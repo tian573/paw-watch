@@ -1,0 +1,1555 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart' as ll;
+import '../../services/ai_service.dart';
+import '../../services/location_service.dart';
+import '../../services/firebase_service.dart';
+
+class ReportFormScreen extends StatefulWidget {
+  const ReportFormScreen({super.key});
+
+  @override
+  State<ReportFormScreen> createState() => _ReportFormScreenState();
+}
+
+class _ReportFormScreenState extends State<ReportFormScreen> {
+  static const Color _navy = Color(0xFF1B2A4A);
+  static const Color _lavender = Color(0xFF9B8EC4);
+  static const Color _bgWhite = Color(0xFFFAF9F7);
+  static const Color _urgent = Color(0xFFE53935);
+  static const Color _needsHelp = Color(0xFFFF7043);
+  static const Color _resolved = Color(0xFF43A047);
+  static const Color _cardBg = Color(0xFFFFFFFF);
+
+  final ImagePicker _picker = ImagePicker();
+  final AiValidationService _aiService = AiValidationService();
+  final LocationService _locationService = LocationService();
+  final MapController _mapController = MapController();
+
+  final List<File> _photos = [];
+  bool _isScanningPhoto = false;
+
+  String _selectedUrgency = '';
+  final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _descController = TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
+  bool _isSearchingLocation = false;
+
+  ll.LatLng _selectedLocation = const ll.LatLng(-6.2615, 106.8106);
+  String _locationText = 'Detecting current location...';
+  bool _isLocationLoading = false;
+  bool _isGpsAutoFilled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchCurrentLocation();
+  }
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descController.dispose();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  int get _currentStepCount {
+    int steps = 0;
+    if (_titleController.text.trim().isNotEmpty) steps++;
+    if (_photos.isNotEmpty) steps++;
+    if (!_isLocationLoading && _locationText.isNotEmpty) steps++;
+    if (_descController.text.trim().isNotEmpty) steps++;
+    if (_selectedUrgency.isNotEmpty) steps++;
+    return steps == 0 ? 1 : steps;
+  }
+
+  bool get _canSubmit {
+    return _photos.isNotEmpty && _selectedUrgency.isNotEmpty;
+  }
+
+  Future<void> _fetchCurrentLocation() async {
+    setState(() => _isLocationLoading = true);
+    final result = await _locationService.getCurrentUserLocation();
+    if (!mounted) return;
+    setState(() {
+      _selectedLocation = ll.LatLng(result.latitude, result.longitude);
+      _locationText = result.formattedAddress;
+      _isGpsAutoFilled = result.isGpsAutoFilled;
+      _isLocationLoading = false;
+    });
+
+    try {
+      _mapController.move(_selectedLocation, 16.0);
+    } catch (_) {}
+
+    if (result.isGpsAutoFilled) {
+      _showSnackBar('📍 Location auto-detected!');
+    } else if (result.errorMessage != null) {
+      _showSnackBar('⚠️ Location: ${result.errorMessage}');
+    }
+  }
+
+  Future<void> _onMapTapped(ll.LatLng tappedPoint) async {
+    setState(() {
+      _selectedLocation = tappedPoint;
+      _isGpsAutoFilled = false;
+    });
+
+    try {
+      _mapController.move(tappedPoint, _mapController.camera.zoom);
+    } catch (_) {}
+
+    final address = await _locationService.getAddressFromCoordinates(
+      tappedPoint.latitude,
+      tappedPoint.longitude,
+    );
+
+    if (mounted) {
+      setState(() {
+        _locationText = address;
+      });
+    }
+  }
+
+  Future<void> _handleSearchLocation(String query) async {
+    final cleanQuery = query.trim();
+    if (cleanQuery.isEmpty) return;
+
+    FocusScope.of(context).unfocus();
+    setState(() => _isSearchingLocation = true);
+
+    final result = await _locationService.searchLocation(cleanQuery);
+
+    if (!mounted) return;
+    setState(() => _isSearchingLocation = false);
+
+    if (result != null) {
+      setState(() {
+        _selectedLocation = ll.LatLng(result.latitude, result.longitude);
+        _locationText = result.formattedAddress;
+        _isGpsAutoFilled = false;
+      });
+
+      try {
+        _mapController.move(_selectedLocation, 16.0);
+      } catch (_) {}
+
+      _showSnackBar('📍 Found location: $cleanQuery');
+    } else {
+      _showSnackBar('Could not find "$cleanQuery". Try adding a city name.');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+    ));
+
+    return Scaffold(
+      backgroundColor: _bgWhite,
+      body: SafeArea(
+        child: Column(
+          children: [
+            _buildAppBar(context),
+            Expanded(
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildInfoBanner(),
+                    const SizedBox(height: 14),
+                    _buildTitleSection(),
+                    const SizedBox(height: 14),
+                    _buildPhotoSection(),
+                    const SizedBox(height: 14),
+                    _buildLocationSection(),
+                    const SizedBox(height: 14),
+                    _buildDescriptionSection(),
+                    const SizedBox(height: 14),
+                    _buildUrgencySection(),
+                    const SizedBox(height: 24),
+                    _buildSubmitButton(),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAppBar(BuildContext context) {
+    return Container(
+      color: _bgWhite,
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back, color: _navy, size: 22),
+            onPressed: () => Navigator.pop(context),
+          ),
+          Expanded(
+            child: Text(
+              'Report Sighting',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.nunito(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: _navy,
+              ),
+            ),
+          ),
+          _buildStepIndicator(),
+          const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStepIndicator() {
+    final step = _currentStepCount;
+    return SizedBox(
+      width: 44,
+      height: 44,
+      child: Stack(
+        children: [
+          SizedBox(
+            width: 44,
+            height: 44,
+            child: CircularProgressIndicator(
+              value: step / 5,
+              strokeWidth: 3.5,
+              backgroundColor: _lavender.withValues(alpha: 0.2),
+              valueColor: const AlwaysStoppedAnimation<Color>(_lavender),
+            ),
+          ),
+          Center(
+            child: Text(
+              '$step/5',
+              style: GoogleFonts.nunito(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: _navy,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInfoBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: _lavender.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _lavender.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: _lavender.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.camera_alt_outlined, color: _lavender, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Your report helps rescuers take action faster.',
+                  style: GoogleFonts.nunito(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: _navy,
+                    height: 1.3,
+                  ),
+                ),
+                Text(
+                  'AI validates every photo to ensure it contains a cat!',
+                  style: GoogleFonts.nunito(
+                    fontSize: 11,
+                    color: _navy.withValues(alpha: 0.55),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Image.asset(
+            'assets/images/LogoReportPage.png',
+            width: 60,
+            height: 60,
+            fit: BoxFit.contain,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTitleSection() {
+    return _buildCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            icon: Icons.title_rounded,
+            title: '1. Title',
+            subtitle: 'Give your report a clear headline.',
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: _bgWhite,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _navy.withValues(alpha: 0.1)),
+            ),
+            child: TextField(
+              controller: _titleController,
+              maxLength: 70,
+              onChanged: (_) => setState(() {}),
+              style: GoogleFonts.nunito(
+                fontSize: 13.5,
+                color: _navy,
+                fontWeight: FontWeight.w700,
+              ),
+              decoration: InputDecoration(
+                hintText: "E.g. Injured calico cat behind minimarket",
+                hintStyle: GoogleFonts.nunito(
+                  fontSize: 13,
+                  color: _navy.withValues(alpha: 0.35),
+                  fontWeight: FontWeight.w500,
+                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                border: InputBorder.none,
+                counterStyle: GoogleFonts.nunito(
+                  fontSize: 11,
+                  color: _navy.withValues(alpha: 0.4),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPhotoSection() {
+    return _buildCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            icon: Icons.camera_alt_outlined,
+            title: '2. Add Photo',
+            subtitle: 'Minimum 1 cat photo required (max 5). All verified by AI.',
+          ),
+          const SizedBox(height: 14),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            child: Row(
+              children: List.generate(5, (index) {
+                return Padding(
+                  padding: EdgeInsets.only(right: index < 4 ? 8.0 : 0.0),
+                  child: _buildPhotoSlot(index),
+                );
+              }),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPhotoSlot(int index) {
+    if (_isScanningPhoto && index == _photos.length) {
+      return Container(
+        width: index == 0 ? 125 : 78,
+        height: 115,
+        decoration: BoxDecoration(
+          color: _lavender.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _lavender, width: 1.5),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                color: _lavender,
+                strokeWidth: 2.5,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Scanning...',
+              style: GoogleFonts.nunito(
+                fontSize: 10,
+                fontWeight: FontWeight.w800,
+                color: _lavender,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (index < _photos.length) {
+      final photo = _photos[index];
+      final isPrimary = index == 0;
+      return Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(14),
+            child: Container(
+              width: isPrimary ? 125 : 78,
+              height: 115,
+              decoration: BoxDecoration(
+                border: Border.all(color: _resolved, width: 2),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Image.file(
+                photo,
+                fit: BoxFit.cover,
+              ),
+            ),
+          ),
+          Positioned(
+            top: 5,
+            left: 5,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+              decoration: BoxDecoration(
+                color: _resolved,
+                borderRadius: BorderRadius.circular(6),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.25),
+                    blurRadius: 3,
+                  ),
+                ],
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.check_circle, size: 9, color: Colors.white),
+                  if (isPrimary) ...[
+                    const SizedBox(width: 2),
+                    Text(
+                      'AI Verified',
+                      style: GoogleFonts.nunito(
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          Positioned(
+            top: 5,
+            right: 5,
+            child: GestureDetector(
+              onTap: () => setState(() => _photos.removeAt(index)),
+              child: Container(
+                padding: const EdgeInsets.all(3.5),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.65),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close, size: 12, color: Colors.white),
+              ),
+            ),
+          ),
+        ],
+      );
+    }
+
+    final isNextSlot = index == _photos.length;
+
+    if (index == 0) {
+      return GestureDetector(
+        onTap: _pickAndValidatePhoto,
+        child: Container(
+          width: 125,
+          height: 115,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: _lavender,
+              width: 1.5,
+              style: BorderStyle.solid,
+            ),
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.camera_alt_outlined, color: _lavender, size: 28),
+              const SizedBox(height: 4),
+              Text(
+                'Tap to take photo',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.nunito(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: _lavender,
+                ),
+              ),
+              Text(
+                'AI Cat Scan ★',
+                textAlign: TextAlign.center,
+                style: GoogleFonts.nunito(
+                  fontSize: 10,
+                  color: _navy.withValues(alpha: 0.5),
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 5),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                decoration: BoxDecoration(
+                  color: _lavender.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  'Required (1/5)',
+                  style: GoogleFonts.nunito(
+                    fontSize: 9,
+                    color: _lavender,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: isNextSlot ? _pickAndValidatePhoto : null,
+      child: Container(
+        width: 78,
+        height: 115,
+        decoration: BoxDecoration(
+          color: _bgWhite,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isNextSlot
+                ? _lavender.withValues(alpha: 0.4)
+                : _navy.withValues(alpha: 0.08),
+          ),
+        ),
+        child: Center(
+          child: Icon(
+            isNextSlot ? Icons.add_photo_alternate_outlined : Icons.image_outlined,
+            size: 24,
+            color: isNextSlot
+                ? _lavender.withValues(alpha: 0.7)
+                : _navy.withValues(alpha: 0.2),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _pickAndValidatePhoto() async {
+    if (_photos.length >= 5) {
+      _showSnackBar('Maximum 5 photos reached.');
+      return;
+    }
+
+    final source = await _showPhotoSourceBottomSheet();
+    if (source == null) return;
+
+    try {
+      final XFile? picked = await _picker.pickImage(
+        source: source,
+        maxWidth: 1200,
+        maxHeight: 1200,
+        imageQuality: 85,
+      );
+
+      if (picked == null) return;
+
+      final file = File(picked.path);
+      setState(() => _isScanningPhoto = true);
+
+      final result = await _aiService.validateCatImage(file);
+
+      if (!mounted) return;
+      setState(() => _isScanningPhoto = false);
+
+      if (result.isCat) {
+        setState(() {
+          _photos.add(file);
+        });
+        _showSnackBar('✨ Cat verified! ${result.primaryLabel} (${(result.confidence * 100).toStringAsFixed(0)}%)');
+      } else {
+        _showAiRejectionDialog(file, result);
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => _isScanningPhoto = false);
+        _showSnackBar('Photo error: $e');
+      }
+    }
+  }
+
+  Future<ImageSource?> _showPhotoSourceBottomSheet() {
+    return showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: _navy.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Add Cat Photo (AI Checked)',
+              style: GoogleFonts.nunito(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: _navy,
+              ),
+            ),
+            const SizedBox(height: 18),
+            Row(
+              children: [
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => Navigator.pop(ctx, ImageSource.camera),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        color: _lavender.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: _lavender.withValues(alpha: 0.3)),
+                      ),
+                      child: Column(
+                        children: [
+                          const Icon(Icons.camera_alt_rounded, color: _lavender, size: 28),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Camera',
+                            style: GoogleFonts.nunito(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: _navy,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: GestureDetector(
+                    onTap: () => Navigator.pop(ctx, ImageSource.gallery),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      decoration: BoxDecoration(
+                        color: _lavender.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: _lavender.withValues(alpha: 0.3)),
+                      ),
+                      child: Column(
+                        children: [
+                          const Icon(Icons.photo_library_rounded, color: _lavender, size: 28),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Gallery',
+                            style: GoogleFonts.nunito(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                              color: _navy,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAiRejectionDialog(File rejectedFile, CatValidationResult result) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _urgent.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.warning_amber_rounded, color: _urgent, size: 22),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'No Cat Detected',
+                style: GoogleFonts.nunito(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: _navy,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                height: 120,
+                width: double.infinity,
+                child: Image.file(rejectedFile, fit: BoxFit.cover),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              result.message,
+              style: GoogleFonts.nunito(
+                fontSize: 13,
+                color: _navy.withValues(alpha: 0.7),
+                fontWeight: FontWeight.w600,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.nunito(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: _navy.withValues(alpha: 0.6),
+              ),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _lavender,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _pickAndValidatePhoto();
+            },
+            child: Text(
+              'Try Another Photo',
+              style: GoogleFonts.nunito(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationSection() {
+    return _buildCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: _buildSectionHeader(
+                  icon: Icons.location_on_outlined,
+                  title: '3. Location',
+                  subtitle: 'Pin the exact location where you saw the cat.',
+                ),
+              ),
+              GestureDetector(
+                onTap: _fetchCurrentLocation,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: _isGpsAutoFilled ? _lavender.withValues(alpha: 0.12) : Colors.white,
+                    border: Border.all(color: _lavender.withValues(alpha: 0.45)),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (_isLocationLoading)
+                        const SizedBox(
+                          width: 11,
+                          height: 11,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 1.8,
+                            color: _lavender,
+                          ),
+                        )
+                      else
+                        const Icon(Icons.near_me_outlined, size: 12, color: _lavender),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Locate Me',
+                        style: GoogleFonts.nunito(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          color: _lavender,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            height: 42,
+            margin: const EdgeInsets.only(bottom: 10),
+            decoration: BoxDecoration(
+              color: _bgWhite,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _navy.withValues(alpha: 0.12)),
+            ),
+            child: Row(
+              children: [
+                const SizedBox(width: 12),
+                Icon(Icons.search_rounded, size: 18, color: _navy.withValues(alpha: 0.45)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: TextField(
+                    controller: _searchController,
+                    textInputAction: TextInputAction.search,
+                    onSubmitted: _handleSearchLocation,
+                    style: GoogleFonts.nunito(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: _navy,
+                    ),
+                    decoration: InputDecoration(
+                      hintText: 'Search street, landmark, or city...',
+                      hintStyle: GoogleFonts.nunito(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: _navy.withValues(alpha: 0.4),
+                      ),
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    ),
+                  ),
+                ),
+                if (_isSearchingLocation)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 10),
+                    child: SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2, color: _lavender),
+                    ),
+                  )
+                else if (_searchController.text.isNotEmpty)
+                  GestureDetector(
+                    onTap: () => setState(() => _searchController.clear()),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      child: Icon(Icons.close_rounded, size: 16, color: _navy.withValues(alpha: 0.4)),
+                    ),
+                  )
+                else
+                  GestureDetector(
+                    onTap: () => _handleSearchLocation(_searchController.text),
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: _lavender.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Search',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: _lavender,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          _buildInteractiveMap(),
+          const SizedBox(height: 10),
+          _buildLocationAddress(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInteractiveMap() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        height: 190,
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: const Color(0xFFE8EAF0),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: _navy.withValues(alpha: 0.1)),
+        ),
+        child: Stack(
+          children: [
+            FlutterMap(
+              mapController: _mapController,
+              options: MapOptions(
+                initialCenter: _selectedLocation,
+                initialZoom: 16.0,
+                onTap: (tapPosition, point) => _onMapTapped(point),
+              ),
+              children: [
+                TileLayer(
+                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  userAgentPackageName: 'com.pawwatch.app',
+                ),
+                MarkerLayer(
+                  markers: [
+                    Marker(
+                      point: _selectedLocation,
+                      width: 46,
+                      height: 46,
+                      child: _buildMapPinMarker(),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            Positioned(
+              right: 10,
+              top: 10,
+              child: Column(
+                children: [
+                  _buildMapButton(
+                    Icons.my_location,
+                    onTap: _fetchCurrentLocation,
+                  ),
+                  const SizedBox(height: 6),
+                  _buildMapButton(
+                    Icons.add,
+                    onTap: () {
+                      try {
+                        final zoom = _mapController.camera.zoom + 1;
+                        _mapController.move(_selectedLocation, zoom);
+                      } catch (_) {}
+                    },
+                  ),
+                  const SizedBox(height: 4),
+                  _buildMapButton(
+                    Icons.remove,
+                    onTap: () {
+                      try {
+                        final zoom = _mapController.camera.zoom - 1;
+                        _mapController.move(_selectedLocation, zoom);
+                      } catch (_) {}
+                    },
+                  ),
+                ],
+              ),
+            ),
+            Positioned(
+              bottom: 8,
+              left: 8,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.92),
+                  borderRadius: BorderRadius.circular(8),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.1),
+                      blurRadius: 4,
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.touch_app_outlined, size: 12, color: _lavender),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Tap map to drop pin',
+                      style: GoogleFonts.nunito(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: _navy,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMapPinMarker() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: _lavender,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2.5),
+            boxShadow: [
+              BoxShadow(
+                color: _lavender.withValues(alpha: 0.5),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: const Icon(Icons.pets, color: Colors.white, size: 18),
+        ),
+        Container(
+          width: 8,
+          height: 4,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.3),
+            borderRadius: BorderRadius.circular(50),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMapButton(IconData icon, {required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [
+            BoxShadow(
+              color: _navy.withValues(alpha: 0.1),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Icon(icon, size: 18, color: _navy),
+      ),
+    );
+  }
+
+  Widget _buildLocationAddress() {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.location_on, size: 16, color: _lavender),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _isLocationLoading
+              ? Text(
+                  'Fetching real-time location...',
+                  style: GoogleFonts.nunito(
+                    fontSize: 12,
+                    color: _navy.withValues(alpha: 0.5),
+                    fontStyle: FontStyle.italic,
+                  ),
+                )
+              : Text(
+                  _locationText,
+                  style: GoogleFonts.nunito(
+                    fontSize: 12,
+                    color: _navy.withValues(alpha: 0.8),
+                    fontWeight: FontWeight.w600,
+                    height: 1.4,
+                  ),
+                ),
+        ),
+        const SizedBox(width: 8),
+        if (_isGpsAutoFilled)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.check_circle, size: 13, color: _resolved),
+              const SizedBox(width: 3),
+              Text(
+                'GPS Auto-filled',
+                style: GoogleFonts.nunito(
+                  fontSize: 11,
+                  color: _resolved,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          )
+        else
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.pin_drop_outlined, size: 13, color: _lavender),
+              const SizedBox(width: 3),
+              Text(
+                'Pinned',
+                style: GoogleFonts.nunito(
+                  fontSize: 11,
+                  color: _lavender,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+      ],
+    );
+  }
+
+  Widget _buildDescriptionSection() {
+    return _buildCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            icon: Icons.edit_outlined,
+            title: '4. Description',
+            subtitle: 'Provide any details that might help.',
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              color: _bgWhite,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _navy.withValues(alpha: 0.1)),
+            ),
+            child: TextField(
+              controller: _descController,
+              maxLines: 5,
+              maxLength: 500,
+              onChanged: (_) => setState(() {}),
+              style: GoogleFonts.nunito(
+                fontSize: 13,
+                color: _navy,
+                fontWeight: FontWeight.w600,
+              ),
+              decoration: InputDecoration(
+                hintText: "E.g. color, size, behavior, what's around the cat, etc.",
+                hintStyle: GoogleFonts.nunito(
+                  fontSize: 13,
+                  color: _navy.withValues(alpha: 0.35),
+                  fontWeight: FontWeight.w500,
+                ),
+                contentPadding: const EdgeInsets.all(14),
+                border: InputBorder.none,
+                counterStyle: GoogleFonts.nunito(
+                  fontSize: 11,
+                  color: _navy.withValues(alpha: 0.4),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUrgencySection() {
+    return _buildCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            icon: Icons.error_outline,
+            title: '5. Urgency Level',
+            subtitle: 'How urgent is the situation?',
+          ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              Expanded(
+                child: _buildUrgencyOption(
+                  value: 'urgent',
+                  icon: Icons.error,
+                  label: 'Urgent',
+                  sublabel: 'Needs immediate help',
+                  color: _urgent,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildUrgencyOption(
+                  value: 'needsHelp',
+                  icon: Icons.error_outline,
+                  label: 'Needs Help',
+                  sublabel: 'Not urgent, but needs help',
+                  color: _needsHelp,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _buildUrgencyOption(
+                  value: 'notUrgent',
+                  icon: Icons.check_circle_outline,
+                  label: 'Resolved',
+                  sublabel: 'Safe for now',
+                  color: _resolved,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildUrgencyOption({
+    required String value,
+    required IconData icon,
+    required String label,
+    required String sublabel,
+    required Color color,
+  }) {
+    final isSelected = _selectedUrgency == value;
+    return GestureDetector(
+      onTap: () => setState(() => _selectedUrgency = value),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        decoration: BoxDecoration(
+          color: isSelected ? color.withValues(alpha: 0.08) : Colors.white,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isSelected ? color : _navy.withValues(alpha: 0.12),
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, size: 22, color: color),
+            const SizedBox(height: 5),
+            Text(
+              label,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.nunito(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              sublabel,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.nunito(
+                fontSize: 10,
+                color: _navy.withValues(alpha: 0.5),
+                fontWeight: FontWeight.w600,
+                height: 1.3,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSubmitButton() {
+    final canSubmit = _canSubmit;
+    return GestureDetector(
+      onTap: canSubmit
+          ? _handleSubmit
+          : () {
+              if (_photos.isEmpty) {
+                _showSnackBar('⚠️ Please add at least 1 verified cat photo.');
+              } else if (_selectedUrgency.isEmpty) {
+                _showSnackBar('⚠️ Please select an urgency level.');
+              }
+            },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 17),
+        decoration: BoxDecoration(
+          gradient: canSubmit
+              ? const LinearGradient(
+                  colors: [_lavender, Color(0xFF7B6DB5)],
+                  begin: Alignment.centerLeft,
+                  end: Alignment.centerRight,
+                )
+              : null,
+          color: canSubmit ? null : _navy.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(18),
+          boxShadow: canSubmit
+              ? [
+                  BoxShadow(
+                    color: _lavender.withValues(alpha: 0.4),
+                    blurRadius: 14,
+                    offset: const Offset(0, 5),
+                  ),
+                ]
+              : [],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.send_rounded,
+              size: 18,
+              color: canSubmit ? Colors.white : _navy.withValues(alpha: 0.3),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'Submit Report',
+              style: GoogleFonts.nunito(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: canSubmit ? Colors.white : _navy.withValues(alpha: 0.3),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCard({required Widget child}) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: _navy.withValues(alpha: 0.055),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _buildSectionHeader({
+    required IconData icon,
+    required String title,
+    required String subtitle,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 34,
+          height: 34,
+          decoration: BoxDecoration(
+            color: _lavender.withValues(alpha: 0.12),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(icon, size: 17, color: _lavender),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: GoogleFonts.nunito(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: _navy,
+                ),
+              ),
+              Text(
+                subtitle,
+                style: GoogleFonts.nunito(
+                  fontSize: 12,
+                  color: _navy.withValues(alpha: 0.5),
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  bool _isSubmitting = false;
+
+  Future<void> _handleSubmit() async {
+    if (_isSubmitting) return;
+
+    if (_photos.isEmpty) {
+      _showSnackBar('⚠️ Please add at least 1 verified cat photo.');
+      return;
+    }
+    if (_selectedUrgency.isEmpty) {
+      _showSnackBar('⚠️ Please select an urgency level.');
+      return;
+    }
+
+    setState(() => _isSubmitting = true);
+
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => PopScope(
+        canPop: false,
+        child: Dialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 58,
+                  height: 58,
+                  decoration: BoxDecoration(
+                    color: _lavender.withValues(alpha: 0.15),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Center(
+                    child: SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: _lavender,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  'Publishing Report...',
+                  style: GoogleFonts.nunito(
+                    fontSize: 17,
+                    fontWeight: FontWeight.w800,
+                    color: _navy,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  'Uploading photos & saving to PawWatch live network.',
+                  textAlign: TextAlign.center,
+                  style: GoogleFonts.nunito(
+                    fontSize: 12.5,
+                    color: _navy.withValues(alpha: 0.6),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    try {
+      await FirebaseService.instance.createSighting(
+        title: _titleController.text.trim(),
+        photos: _photos,
+        latitude: _selectedLocation.latitude,
+        longitude: _selectedLocation.longitude,
+        locationAddress: _locationText,
+        description: _descController.text.trim(),
+        urgency: _selectedUrgency,
+      );
+
+      if (mounted) {
+        Navigator.pop(context); // Dismiss loading dialog
+        _showSnackBar('🎉 Sighting published live! +50 XP Earned 🐾');
+        Navigator.pop(context, true); // Return to home feed
+      }
+    } catch (e) {
+      if (mounted) {
+        Navigator.pop(context); // Dismiss loading dialog
+        setState(() => _isSubmitting = false);
+        _showSnackBar('Failed to submit report: $e');
+      }
+    }
+  }
+
+  void _showSnackBar(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          msg,
+          style: GoogleFonts.nunito(fontWeight: FontWeight.w600),
+        ),
+        backgroundColor: _navy,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+}

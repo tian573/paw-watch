@@ -1,0 +1,1314 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../models/sighting.dart';
+import '../../services/firebase_service.dart';
+import 'report_form.dart';
+
+class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen>
+    with SingleTickerProviderStateMixin {
+  static const Color _navy = Color(0xFF1B2A4A);
+  static const Color _lavender = Color(0xFF9B8EC4);
+  static const Color _green = Color(0xFF7BBF5E);
+  static const Color _bgWhite = Color(0xFFFAF9F7);
+  static const Color _urgent = Color(0xFFE53935);
+  static const Color _needsHelp = Color(0xFFFF7043);
+  static const Color _resolved = Color(0xFF43A047);
+  static const Color _cardBg = Color(0xFFFFFFFF);
+
+  int _currentTab = 0;
+  String _activeFilter = 'All';
+  bool _showNewUserTip = false;
+  late AnimationController _arrowAnimController;
+  late Animation<double> _arrowBounce;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkFirstTimeUser();
+    _arrowAnimController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    )..repeat(reverse: true);
+    _arrowBounce = Tween<double>(begin: 0, end: 10).animate(
+      CurvedAnimation(parent: _arrowAnimController, curve: Curves.easeInOut),
+    );
+  }
+
+  Future<void> _checkFirstTimeUser() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final hasSeenTip = prefs.getBool('has_seen_report_tip') ?? false;
+      if (!hasSeenTip && mounted) {
+        setState(() {
+          _showNewUserTip = true;
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _dismissTip() async {
+    setState(() => _showNewUserTip = false);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('has_seen_report_tip', true);
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _arrowAnimController.dispose();
+    super.dispose();
+  }
+
+  final List<String> _filters = ['All', 'Urgent', 'Needs Help', 'Resolved', 'Nearby'];
+
+  int _statusPriority(String status) {
+    switch (status) {
+      case 'urgent': return 0;
+      case 'needsHelp': return 1;
+      case 'resolved': return 2;
+      default: return 3;
+    }
+  }
+
+  List<Sighting> _filterAndSortSightings(List<Sighting> list) {
+    List<Sighting> filtered;
+    if (_activeFilter == 'All') {
+      filtered = List<Sighting>.from(list);
+    } else if (_activeFilter == 'Urgent') {
+      filtered = list.where((s) => s.status == 'urgent').toList();
+    } else if (_activeFilter == 'Needs Help') {
+      filtered = list.where((s) => s.status == 'needsHelp').toList();
+    } else if (_activeFilter == 'Resolved') {
+      filtered = list.where((s) => s.status == 'resolved').toList();
+    } else if (_activeFilter == 'Nearby') {
+      filtered = List<Sighting>.from(list);
+    } else {
+      filtered = List<Sighting>.from(list);
+    }
+
+    if (_activeFilter == 'All' || _activeFilter == 'Nearby') {
+      filtered.sort((a, b) => _statusPriority(a.status).compareTo(_statusPriority(b.status)));
+    }
+    return filtered;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.dark,
+    ));
+
+    return Stack(
+      children: [
+        Scaffold(
+          backgroundColor: _bgWhite,
+          body: SafeArea(
+            child: IndexedStack(
+              index: _currentTab,
+              children: [
+                _buildHomeTab(),
+                _buildPlaceholderTab('Map', Icons.map_outlined),
+                const SizedBox.shrink(),
+                _buildPlaceholderTab('Notifications', Icons.notifications_outlined),
+                _buildPlaceholderTab('Profile', Icons.person_outline),
+              ],
+            ),
+          ),
+          floatingActionButton: _buildReportFab(),
+          floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
+          bottomNavigationBar: _buildBottomNav(),
+        ),
+        if (_showNewUserTip) _buildSpotlightCoachmark(),
+      ],
+    );
+  }
+
+  Widget _buildHomeTab() {
+    return Column(
+      children: [
+        _buildAppBar(),
+        Expanded(
+          child: StreamBuilder<List<Sighting>>(
+            stream: FirebaseService.instance.streamSightings(),
+            builder: (context, snapshot) {
+              final firestoreList = snapshot.data ?? [];
+              final allSightings = firestoreList.isNotEmpty
+                  ? firestoreList
+                  : FirebaseService.sampleSightings;
+
+              final filtered = _filterAndSortSightings(allSightings);
+
+              return CustomScrollView(
+                physics: const BouncingScrollPhysics(),
+                slivers: [
+                  SliverToBoxAdapter(child: _buildFilterChips()),
+                  if (snapshot.connectionState == ConnectionState.waiting && firestoreList.isEmpty)
+                    const SliverToBoxAdapter(
+                      child: Padding(
+                        padding: EdgeInsets.all(40),
+                        child: Center(
+                          child: CircularProgressIndicator(color: _lavender),
+                        ),
+                      ),
+                    )
+                  else if (filtered.isEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 48, horizontal: 24),
+                        child: Center(
+                          child: Column(
+                            children: [
+                              Icon(Icons.pets, size: 48, color: _lavender.withValues(alpha: 0.3)),
+                              const SizedBox(height: 12),
+                              Text(
+                                'No sightings in this category yet',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                  color: _navy.withValues(alpha: 0.5),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 100),
+                      sliver: SliverList(
+                        delegate: SliverChildBuilderDelegate(
+                          (context, i) {
+                            if (i >= filtered.length) return null;
+                            return Padding(
+                              padding: const EdgeInsets.only(bottom: 14),
+                              child: _buildSightingCard(filtered[i]),
+                            );
+                          },
+                          childCount: filtered.length,
+                        ),
+                      ),
+                    ),
+                ],
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAppBar() {
+    final user = FirebaseAuth.instance.currentUser;
+    final displayName = user?.displayName ?? user?.email ?? 'PawWatcher';
+    final initials = _getInitials(displayName);
+
+    return Container(
+      color: _bgWhite,
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _buildNotificationBell(),
+          ),
+          Center(
+            child: _buildPawWatchLogo(),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: _buildUserXpWidget(initials),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNotificationBell() {
+    return Stack(
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: _navy.withValues(alpha: 0.07),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Icon(Icons.notifications_outlined, color: _navy, size: 22),
+        ),
+        Positioned(
+          top: 6,
+          right: 6,
+          child: Container(
+            width: 9,
+            height: 9,
+            decoration: BoxDecoration(
+              color: _lavender,
+              shape: BoxShape.circle,
+              border: Border.all(color: _bgWhite, width: 1.5),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPawWatchLogo() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Image.asset(
+          'assets/images/AppLogo.png',
+          height: 38,
+          fit: BoxFit.contain,
+        ),
+        const SizedBox(height: 2),
+        RichText(
+          text: TextSpan(
+            style: GoogleFonts.nunito(fontSize: 10.5, fontWeight: FontWeight.w800),
+            children: [
+              TextSpan(text: 'Rescue.', style: TextStyle(color: _navy)),
+              const TextSpan(text: ' '),
+              TextSpan(text: 'Report.', style: TextStyle(color: _lavender)),
+              const TextSpan(text: ' '),
+              TextSpan(text: 'Earn.', style: TextStyle(color: _green)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUserXpWidget(String initials) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: _lavender.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+                border: Border.all(color: _lavender, width: 2),
+              ),
+              child: Center(
+                child: Text(
+                  initials,
+                  style: GoogleFonts.nunito(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: _lavender,
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: -4,
+              right: -4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _lavender,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Lv.4',
+                  style: GoogleFonts.nunito(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          '640 / 800 XP',
+          style: GoogleFonts.nunito(
+            fontSize: 9,
+            fontWeight: FontWeight.w700,
+            color: _navy.withValues(alpha: 0.6),
+          ),
+        ),
+        const SizedBox(height: 2),
+        SizedBox(
+          width: 60,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: 640 / 800,
+              minHeight: 5,
+              backgroundColor: _lavender.withValues(alpha: 0.2),
+              valueColor: AlwaysStoppedAnimation<Color>(_lavender),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSpotlightCoachmark() {
+    return Positioned.fill(
+      child: Material(
+        color: Colors.transparent,
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: GestureDetector(
+                onTap: _dismissTip,
+                child: Container(
+                  color: Colors.black.withValues(alpha: 0.65),
+                ),
+              ),
+            ),
+            Positioned(
+              left: 20,
+              right: 20,
+              bottom: 95,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _lavender.withValues(alpha: 0.35),
+                          blurRadius: 20,
+                          offset: const Offset(0, 8),
+                        ),
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.2),
+                          blurRadius: 16,
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _lavender.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.pets,
+                                      size: 14, color: _lavender),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'New Rescuer Guide',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: _lavender,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Spacer(),
+                            GestureDetector(
+                              onTap: _dismissTip,
+                              child: Icon(
+                                Icons.close_rounded,
+                                size: 20,
+                                color: _navy.withValues(alpha: 0.4),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Spotted a cat in need? 🐱',
+                          style: GoogleFonts.nunito(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: _navy,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Tap this plus (+) button below to create a quick rescue report, snap photos, and alert nearby rescuers!',
+                          style: GoogleFonts.nunito(
+                            fontSize: 13,
+                            color: _navy.withValues(alpha: 0.65),
+                            fontWeight: FontWeight.w600,
+                            height: 1.4,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            GestureDetector(
+                              onTap: _dismissTip,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 16, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: _navy,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text(
+                                  'Got it, thanks! 👍',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  AnimatedBuilder(
+                    animation: _arrowBounce,
+                    builder: (context, child) {
+                      return Transform.translate(
+                        offset: Offset(0, _arrowBounce.value),
+                        child: child,
+                      );
+                    },
+                    child: Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          color: _lavender,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: _lavender.withValues(alpha: 0.7),
+                              blurRadius: 16,
+                              spreadRadius: 2,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: const Icon(
+                          Icons.keyboard_double_arrow_down_rounded,
+                          color: Colors.white,
+                          size: 28,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Positioned(
+              bottom: 24,
+              left: 0,
+              right: 0,
+              child: Center(
+                child: GestureDetector(
+                  onTap: () {
+                    _dismissTip();
+                    _openReportForm();
+                  },
+                  child: Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: Colors.white,
+                        width: 3,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: _lavender.withValues(alpha: 0.8),
+                          blurRadius: 20,
+                          spreadRadius: 4,
+                        ),
+                      ],
+                    ),
+                    child: Container(
+                      decoration: const BoxDecoration(
+                        color: _lavender,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.add,
+                        color: Colors.white,
+                        size: 34,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildFilterChips() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 0, 10),
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        child: Row(
+          children: [
+            ..._filters.map((filter) => Padding(
+                  padding: const EdgeInsets.only(right: 8),
+                  child: _buildChip(filter),
+                )),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChip(String label) {
+    final isActive = _activeFilter == label;
+    Color chipColor;
+    switch (label) {
+      case 'Urgent':
+        chipColor = _urgent;
+        break;
+      case 'Needs Help':
+        chipColor = _needsHelp;
+        break;
+      case 'Resolved':
+        chipColor = _resolved;
+        break;
+      default:
+        chipColor = _navy;
+    }
+
+    return GestureDetector(
+      onTap: () => setState(() => _activeFilter = label),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isActive ? chipColor : Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isActive ? chipColor : _navy.withValues(alpha: 0.12),
+          ),
+          boxShadow: isActive
+              ? [
+                  BoxShadow(
+                    color: chipColor.withValues(alpha: 0.25),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : [
+                  BoxShadow(
+                    color: _navy.withValues(alpha: 0.04),
+                    blurRadius: 6,
+                  ),
+                ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (label == 'Urgent')
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(Icons.error,
+                    size: 13,
+                    color: isActive ? Colors.white : _urgent),
+              ),
+            if (label == 'Nearby')
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(
+                  Icons.location_on_outlined,
+                  size: 13,
+                  color: isActive ? Colors.white : _navy.withValues(alpha: 0.6),
+                ),
+              ),
+            if (label == 'Needs Help')
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(Icons.error_outline,
+                    size: 13,
+                    color: isActive ? Colors.white : _needsHelp),
+              ),
+            if (label == 'Resolved')
+              Padding(
+                padding: const EdgeInsets.only(right: 4),
+                child: Icon(Icons.check_circle_outline,
+                    size: 13,
+                    color: isActive ? Colors.white : _resolved),
+              ),
+            Text(
+              label,
+              style: GoogleFonts.nunito(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: isActive
+                    ? Colors.white
+                    : _navy.withValues(alpha: 0.75),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSightingCard(Sighting data) {
+    return Container(
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: _navy.withValues(alpha: 0.06),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildCardImage(data),
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 12, 10, 8),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          _buildAvatar(data.initials, data.avatarColor),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  data.reporterName,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w800,
+                                    color: _navy,
+                                  ),
+                                ),
+                                Row(
+                                  children: [
+                                    Text(
+                                      data.timeAgo,
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 11,
+                                        color: _navy.withValues(alpha: 0.5),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Icon(Icons.location_on_outlined,
+                                        size: 11,
+                                        color: _navy.withValues(alpha: 0.4)),
+                                    Text(
+                                      data.distance,
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 11,
+                                        color: _navy.withValues(alpha: 0.5),
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.more_horiz,
+                              color: _navy.withValues(alpha: 0.3), size: 18),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        data.displayTitle,
+                        style: GoogleFonts.nunito(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: _navy,
+                          height: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        data.description.isNotEmpty ? data.description : 'Cat spotted in the area.',
+                        style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          color: _navy.withValues(alpha: 0.6),
+                          fontWeight: FontWeight.w500,
+                          height: 1.35,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 8),
+                      _buildLocationChip(data.locationAddress),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            child: Row(
+              children: [
+                _buildCategoryTag(data.category),
+                const SizedBox(width: 10),
+                Icon(Icons.chat_bubble_outline,
+                    size: 14, color: _navy.withValues(alpha: 0.4)),
+                const SizedBox(width: 4),
+                Text(
+                  '${data.commentCount}',
+                  style: GoogleFonts.nunito(
+                    fontSize: 12,
+                    color: _navy.withValues(alpha: 0.5),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const Spacer(),
+                ..._buildActionButtons(data),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCardImage(Sighting data) {
+    final Color statusColor;
+    final String statusLabel;
+    switch (data.status) {
+      case 'urgent':
+        statusColor = _urgent;
+        statusLabel = 'Urgent';
+        break;
+      case 'resolved':
+        statusColor = _resolved;
+        statusLabel = 'Resolved';
+        break;
+      default:
+        statusColor = _needsHelp;
+        statusLabel = 'Needs Help';
+    }
+
+    return ClipRRect(
+      borderRadius: const BorderRadius.only(
+        topLeft: Radius.circular(18),
+        bottomLeft: Radius.circular(0),
+      ),
+      child: SizedBox(
+        width: 120,
+        height: 140,
+        child: Stack(
+          children: [
+            if (data.photoUrls.isNotEmpty)
+              Positioned.fill(
+                child: data.photoUrls.first.startsWith('http')
+                    ? Image.network(
+                        data.photoUrls.first,
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => Container(
+                          color: _lavender.withValues(alpha: 0.15),
+                          child: Center(
+                            child: Icon(Icons.pets,
+                                size: 40, color: _lavender.withValues(alpha: 0.4)),
+                          ),
+                        ),
+                      )
+                    : Image.file(
+                        File(data.photoUrls.first),
+                        fit: BoxFit.cover,
+                        errorBuilder: (context, error, stackTrace) => Container(
+                          color: _lavender.withValues(alpha: 0.15),
+                          child: Center(
+                            child: Icon(Icons.pets,
+                                size: 40, color: _lavender.withValues(alpha: 0.4)),
+                          ),
+                        ),
+                      ),
+              )
+            else
+              Container(
+                color: _lavender.withValues(alpha: 0.15),
+                child: Center(
+                  child: Icon(Icons.pets,
+                      size: 40, color: _lavender.withValues(alpha: 0.4)),
+                ),
+              ),
+            Positioned(
+              top: 8,
+              left: 8,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                decoration: BoxDecoration(
+                  color: statusColor,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      data.status == 'resolved'
+                          ? Icons.check_circle
+                          : Icons.error,
+                      size: 10,
+                      color: Colors.white,
+                    ),
+                    const SizedBox(width: 3),
+                    Text(
+                      statusLabel,
+                      style: GoogleFonts.nunito(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: 6,
+              right: 6,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.45),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.image_outlined, size: 10, color: Colors.white),
+                    const SizedBox(width: 3),
+                    Text(
+                      '${data.imageCount}',
+                      style: GoogleFonts.nunito(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAvatar(String initials, Color color) {
+    return Container(
+      width: 32,
+      height: 32,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.2),
+        shape: BoxShape.circle,
+        border: Border.all(color: color.withValues(alpha: 0.4), width: 1.5),
+      ),
+      child: Center(
+        child: Text(
+          initials,
+          style: GoogleFonts.nunito(
+            fontSize: 11,
+            fontWeight: FontWeight.w800,
+            color: color,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLocationChip(String location) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: _lavender.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.location_on_outlined,
+              size: 11, color: _lavender),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              location,
+              style: GoogleFonts.nunito(
+                fontSize: 11,
+                color: _lavender,
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCategoryTag(String category) {
+    IconData icon;
+    switch (category) {
+      case 'Kitten':
+        icon = Icons.pets;
+        break;
+      case 'Injured':
+        icon = Icons.healing_outlined;
+        break;
+      case 'Needs Foster':
+      case 'Rehomed':
+        icon = Icons.home_outlined;
+        break;
+      case 'Needs Vet':
+      case 'Vet Visit':
+        icon = Icons.medical_services_outlined;
+        break;
+      case 'Feeding Spot':
+        icon = Icons.restaurant_outlined;
+        break;
+      case 'Urgent Rescue':
+        icon = Icons.emergency_outlined;
+        break;
+      case 'Resolved':
+        icon = Icons.check_circle_outline;
+        break;
+      default:
+        icon = Icons.remove_red_eye_outlined;
+    }
+
+    final String displayCategory = (category == 'Stray Cat' || category == 'Stray')
+        ? 'Spotted'
+        : category;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, size: 14, color: _navy.withValues(alpha: 0.45)),
+        const SizedBox(width: 4),
+        Text(
+          displayCategory,
+          style: GoogleFonts.nunito(
+            fontSize: 12,
+            color: _navy.withValues(alpha: 0.55),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<Widget> _buildActionButtons(Sighting data) {
+    if (data.status == 'urgent') {
+      return [
+        GestureDetector(
+          onTap: () => _showSnackBar("You're on your way! 🐾"),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              color: _urgent,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.pets, size: 13, color: Colors.white),
+                const SizedBox(width: 4),
+                Text(
+                  "I'm on my way",
+                  style: GoogleFonts.nunito(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        GestureDetector(
+          onTap: () => _showSnackBar('View details coming soon'),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+            decoration: BoxDecoration(
+              border: Border.all(color: _urgent, width: 1.2),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              'View Details',
+              style: GoogleFonts.nunito(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: _urgent,
+              ),
+            ),
+          ),
+        ),
+      ];
+    }
+
+    final Color outlineColor =
+        data.status == 'resolved' ? _resolved : _needsHelp;
+    return [
+      GestureDetector(
+        onTap: () => _showSnackBar('View details coming soon'),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            border: Border.all(color: outlineColor, width: 1.2),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            'View Details',
+            style: GoogleFonts.nunito(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              color: outlineColor,
+            ),
+          ),
+        ),
+      ),
+    ];
+  }
+
+  Widget _buildPlaceholderTab(String label, IconData icon) {
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 48, color: _lavender.withValues(alpha: 0.5)),
+          const SizedBox(height: 12),
+          Text(
+            label,
+            style: GoogleFonts.nunito(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: _navy,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Coming soon 🐾',
+            style: GoogleFonts.nunito(
+              fontSize: 14,
+              color: _navy.withValues(alpha: 0.45),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReportFab() {
+    return GestureDetector(
+      onTap: _openReportForm,
+      child: Container(
+        width: 60,
+        height: 60,
+        decoration: BoxDecoration(
+          color: _lavender,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: _lavender.withValues(alpha: 0.4),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: const Icon(Icons.add, color: Colors.white, size: 30),
+      ),
+    );
+  }
+
+  Widget _buildBottomNav() {
+    return BottomAppBar(
+      color: Colors.white,
+      elevation: 8,
+      shadowColor: _navy.withValues(alpha: 0.08),
+      shape: const CircularNotchedRectangle(),
+      notchMargin: 8,
+      child: SizedBox(
+        height: 60,
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _buildNavItem(0, Icons.home_rounded, Icons.home_outlined, 'Home'),
+            _buildNavItem(1, Icons.map_rounded, Icons.map_outlined, 'Map'),
+            const SizedBox(width: 60),
+            _buildNavItemWithBadge(3, Icons.notifications_rounded,
+                Icons.notifications_outlined, 'Notifications'),
+            _buildNavItem(
+                4, Icons.person_rounded, Icons.person_outlined, 'Profile'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItem(
+      int index, IconData activeIcon, IconData inactiveIcon, String label) {
+    final isActive = _currentTab == index;
+    return GestureDetector(
+      onTap: () => setState(() => _currentTab = index),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isActive ? activeIcon : inactiveIcon,
+              color: isActive ? _lavender : _navy.withValues(alpha: 0.35),
+              size: 24,
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: GoogleFonts.nunito(
+                fontSize: 10,
+                fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+                color: isActive ? _lavender : _navy.withValues(alpha: 0.35),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildNavItemWithBadge(
+      int index, IconData activeIcon, IconData inactiveIcon, String label) {
+    final isActive = _currentTab == index;
+    return GestureDetector(
+      onTap: () => setState(() => _currentTab = index),
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Icon(
+                  isActive ? activeIcon : inactiveIcon,
+                  color: isActive ? _lavender : _navy.withValues(alpha: 0.35),
+                  size: 24,
+                ),
+                Positioned(
+                  top: -2,
+                  right: -2,
+                  child: Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: _lavender,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: GoogleFonts.nunito(
+                fontSize: 10,
+                fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
+                color: isActive ? _lavender : _navy.withValues(alpha: 0.35),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _openReportForm() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const ReportFormScreen()),
+    );
+  }
+
+  void _showSnackBar(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg,
+            style: GoogleFonts.nunito(fontWeight: FontWeight.w600)),
+        backgroundColor: _navy,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  String _getInitials(String name) {
+    final parts = name.trim().split(' ');
+    if (parts.length >= 2) {
+      return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    } else if (parts[0].length >= 2) {
+      return parts[0].substring(0, 2).toUpperCase();
+    }
+    return parts[0][0].toUpperCase();
+  }
+}
