@@ -78,6 +78,8 @@ class FirebaseService {
     required String locationAddress,
     required String description,
     required String urgency,
+    String? category,
+    String? routineHours,
   }) async {
     final docRef = _firestore.collection('sightings').doc();
     final sightingId = docRef.id;
@@ -94,7 +96,9 @@ class FirebaseService {
         ? user!.displayName!
         : (user?.email?.split('@').first ?? 'PawWatcher');
 
-    final category = _determineCategory(description, urgency);
+    final finalCategory = (category != null && category.trim().isNotEmpty)
+        ? category.trim()
+        : _determineCategory(description, urgency);
     final now = DateTime.now();
 
     final sighting = Sighting(
@@ -108,10 +112,13 @@ class FirebaseService {
       locationAddress: locationAddress,
       description: description,
       urgency: urgency,
-      category: category,
+      category: finalCategory,
       createdAt: now,
       commentCount: 0,
       upvotes: 0,
+      routineHours: routineHours?.trim(),
+      lastSeenAt: now,
+      lastSeenStatus: 'still_here',
     );
 
     // 2. Write to Cloud Firestore
@@ -142,6 +149,521 @@ class FirebaseService {
         .snapshots()
         .map((snapshot) {
       return snapshot.docs.map((doc) => Sighting.fromFirestore(doc)).toList();
+    });
+  }
+
+  /// Stream a single sighting document by ID
+  Stream<Sighting?> streamSightingById(String sightingId) {
+    return _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .snapshots()
+        .map((doc) => doc.exists ? Sighting.fromFirestore(doc) : null);
+  }
+
+  /// Stream comments (and action-auto-posts) for a sighting, sorted by time
+  Stream<List<Map<String, dynamic>>> streamCommunityUpdates(String sightingId) {
+    return _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .orderBy('createdAt', descending: false)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              final data = d.data();
+              data['id'] = d.id;
+              return data;
+            }).toList());
+  }
+
+  /// Add a comment / reply to a sighting
+  Future<void> addComment({
+    required String sightingId,
+    required String text,
+    String? parentId,
+    bool anonymous = false,
+  }) async {
+    final user = _auth.currentUser;
+    final uid = user?.uid ?? 'anon';
+    final name = anonymous
+        ? 'Anonymous'
+        : (user?.displayName?.isNotEmpty == true
+            ? user!.displayName!
+            : (user?.email?.split('@').first ?? 'PawWatcher'));
+
+    final batch = _firestore.batch();
+
+    final updateRef = _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .doc();
+
+    batch.set(updateRef, {
+      'type': 'comment',
+      'authorId': uid,
+      'authorName': name,
+      'text': text.trim(),
+      'parentId': parentId ?? '',
+      'isAnonymous': anonymous,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    // Increment commentCount on the sighting
+    final sightingRef = _firestore.collection('sightings').doc(sightingId);
+    batch.update(sightingRef, {'commentCount': FieldValue.increment(1)});
+
+    await batch.commit();
+  }
+
+  /// Log a rescue action (Fed, Vet Visit, Took In, etc.) with verified photo proof
+  Future<int> logRescueAction({
+    required String sightingId,
+    required String action, // 'fed', 'vet', 'tookIn', 'sheltered', 'rehomed', 'stillHere', 'moved', 'notHere', 'holding', 'helpedOffline'
+    bool anonymous = false,
+    File? proofPhotoFile,
+    String? proofPhotoUrl,
+    String? customNote,
+    double? updatedLatitude,
+    double? updatedLongitude,
+    String? updatedLocationAddress,
+    bool markResolved = false,
+  }) async {
+    final user = _auth.currentUser;
+    final uid = user?.uid ?? 'anon';
+    final name = anonymous
+        ? 'Anonymous'
+        : (user?.displayName?.isNotEmpty == true
+            ? user!.displayName!
+            : (user?.email?.split('@').first ?? 'PawWatcher'));
+
+    String? finalProofUrl = proofPhotoUrl;
+    if (proofPhotoFile != null) {
+      final uploaded = await uploadPhotos([proofPhotoFile], sightingId);
+      if (uploaded.isNotEmpty) {
+        finalProofUrl = uploaded.first;
+      }
+    }
+
+    const xpMap = {
+      'fed': 30,
+      'vet': 100,
+      'tookIn': 150,
+      'sheltered': 120,
+      'rehomed': 200,
+      'stillHere': 15,
+      'moved': 25,
+      'notHere': 10,
+      'holding': 100,
+      'helpedOffline': 30,
+    };
+
+    const autoMessages = {
+      'fed': 'gave the cat some food.',
+      'vet': 'took the cat to the vet.',
+      'tookIn': 'took the cat in and is taking care of it.',
+      'sheltered': 'brought the cat to a shelter.',
+      'rehomed': 'found a loving home for the cat! 🎉',
+      'stillHere': 'confirmed the cat is still at this spot.',
+      'moved': 'spotted the cat nearby and updated location.',
+      'notHere': 'checked this spot, but the cat is not here right now.',
+      'holding': 'secured the cat in temporary holding / foster care.',
+      'helpedOffline': 'reported that the cat was already helped or taken in by a local resident. 🏠',
+    };
+
+    final xp = xpMap[action] ?? 10;
+    String message = autoMessages[action] ?? 'took action.';
+    if (customNote != null && customNote.trim().isNotEmpty) {
+      message = '$message "${customNote.trim()}"';
+    }
+
+    final docData = <String, dynamic>{
+      'type': 'action',
+      'action': action,
+      'authorId': uid,
+      'authorName': name,
+      'text': message,
+      'isAnonymous': anonymous,
+      'parentId': '',
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+    if (finalProofUrl != null && finalProofUrl.isNotEmpty) {
+      docData['proofPhotoUrl'] = finalProofUrl;
+    }
+    if (updatedLocationAddress != null && updatedLocationAddress.isNotEmpty) {
+      docData['updatedLocationAddress'] = updatedLocationAddress;
+    }
+
+    // 1. Post auto-update to community feed
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .add(docData);
+
+    // 2. Update parent Sighting document with real-time freshness and roaming coordinates
+    try {
+      final updateFields = <String, dynamic>{
+        'lastSeenAt': FieldValue.serverTimestamp(),
+        'lastSeenStatus': action,
+      };
+      if (customNote != null && customNote.trim().isNotEmpty) {
+        updateFields['lastSeenNote'] = customNote.trim();
+      }
+      if (updatedLatitude != null && updatedLongitude != null) {
+        updateFields['updatedLatitude'] = updatedLatitude;
+        updateFields['updatedLongitude'] = updatedLongitude;
+      }
+      if (updatedLocationAddress != null && updatedLocationAddress.isNotEmpty) {
+        updateFields['updatedLocationAddress'] = updatedLocationAddress;
+      }
+      await _firestore
+          .collection('sightings')
+          .doc(sightingId)
+          .update(updateFields);
+    } catch (e) {
+      debugPrint('Parent sighting last-seen update notice: $e');
+    }
+
+    // 3. Auto-resolve one-time tasks when core goals are completed (e.g. rehomed, vet for injured)
+    try {
+      final sightingDoc =
+          await _firestore.collection('sightings').doc(sightingId).get();
+      if (sightingDoc.exists) {
+        final cat = sightingDoc.data()?['category']?.toString() ?? '';
+        final shouldAutoResolve = markResolved ||
+            action == 'rehomed' ||
+            (action == 'vet' &&
+                (cat == 'Injured' || cat == 'Needs Vet')) ||
+            (action == 'tookIn' &&
+                (cat == 'Urgent Rescue' || cat == 'Kitten')) ||
+            (action == 'sheltered' &&
+                (cat == 'Urgent Rescue' || cat == 'Needs Foster'));
+
+        if (shouldAutoResolve) {
+          await _firestore.collection('sightings').doc(sightingId).update({
+            'urgency': 'resolved',
+            'resolvedByAction': action,
+            'resolvedAt': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Auto-resolve check notice: $e');
+    }
+
+    // 4. Award XP with anti-farming cooldown (2h cooldown per unique sighting report)
+    final isRoamingAction = action == 'stillHere' || action == 'moved' || action == 'notHere';
+    int effectiveXp = xp;
+
+    if (user != null && !anonymous) {
+      try {
+        final userDocRef = _firestore.collection('users').doc(uid);
+        final userDoc = await userDocRef.get();
+        final userData = userDoc.data() ?? {};
+
+        if (isRoamingAction) {
+          final now = DateTime.now();
+
+          // Check spot cooldown (2 hours per specific sighting)
+          final spotCooldowns = (userData['spotCooldowns'] as Map<String, dynamic>?) ?? {};
+          final lastSpotTimestamp = spotCooldowns[sightingId];
+          DateTime? lastSpotUpdate;
+          if (lastSpotTimestamp is Timestamp) {
+            lastSpotUpdate = lastSpotTimestamp.toDate();
+          } else if (lastSpotTimestamp is String) {
+            lastSpotUpdate = DateTime.tryParse(lastSpotTimestamp);
+          }
+
+          final isSpotOnCooldown = lastSpotUpdate != null && now.difference(lastSpotUpdate).inMinutes < 120;
+
+          if (isSpotOnCooldown) {
+            effectiveXp = 0; // Already collected XP for this specific cat recently
+          } else {
+            // Award full XP and record cooldown for this specific cat
+            await userDocRef.set({
+              'xp': FieldValue.increment(effectiveXp),
+              'spotCooldowns': {
+                ...spotCooldowns,
+                sightingId: FieldValue.serverTimestamp(),
+              },
+              'lastActive': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
+          }
+        } else {
+          // Major rescue action (Took In, Vet, Rehomed, etc.) - uncapped
+          await userDocRef.set({
+            'xp': FieldValue.increment(effectiveXp),
+            'lastActive': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+      } catch (e) {
+        debugPrint('XP update notice: $e');
+      }
+    }
+
+    return effectiveXp;
+  }
+
+  /// Reporter confirms a community rescue action with a verified checkmark
+  Future<void> confirmRescueAction(String sightingId, String updateId) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .doc(updateId)
+        .update({
+      'isReporterConfirmed': true,
+      'confirmedBy': user.uid,
+      'confirmedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Claim "I'm on my way" rescue button
+  Future<void> claimRescue(String sightingId) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final name = user.displayName?.isNotEmpty == true
+        ? user.displayName!
+        : (user.email?.split('@').first ?? 'PawWatcher');
+
+    final sightingRef = _firestore.collection('sightings').doc(sightingId);
+    await sightingRef.update({
+      'rescueClaimed': true,
+      'rescueClaimedBy': user.uid,
+      'rescueClaimedByName': name,
+      'rescueClaimedAt': FieldValue.serverTimestamp(),
+    });
+
+    // Post auto-update
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .add({
+      'type': 'onMyWay',
+      'authorId': user.uid,
+      'authorName': name,
+      'text': "is on their way to help! (45m arrival window) 🐾",
+      'isAnonymous': false,
+      'parentId': '',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Check and expire a rescue claim that timed out past 45 mins without action
+  Future<void> checkAndExpireRescueClaim(String sightingId) async {
+    try {
+      final doc = await _firestore.collection('sightings').doc(sightingId).get();
+      if (!doc.exists) return;
+      final data = doc.data() ?? {};
+      final bool claimed = data['rescueClaimed'] == true;
+      final claimerUid = data['rescueClaimedBy']?.toString() ?? '';
+      final claimerName = data['rescueClaimedByName']?.toString() ?? 'Rescuer';
+      final claimedAt = data['rescueClaimedAt'];
+
+      if (!claimed || claimedAt == null) return;
+
+      DateTime parsedClaimedAt = DateTime.now();
+      if (claimedAt is Timestamp) {
+        parsedClaimedAt = claimedAt.toDate();
+      } else if (claimedAt is String) {
+        parsedClaimedAt = DateTime.tryParse(claimedAt) ?? DateTime.now();
+      }
+
+      final diff = DateTime.now().difference(parsedClaimedAt);
+      if (diff.inMinutes < 45) return; // Still within 45m window
+
+      // 1. Release the spot
+      await _firestore.collection('sightings').doc(sightingId).update({
+        'rescueClaimed': false,
+        'rescueClaimedBy': '',
+        'rescueClaimedByName': '',
+        'rescueClaimedAt': null,
+      });
+
+      // 2. Invalidate onMyWay updates
+      final updatesSnap = await _firestore
+          .collection('sightings')
+          .doc(sightingId)
+          .collection('updates')
+          .where('type', isEqualTo: 'onMyWay')
+          .get();
+
+      for (final uDoc in updatesSnap.docs) {
+        if (uDoc.data()['isCancelled'] != true) {
+          await uDoc.reference.update({
+            'isCancelled': true,
+            'cancelledAt': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+
+      // 3. Post timeout notice to community feed
+      await _firestore
+          .collection('sightings')
+          .doc(sightingId)
+          .collection('updates')
+          .add({
+        'type': 'onMyWayCancelled',
+        'authorId': 'system',
+        'authorName': 'PawWatch Bot',
+        'text': 'Rescue claim timed out after 45m without action proof. Spot is open again for rescuers! 🐾',
+        'isAnonymous': false,
+        'parentId': '',
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+      // 4. Ghosting accountability: deduct 30 XP from abandoned claimant
+      if (claimerUid.isNotEmpty) {
+        await _firestore.collection('users').doc(claimerUid).set({
+          'xp': FieldValue.increment(-30),
+          'abandonedClaimsCount': FieldValue.increment(1),
+          'lastGhostedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+    } catch (e) {
+      debugPrint('Check expire rescue claim notice: $e');
+    }
+  }
+
+  /// Cancel "I'm on my way" claim (by claimant or reporter)
+  Future<void> cancelRescueClaim(String sightingId) async {
+    final user = _auth.currentUser;
+    final name = user?.displayName?.isNotEmpty == true
+        ? user!.displayName!
+        : (user?.email?.split('@').first ?? 'PawWatcher');
+
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'rescueClaimed': false,
+      'rescueClaimedBy': '',
+      'rescueClaimedByName': '',
+      'rescueClaimedAt': null,
+    });
+
+    // 1. Mark existing active onMyWay updates for this sighting as cancelled
+    try {
+      final updatesSnap = await _firestore
+          .collection('sightings')
+          .doc(sightingId)
+          .collection('updates')
+          .where('type', isEqualTo: 'onMyWay')
+          .get();
+
+      for (final doc in updatesSnap.docs) {
+        if (doc.data()['isCancelled'] != true) {
+          await doc.reference.update({
+            'isCancelled': true,
+            'cancelledAt': FieldValue.serverTimestamp(),
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Cancel updates notice: $e');
+    }
+
+    // 2. Post a clear community notice that the trip was cancelled
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .add({
+      'type': 'onMyWayCancelled',
+      'authorId': user?.uid ?? 'anon',
+      'authorName': name,
+      'text': 'cancelled their rescue trip. This spot is open for anyone to help! 🐾',
+      'isAnonymous': false,
+      'parentId': '',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Delete a sighting (owner only)
+  Future<void> deleteSighting(String sightingId) async {
+    await _firestore.collection('sightings').doc(sightingId).delete();
+  }
+
+  /// Update sighting title and/or description (owner only)
+  Future<void> updateSighting(String sightingId, {String? title, String? description}) async {
+    final data = <String, dynamic>{};
+    if (title != null) data['title'] = title.trim();
+    if (description != null) data['description'] = description.trim();
+    if (data.isNotEmpty) {
+      await _firestore.collection('sightings').doc(sightingId).update(data);
+    }
+  }
+
+  /// Flag a sighting as inappropriate
+  Future<void> flagSighting(String sightingId, String reason) async {
+    final user = _auth.currentUser;
+    await _firestore.collection('flags').add({
+      'type': 'sighting',
+      'sightingId': sightingId,
+      'reportedBy': user?.uid ?? 'anon',
+      'reason': reason,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Edit a comment or reply (author only)
+  Future<void> editComment({
+    required String sightingId,
+    required String commentId,
+    required String newText,
+  }) async {
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .doc(commentId)
+        .update({
+      'text': newText.trim(),
+      'isEdited': true,
+      'editedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Soft-delete a comment or reply (author only)
+  Future<void> deleteComment({
+    required String sightingId,
+    required String commentId,
+  }) async {
+    final batch = _firestore.batch();
+    final commentRef = _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .doc(commentId);
+
+    batch.update(commentRef, {
+      'text': '[Comment deleted]',
+      'isDeleted': true,
+      'deletedAt': FieldValue.serverTimestamp(),
+    });
+
+    // Decrement comment count on sighting doc
+    final sightingRef = _firestore.collection('sightings').doc(sightingId);
+    batch.update(sightingRef, {'commentCount': FieldValue.increment(-1)});
+
+    await batch.commit();
+  }
+
+  /// Report/flag a comment or reply
+  Future<void> flagComment({
+    required String sightingId,
+    required String commentId,
+    required String reason,
+  }) async {
+    final user = _auth.currentUser;
+    await _firestore.collection('flags').add({
+      'type': 'comment',
+      'sightingId': sightingId,
+      'commentId': commentId,
+      'reportedBy': user?.uid ?? 'anon',
+      'reason': reason,
+      'createdAt': FieldValue.serverTimestamp(),
     });
   }
 

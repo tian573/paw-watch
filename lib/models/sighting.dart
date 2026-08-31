@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:geolocator/geolocator.dart';
 
 class Sighting {
   final String id;
@@ -16,6 +17,17 @@ class Sighting {
   final DateTime createdAt;
   final int commentCount;
   final int upvotes;
+  final bool rescueClaimed;
+  final String rescueClaimedBy;    // uid of claimer
+  final String rescueClaimedByName; // display name of claimer
+  final DateTime? rescueClaimedAt; // timestamp when on-my-way was claimed
+  final DateTime? lastSeenAt;
+  final String? lastSeenStatus; // 'still_here', 'moved', 'not_here', 'holding', 'fed', 'vet'
+  final String? lastSeenNote;
+  final String? routineHours;
+  final double? updatedLatitude;
+  final double? updatedLongitude;
+  final String? updatedLocationAddress;
 
   const Sighting({
     required this.id,
@@ -32,9 +44,44 @@ class Sighting {
     this.title = '',
     this.commentCount = 0,
     this.upvotes = 0,
+    this.rescueClaimed = false,
+    this.rescueClaimedBy = '',
+    this.rescueClaimedByName = '',
+    this.rescueClaimedAt,
+    this.lastSeenAt,
+    this.lastSeenStatus,
+    this.lastSeenNote,
+    this.routineHours,
+    this.updatedLatitude,
+    this.updatedLongitude,
+    this.updatedLocationAddress,
   });
 
+  bool get isRescueClaimExpired {
+    if (!rescueClaimed || rescueClaimedAt == null) return false;
+    final diff = DateTime.now().difference(rescueClaimedAt!);
+    return diff.inMinutes >= 45;
+  }
+
+  bool get isRescueClaimActive => rescueClaimed && !isRescueClaimExpired;
+
+  int get rescueClaimRemainingMinutes {
+    if (!rescueClaimed || rescueClaimedAt == null) return 0;
+    final diff = DateTime.now().difference(rescueClaimedAt!);
+    final rem = 45 - diff.inMinutes;
+    return rem > 0 ? rem : 0;
+  }
+
   String get status => urgency;
+
+  bool get isOneTimeTask =>
+      category == 'Injured' ||
+      category == 'Needs Vet' ||
+      category == 'Kitten' ||
+      category == 'Urgent Rescue' ||
+      category == 'Needs Foster';
+
+  bool get isOngoingCare => !isOneTimeTask;
 
   String get displayTitle {
     if (title.trim().isNotEmpty) return title.trim();
@@ -77,6 +124,80 @@ class Sighting {
     }
   }
 
+  static String extractCityOnly(String address) {
+    if (address.trim().isEmpty) return 'Nearby Area';
+    final parts = address
+        .split(',')
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty)
+        .toList();
+    if (parts.length <= 1) return address;
+
+    // Filter out parts containing street / house indicators or raw zip codes
+    final filtered = parts.where((p) {
+      final lower = p.toLowerCase();
+      final hasStreet = lower.startsWith('jl') ||
+          lower.startsWith('jalan') ||
+          lower.startsWith('gang') ||
+          lower.startsWith('gg.') ||
+          lower.startsWith('no.') ||
+          lower.contains('rt.') ||
+          lower.contains('rw.') ||
+          lower.contains('blok') ||
+          lower.contains('kav.');
+      final isPostalOnly = RegExp(r'^\d{4,6}$').hasMatch(p);
+      return !hasStreet && !isPostalOnly;
+    }).toList();
+
+    if (filtered.isNotEmpty) {
+      if (filtered.length >= 2) {
+        return '${filtered[filtered.length - 2]}, ${filtered.last}';
+      }
+      return filtered.last;
+    }
+    return parts.last;
+  }
+
+  String get displayLocation {
+    if (urgency == 'resolved') {
+      return extractCityOnly(locationAddress);
+    }
+    return locationAddress;
+  }
+
+  String formatDistance(double? userLat, double? userLng) {
+    if (userLat == null || userLng == null) return 'Nearby';
+    try {
+      final meters = Geolocator.distanceBetween(
+        userLat,
+        userLng,
+        latitude,
+        longitude,
+      );
+      if (meters < 1000) {
+        return '${meters.round()}m away';
+      } else {
+        return '${(meters / 1000).toStringAsFixed(1)}km away';
+      }
+    } catch (_) {
+      return 'Nearby';
+    }
+  }
+
+  double calculateDistanceInMeters(double? userLat, double? userLng) {
+    if (userLat == null || userLng == null) return 999999999.0;
+    try {
+      return Geolocator.distanceBetween(
+        userLat,
+        userLng,
+        latitude,
+        longitude,
+      );
+    } catch (_) {
+      return 999999999.0;
+    }
+  }
+
   String get distance {
     // Default friendly distance label
     return 'Nearby';
@@ -110,6 +231,71 @@ class Sighting {
     return colors[index];
   }
 
+  double get effectiveLatitude => updatedLatitude ?? latitude;
+  double get effectiveLongitude => updatedLongitude ?? longitude;
+  String get effectiveLocationAddress =>
+      updatedLocationAddress ?? locationAddress;
+
+  String get effectiveDisplayLocation {
+    if (urgency == 'resolved') {
+      return Sighting.extractCityOnly(effectiveLocationAddress);
+    }
+    return effectiveLocationAddress;
+  }
+
+  String get lastSeenFreshness {
+    final seen = lastSeenAt ?? createdAt;
+    final now = DateTime.now();
+    final diff = now.difference(seen);
+
+    if (lastSeenStatus == 'helpedOffline') {
+      return 'Rescued / Taken in by Local Resident 🏠';
+    }
+
+    if (lastSeenStatus == 'holding') {
+      return 'In Temporary Holding / Safe with Rescuer';
+    }
+
+    if (lastSeenStatus == 'not_here' || lastSeenStatus == 'notHere') {
+      if (diff.inMinutes < 60) {
+        return 'Checked: Not here (${diff.inMinutes < 1 ? 'just now' : '${diff.inMinutes}m ago'})';
+      }
+      if (diff.inHours < 24) {
+        return 'Checked: Not here (${diff.inHours}h ago)';
+      }
+      return 'Checked: Not here (${diff.inDays}d ago)';
+    }
+
+    if (lastSeenStatus == 'moved') {
+      if (diff.inMinutes < 60) {
+        return 'Spotted & Moved (${diff.inMinutes < 1 ? 'just now' : '${diff.inMinutes}m ago'})';
+      }
+      return 'Moved Nearby (${diff.inHours}h ago)';
+    }
+
+    if (diff.inMinutes < 60) {
+      return 'Active (Seen ${diff.inMinutes < 1 ? 'just now' : '${diff.inMinutes}m ago'})';
+    } else if (diff.inHours < 6) {
+      return 'Seen ${diff.inHours}h ago';
+    } else if (diff.inHours < 24) {
+      return 'Last seen ${diff.inHours}h ago';
+    } else {
+      return 'Last seen ${diff.inDays}d ago';
+    }
+  }
+
+  Color get lastSeenFreshnessColor {
+    if (lastSeenStatus == 'helpedOffline') return const Color(0xFF43A047);
+    if (lastSeenStatus == 'holding') return const Color(0xFF9C27B0);
+    if (lastSeenStatus == 'not_here' || lastSeenStatus == 'notHere') return const Color(0xFF78909C);
+    if (lastSeenStatus == 'moved') return const Color(0xFFFF9800);
+    final seen = lastSeenAt ?? createdAt;
+    final diff = DateTime.now().difference(seen);
+    if (diff.inHours < 6) return const Color(0xFF43A047);
+    if (diff.inHours < 24) return const Color(0xFFFFA000);
+    return const Color(0xFF9E9E9E);
+  }
+
   Map<String, dynamic> toMap() {
     return {
       'title': title,
@@ -125,6 +311,17 @@ class Sighting {
       'createdAt': Timestamp.fromDate(createdAt),
       'commentCount': commentCount,
       'upvotes': upvotes,
+      'rescueClaimed': rescueClaimed,
+      'rescueClaimedBy': rescueClaimedBy,
+      'rescueClaimedByName': rescueClaimedByName,
+      'rescueClaimedAt': rescueClaimedAt != null ? Timestamp.fromDate(rescueClaimedAt!) : null,
+      'lastSeenAt': lastSeenAt != null ? Timestamp.fromDate(lastSeenAt!) : null,
+      'lastSeenStatus': lastSeenStatus,
+      'lastSeenNote': lastSeenNote,
+      'routineHours': routineHours,
+      'updatedLatitude': updatedLatitude,
+      'updatedLongitude': updatedLongitude,
+      'updatedLocationAddress': updatedLocationAddress,
     };
   }
 
@@ -141,6 +338,20 @@ class Sighting {
       parsedDate = DateTime.tryParse(data['createdAt']) ?? DateTime.now();
     }
 
+    DateTime? parsedLastSeen;
+    if (data['lastSeenAt'] is Timestamp) {
+      parsedLastSeen = (data['lastSeenAt'] as Timestamp).toDate();
+    } else if (data['lastSeenAt'] is String) {
+      parsedLastSeen = DateTime.tryParse(data['lastSeenAt']);
+    }
+
+    DateTime? parsedRescueClaimedAt;
+    if (data['rescueClaimedAt'] is Timestamp) {
+      parsedRescueClaimedAt = (data['rescueClaimedAt'] as Timestamp).toDate();
+    } else if (data['rescueClaimedAt'] is String) {
+      parsedRescueClaimedAt = DateTime.tryParse(data['rescueClaimedAt']);
+    }
+
     final rawPhotos = data['photoUrls'];
     List<String> photos = [];
     if (rawPhotos is List) {
@@ -154,6 +365,11 @@ class Sighting {
         ? 'Spotted'
         : rawCategory;
 
+    final rawUrgency = data['urgency']?.toString() ?? 'needsHelp';
+    final normalizedUrgency = (rawUrgency == 'notUrgent' || rawUrgency == 'safe')
+        ? 'resolved'
+        : rawUrgency;
+
     return Sighting(
       id: id,
       title: data['title'] ?? '',
@@ -164,11 +380,26 @@ class Sighting {
       longitude: (data['longitude'] is num) ? (data['longitude'] as num).toDouble() : 106.8106,
       locationAddress: data['locationAddress'] ?? 'Jakarta Selatan, Indonesia',
       description: data['description'] ?? '',
-      urgency: data['urgency'] ?? 'needsHelp',
+      urgency: normalizedUrgency,
       category: normalizedCategory,
       createdAt: parsedDate,
       commentCount: (data['commentCount'] is num) ? (data['commentCount'] as num).toInt() : 0,
       upvotes: (data['upvotes'] is num) ? (data['upvotes'] as num).toInt() : 0,
+      rescueClaimed: data['rescueClaimed'] == true,
+      rescueClaimedBy: data['rescueClaimedBy'] ?? '',
+      rescueClaimedByName: data['rescueClaimedByName'] ?? '',
+      rescueClaimedAt: parsedRescueClaimedAt,
+      lastSeenAt: parsedLastSeen,
+      lastSeenStatus: data['lastSeenStatus']?.toString(),
+      lastSeenNote: data['lastSeenNote']?.toString(),
+      routineHours: data['routineHours']?.toString(),
+      updatedLatitude: (data['updatedLatitude'] is num)
+          ? (data['updatedLatitude'] as num).toDouble()
+          : null,
+      updatedLongitude: (data['updatedLongitude'] is num)
+          ? (data['updatedLongitude'] as num).toDouble()
+          : null,
+      updatedLocationAddress: data['updatedLocationAddress']?.toString(),
     );
   }
 }

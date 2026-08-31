@@ -8,6 +8,7 @@ import 'package:latlong2/latlong.dart' as ll;
 import '../../services/ai_service.dart';
 import '../../services/location_service.dart';
 import '../../services/firebase_service.dart';
+import '../../models/sighting.dart';
 
 class ReportFormScreen extends StatefulWidget {
   const ReportFormScreen({super.key});
@@ -33,10 +34,12 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
   final List<File> _photos = [];
   bool _isScanningPhoto = false;
 
-  String _selectedUrgency = '';
+  String _reportType = 'needsHelp'; // 'needsHelp' or 'resolved'
+  String _selectedCategory = 'Urgent Rescue';
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
+  final TextEditingController _routineHoursController = TextEditingController();
   bool _isSearchingLocation = false;
 
   ll.LatLng _selectedLocation = const ll.LatLng(-6.2615, 106.8106);
@@ -55,21 +58,27 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
     _titleController.dispose();
     _descController.dispose();
     _searchController.dispose();
+    _routineHoursController.dispose();
     super.dispose();
   }
+
+  int get _totalSteps => _reportType == 'resolved' ? 4 : 5;
 
   int get _currentStepCount {
     int steps = 0;
     if (_titleController.text.trim().isNotEmpty) steps++;
     if (_photos.isNotEmpty) steps++;
+    if (_reportType == 'needsHelp' && _selectedCategory.isNotEmpty) steps++;
     if (!_isLocationLoading && _locationText.isNotEmpty) steps++;
     if (_descController.text.trim().isNotEmpty) steps++;
-    if (_selectedUrgency.isNotEmpty) steps++;
     return steps == 0 ? 1 : steps;
   }
 
   bool get _canSubmit {
-    return _photos.isNotEmpty && _selectedUrgency.isNotEmpty;
+    if (_reportType == 'resolved') {
+      return _photos.isNotEmpty;
+    }
+    return _photos.isNotEmpty && _selectedCategory.isNotEmpty;
   }
 
   Future<void> _fetchCurrentLocation() async {
@@ -94,29 +103,26 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
     }
   }
 
-  Future<void> _onMapTapped(ll.LatLng tappedPoint) async {
+  void _onMapTapped(ll.LatLng latLng) async {
     setState(() {
-      _selectedLocation = tappedPoint;
+      _selectedLocation = latLng;
+      _isLocationLoading = true;
       _isGpsAutoFilled = false;
     });
 
-    try {
-      _mapController.move(tappedPoint, _mapController.camera.zoom);
-    } catch (_) {}
-
     final address = await _locationService.getAddressFromCoordinates(
-      tappedPoint.latitude,
-      tappedPoint.longitude,
+      latLng.latitude,
+      latLng.longitude,
     );
 
-    if (mounted) {
-      setState(() {
-        _locationText = address;
-      });
-    }
+    if (!mounted) return;
+    setState(() {
+      _locationText = address;
+      _isLocationLoading = false;
+    });
   }
 
-  Future<void> _handleSearchLocation(String query) async {
+  void _handleSearchLocation(String query) async {
     final cleanQuery = query.trim();
     if (cleanQuery.isEmpty) return;
 
@@ -167,15 +173,19 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
                   children: [
                     _buildInfoBanner(),
                     const SizedBox(height: 14),
+                    _buildReportTypeSelector(),
+                    const SizedBox(height: 14),
                     _buildTitleSection(),
                     const SizedBox(height: 14),
                     _buildPhotoSection(),
                     const SizedBox(height: 14),
+                    if (_reportType == 'needsHelp') ...[
+                      _buildCategorySection(),
+                      const SizedBox(height: 14),
+                    ],
                     _buildLocationSection(),
                     const SizedBox(height: 14),
                     _buildDescriptionSection(),
-                    const SizedBox(height: 14),
-                    _buildUrgencySection(),
                     const SizedBox(height: 24),
                     _buildSubmitButton(),
                     const SizedBox(height: 24),
@@ -219,6 +229,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
 
   Widget _buildStepIndicator() {
     final step = _currentStepCount;
+    final total = _totalSteps;
     return SizedBox(
       width: 44,
       height: 44,
@@ -228,7 +239,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             width: 44,
             height: 44,
             child: CircularProgressIndicator(
-              value: step / 5,
+              value: step / total,
               strokeWidth: 3.5,
               backgroundColor: _lavender.withValues(alpha: 0.2),
               valueColor: const AlwaysStoppedAnimation<Color>(_lavender),
@@ -236,7 +247,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
           ),
           Center(
             child: Text(
-              '$step/5',
+              '$step/$total',
               style: GoogleFonts.nunito(
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
@@ -299,6 +310,133 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             width: 60,
             height: 60,
             fit: BoxFit.contain,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReportTypeSelector() {
+    final isHelp = _reportType == 'needsHelp';
+    final isResolved = _reportType == 'resolved';
+
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: _navy.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: _navy.withValues(alpha: 0.08)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _reportType = 'needsHelp'),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: isHelp ? Colors.white : Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: isHelp
+                      ? [
+                          BoxShadow(
+                            color: _navy.withValues(alpha: 0.08),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.error_outline,
+                      size: 20,
+                      color: isHelp ? _needsHelp : _navy.withValues(alpha: 0.4),
+                    ),
+                    const SizedBox(width: 8),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Needs Help',
+                          style: GoogleFonts.nunito(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: isHelp ? _navy : _navy.withValues(alpha: 0.5),
+                          ),
+                        ),
+                        Text(
+                          'Rescue / Care Needed',
+                          style: GoogleFonts.nunito(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: isHelp ? _needsHelp : _navy.withValues(alpha: 0.4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: GestureDetector(
+              onTap: () => setState(() => _reportType = 'resolved'),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 200),
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: isResolved ? Colors.white : Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: isResolved
+                      ? [
+                          BoxShadow(
+                            color: _navy.withValues(alpha: 0.08),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      Icons.check_circle_outline,
+                      size: 20,
+                      color: isResolved ? _resolved : _navy.withValues(alpha: 0.4),
+                    ),
+                    const SizedBox(width: 8),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Resolved / Safe',
+                          style: GoogleFonts.nunito(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: isResolved ? _navy : _navy.withValues(alpha: 0.5),
+                          ),
+                        ),
+                        Text(
+                          'Cat is Safe or Adopted',
+                          style: GoogleFonts.nunito(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: isResolved ? _resolved : _navy.withValues(alpha: 0.4),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
           ),
         ],
       ),
@@ -806,7 +944,177 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
     );
   }
 
+  Widget _buildCategorySection() {
+    final categories = [
+      {
+        'key': 'Urgent Rescue',
+        'icon': Icons.warning_amber_rounded,
+        'label': 'Trapped / In Danger',
+        'sublabel': 'Requires immediate extraction',
+        'taskType': '🎯 One-Time Task',
+        'color': const Color(0xFFFF5722),
+      },
+      {
+        'key': 'Kitten',
+        'icon': Icons.pets,
+        'label': 'Vulnerable Kitten(s)',
+        'sublabel': 'Needs foster, shelter, or checkup',
+        'taskType': '🎯 One-Time Task',
+        'color': const Color(0xFFE91E63),
+      },
+      {
+        'key': 'Injured',
+        'icon': Icons.healing_outlined,
+        'label': 'Injured / Sick',
+        'sublabel': 'Needs vet visit or medical care',
+        'taskType': '🎯 One-Time Task',
+        'color': _urgent,
+      },
+      {
+        'key': 'Needs Foster',
+        'icon': Icons.home_outlined,
+        'label': 'Needs Foster / Home',
+        'sublabel': 'Looking for an adopter or temporary home',
+        'taskType': '🎯 One-Time Task',
+        'color': const Color(0xFF9C27B0),
+      },
+      {
+        'key': 'Stray',
+        'icon': Icons.restaurant_outlined,
+        'label': 'Stray / Feeding Spot',
+        'sublabel': 'Needs food or daily community care',
+        'taskType': '🍲 Ongoing Care',
+        'color': _lavender,
+      },
+    ];
+
+    return _buildCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            icon: Icons.category_outlined,
+            title: '3. Cat Situation & Goal',
+            subtitle: 'Choose category to set permitted rescue actions.',
+          ),
+          const SizedBox(height: 12),
+          ListView.separated(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: categories.length,
+            separatorBuilder: (context, index) => const SizedBox(height: 8),
+            itemBuilder: (context, index) {
+              final cat = categories[index];
+              final key = cat['key'] as String;
+              final isSelected = _selectedCategory == key;
+              final col = cat['color'] as Color;
+
+              return GestureDetector(
+                onTap: () => setState(() => _selectedCategory = key),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 11),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? col.withValues(alpha: 0.08)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isSelected
+                          ? col
+                          : _navy.withValues(alpha: 0.1),
+                      width: isSelected ? 1.8 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: col.withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(cat['icon'] as IconData,
+                            size: 18, color: col),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    cat['label'] as String,
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                      color: _navy,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: col.withValues(alpha: 0.1),
+                                    borderRadius:
+                                        BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    cat['taskType'] as String,
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: col,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              cat['sublabel'] as String,
+                              style: GoogleFonts.nunito(
+                                fontSize: 11,
+                                color: _navy.withValues(alpha: 0.55),
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(
+                        isSelected
+                            ? Icons.radio_button_checked
+                            : Icons.radio_button_off,
+                        color: isSelected
+                            ? col
+                            : _navy.withValues(alpha: 0.25),
+                        size: 20,
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildLocationSection() {
+    final isResolved = _reportType == 'resolved';
+
     return _buildCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -816,8 +1124,10 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               Expanded(
                 child: _buildSectionHeader(
                   icon: Icons.location_on_outlined,
-                  title: '3. Location',
-                  subtitle: 'Pin the exact location where you saw the cat.',
+                  title: isResolved ? '3. Location (City-Level Area)' : '4. Location',
+                  subtitle: isResolved
+                      ? 'Select the general city/area where the cat was rescued.'
+                      : 'Pin the exact location where you saw the cat.',
                 ),
               ),
               GestureDetector(
@@ -858,6 +1168,37 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               ),
             ],
           ),
+          if (_reportType == 'resolved') ...[
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _resolved.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _resolved.withValues(alpha: 0.35),
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.shield_outlined,
+                      color: _resolved, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      '🔒 Adopter Privacy: For resolved or rehomed cats, exact map coordinates are not published publicly to protect the adopter\'s private home.',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: _navy.withValues(alpha: 0.8),
+                        height: 1.35,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 12),
           Container(
             height: 42,
@@ -1106,10 +1447,18 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
   }
 
   Widget _buildLocationAddress() {
+    final isResolved = _reportType == 'resolved';
+    final displayText = isResolved
+        ? Sighting.extractCityOnly(_locationText)
+        : _locationText;
+
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Icon(Icons.location_on, size: 16, color: _lavender),
+        Icon(
+            isResolved ? Icons.shield_outlined : Icons.location_on,
+            size: 16,
+            color: isResolved ? _resolved : _lavender),
         const SizedBox(width: 8),
         Expanded(
           child: _isLocationLoading
@@ -1122,7 +1471,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
                   ),
                 )
               : Text(
-                  _locationText,
+                  displayText,
                   style: GoogleFonts.nunito(
                     fontSize: 12,
                     color: _navy.withValues(alpha: 0.8),
@@ -1132,7 +1481,23 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
                 ),
         ),
         const SizedBox(width: 8),
-        if (_isGpsAutoFilled)
+        if (isResolved)
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.shield_outlined, size: 13, color: _resolved),
+              const SizedBox(width: 3),
+              Text(
+                'City Level Only',
+                style: GoogleFonts.nunito(
+                  fontSize: 11,
+                  color: _resolved,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ],
+          )
+        else if (_isGpsAutoFilled)
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -1169,14 +1534,18 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
   }
 
   Widget _buildDescriptionSection() {
+    final isResolved = _reportType == 'resolved';
+
     return _buildCard(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildSectionHeader(
             icon: Icons.edit_outlined,
-            title: '4. Description',
-            subtitle: 'Provide any details that might help.',
+            title: isResolved ? '4. Description & Story' : '5. Description',
+            subtitle: isResolved
+                ? 'Share how the cat was rescued or any adoption story details.'
+                : 'Provide any details that might help rescuers.',
           ),
           const SizedBox(height: 12),
           Container(
@@ -1196,7 +1565,9 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
                 fontWeight: FontWeight.w600,
               ),
               decoration: InputDecoration(
-                hintText: "E.g. color, size, behavior, what's around the cat, etc.",
+                hintText: isResolved
+                    ? "E.g. Rescued from the street and happily adopted by my friend!"
+                    : "E.g. color, size, behavior, what's around the cat, etc.",
                 hintStyle: GoogleFonts.nunito(
                   fontSize: 13,
                   color: _navy.withValues(alpha: 0.35),
@@ -1212,107 +1583,66 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildUrgencySection() {
-    return _buildCard(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildSectionHeader(
-            icon: Icons.error_outline,
-            title: '5. Urgency Level',
-            subtitle: 'How urgent is the situation?',
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              Expanded(
-                child: _buildUrgencyOption(
-                  value: 'urgent',
-                  icon: Icons.error,
-                  label: 'Urgent',
-                  sublabel: 'Needs immediate help',
-                  color: _urgent,
-                ),
+          if (!isResolved &&
+              (_selectedCategory == 'Stray' ||
+                  _selectedCategory == 'Feeding Spot' ||
+                  _selectedCategory == 'Needs Foster' ||
+                  _selectedCategory == 'Spotted')) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: _lavender.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: _lavender.withValues(alpha: 0.2)),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildUrgencyOption(
-                  value: 'needsHelp',
-                  icon: Icons.error_outline,
-                  label: 'Needs Help',
-                  sublabel: 'Not urgent, but needs help',
-                  color: _needsHelp,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _buildUrgencyOption(
-                  value: 'notUrgent',
-                  icon: Icons.check_circle_outline,
-                  label: 'Resolved',
-                  sublabel: 'Safe for now',
-                  color: _resolved,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildUrgencyOption({
-    required String value,
-    required IconData icon,
-    required String label,
-    required String sublabel,
-    required Color color,
-  }) {
-    final isSelected = _selectedUrgency == value;
-    return GestureDetector(
-      onTap: () => setState(() => _selectedUrgency = value),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-        decoration: BoxDecoration(
-          color: isSelected ? color.withValues(alpha: 0.08) : Colors.white,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isSelected ? color : _navy.withValues(alpha: 0.12),
-            width: isSelected ? 1.5 : 1,
-          ),
-        ),
-        child: Column(
-          children: [
-            Icon(icon, size: 22, color: color),
-            const SizedBox(height: 5),
-            Text(
-              label,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.nunito(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              sublabel,
-              textAlign: TextAlign.center,
-              style: GoogleFonts.nunito(
-                fontSize: 10,
-                color: _navy.withValues(alpha: 0.5),
-                fontWeight: FontWeight.w600,
-                height: 1.3,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.schedule, size: 14, color: _lavender),
+                      const SizedBox(width: 6),
+                      Text(
+                        'Usual Active Hours (Optional)',
+                        style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: _navy,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  TextField(
+                    controller: _routineHoursController,
+                    maxLength: 80,
+                    style: GoogleFonts.nunito(
+                      fontSize: 12.5,
+                      color: _navy,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    decoration: InputDecoration(
+                      hintText:
+                          'e.g. Usually spotted around 5 PM - 8 PM near food stall',
+                      hintStyle: GoogleFonts.nunito(
+                        fontSize: 12,
+                        color: _navy.withValues(alpha: 0.4),
+                      ),
+                      border: InputBorder.none,
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 4),
+                      counterStyle: GoogleFonts.nunito(
+                        fontSize: 10,
+                        color: _navy.withValues(alpha: 0.4),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
-        ),
+        ],
       ),
     );
   }
@@ -1325,8 +1655,6 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
           : () {
               if (_photos.isEmpty) {
                 _showSnackBar('⚠️ Please add at least 1 verified cat photo.');
-              } else if (_selectedUrgency.isEmpty) {
-                _showSnackBar('⚠️ Please select an urgency level.');
               }
             },
       child: AnimatedContainer(
@@ -1449,10 +1777,6 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
       _showSnackBar('⚠️ Please add at least 1 verified cat photo.');
       return;
     }
-    if (_selectedUrgency.isEmpty) {
-      _showSnackBar('⚠️ Please select an urgency level.');
-      return;
-    }
 
     setState(() => _isSubmitting = true);
 
@@ -1513,15 +1837,36 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
       ),
     );
 
+    final isResolved = _reportType == 'resolved';
+    final finalAddress = isResolved
+        ? Sighting.extractCityOnly(_locationText)
+        : _locationText;
+
+    final String finalUrgency;
+    final String finalCategory;
+
+    if (isResolved) {
+      finalUrgency = 'resolved';
+      finalCategory = 'Resolved';
+    } else {
+      finalCategory = _selectedCategory;
+      finalUrgency = (_selectedCategory == 'Injured' ||
+              _selectedCategory == 'Urgent Rescue')
+          ? 'urgent'
+          : 'needsHelp';
+    }
+
     try {
       await FirebaseService.instance.createSighting(
         title: _titleController.text.trim(),
         photos: _photos,
         latitude: _selectedLocation.latitude,
         longitude: _selectedLocation.longitude,
-        locationAddress: _locationText,
+        locationAddress: finalAddress,
         description: _descController.text.trim(),
-        urgency: _selectedUrgency,
+        urgency: finalUrgency,
+        category: finalCategory,
+        routineHours: _routineHoursController.text.trim(),
       );
 
       if (mounted) {
