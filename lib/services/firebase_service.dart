@@ -294,131 +294,206 @@ class FirebaseService {
       docData['updatedLocationAddress'] = updatedLocationAddress;
     }
 
-    // 1. Post auto-update to community feed
+    // 2. Update parent Sighting document with In-Care custody and last-seen state
+    String reporterId = '';
+    try {
+      final sightingDoc =
+          await _firestore.collection('sightings').doc(sightingId).get();
+      if (sightingDoc.exists) {
+        reporterId = sightingDoc.data()?['reporterId']?.toString() ?? '';
+        final updateFields = <String, dynamic>{
+          'lastSeenAt': FieldValue.serverTimestamp(),
+          'lastSeenStatus': action,
+          'rescueClaimed': false,
+          'rescueClaimedBy': '',
+          'rescueClaimedByName': '',
+          'rescueClaimedAt': null,
+        };
+        if (customNote != null && customNote.trim().isNotEmpty) {
+          updateFields['lastSeenNote'] = customNote.trim();
+        }
+        if (updatedLatitude != null && updatedLongitude != null) {
+          updateFields['updatedLatitude'] = updatedLatitude;
+          updateFields['updatedLongitude'] = updatedLongitude;
+        }
+        if (updatedLocationAddress != null && updatedLocationAddress.isNotEmpty) {
+          updateFields['updatedLocationAddress'] = updatedLocationAddress;
+        }
+
+        // Custody State Transitions:
+        if (action == 'vet') {
+          updateFields['careStatus'] = 'inCare_vet';
+          updateFields['careTakerId'] = uid;
+          updateFields['careTakerName'] = name;
+          updateFields['careStartedAt'] = FieldValue.serverTimestamp();
+        } else if (action == 'tookIn' || action == 'holding') {
+          updateFields['careStatus'] = 'inCare_foster';
+          updateFields['careTakerId'] = uid;
+          updateFields['careTakerName'] = name;
+          updateFields['careStartedAt'] = FieldValue.serverTimestamp();
+        } else if (action == 'sheltered' || markResolved) {
+          updateFields['careStatus'] = 'resolved';
+          updateFields['urgency'] = 'resolved';
+          updateFields['resolvedByAction'] = action;
+          updateFields['resolvedAt'] = FieldValue.serverTimestamp();
+          if (updatedLatitude != null && updatedLongitude != null) {
+            updateFields['latitude'] = updatedLatitude;
+            updateFields['longitude'] = updatedLongitude;
+          }
+          if (updatedLocationAddress != null && updatedLocationAddress.isNotEmpty) {
+            updateFields['locationAddress'] = updatedLocationAddress;
+          }
+        } else if (action == 'returnedToSpot') {
+          updateFields['careStatus'] = 'onStreet';
+          updateFields['careTakerId'] = null;
+          updateFields['careTakerName'] = null;
+          updateFields['careStartedAt'] = null;
+        } else if (action == 'rehomed') {
+          updateFields['careStatus'] = 'resolved';
+          updateFields['urgency'] = 'resolved';
+          updateFields['resolvedByAction'] = action;
+          updateFields['resolvedAt'] = FieldValue.serverTimestamp();
+        }
+
+        await _firestore
+            .collection('sightings')
+            .doc(sightingId)
+            .update(updateFields);
+      }
+    } catch (e) {
+      debugPrint('Parent sighting update notice: $e');
+    }
+
+    // 4. Calculate XP and check if direct award (reporter) or pending confirmation (community rescuer)
+    final isOngoingAction = action == 'fed' || action == 'stillHere' || action == 'moved' || action == 'notHere';
+    final isReporter = uid == reporterId;
+    int effectiveXp = xp;
+    Map<String, dynamic> existingCooldowns = {};
+
+    // Check 2-hour spot cooldown on ongoing actions (feeding / presence checks)
+    if (user != null && !anonymous) {
+      try {
+        final userDoc = await _firestore.collection('users').doc(uid).get();
+        final userData = userDoc.data() ?? {};
+        final rawCooldowns = (userData['spotCooldowns'] as Map<String, dynamic>?) ?? {};
+        existingCooldowns = Map<String, dynamic>.from(rawCooldowns);
+
+        final lastSpotTimestamp = existingCooldowns[sightingId] ?? userData['spotCooldowns.$sightingId'];
+        DateTime? lastSpotUpdate;
+        if (lastSpotTimestamp is Timestamp) {
+          lastSpotUpdate = lastSpotTimestamp.toDate();
+        } else if (lastSpotTimestamp is String) {
+          lastSpotUpdate = DateTime.tryParse(lastSpotTimestamp);
+        }
+
+        if (lastSpotUpdate != null && DateTime.now().difference(lastSpotUpdate).inMinutes < 120) {
+          if (isOngoingAction) {
+            effectiveXp = 0; // On 2-hour cooldown for this spot
+          }
+        }
+      } catch (e) {
+        debugPrint('Spot cooldown check notice: $e');
+      }
+    }
+
+    // Attach confirmation state and pending XP to the update document
+    docData['isReporterConfirmed'] = isReporter;
+    docData['pendingXp'] = effectiveXp;
+    if (isReporter) {
+      docData['confirmedBy'] = uid;
+      docData['confirmedAt'] = FieldValue.serverTimestamp();
+    }
+
+    // 1. Post update to community feed
     await _firestore
         .collection('sightings')
         .doc(sightingId)
         .collection('updates')
         .add(docData);
 
-    // 2. Update parent Sighting document with real-time freshness and roaming coordinates
-    try {
-      final updateFields = <String, dynamic>{
-        'lastSeenAt': FieldValue.serverTimestamp(),
-        'lastSeenStatus': action,
-      };
-      if (customNote != null && customNote.trim().isNotEmpty) {
-        updateFields['lastSeenNote'] = customNote.trim();
-      }
-      if (updatedLatitude != null && updatedLongitude != null) {
-        updateFields['updatedLatitude'] = updatedLatitude;
-        updateFields['updatedLongitude'] = updatedLongitude;
-      }
-      if (updatedLocationAddress != null && updatedLocationAddress.isNotEmpty) {
-        updateFields['updatedLocationAddress'] = updatedLocationAddress;
-      }
-      await _firestore
-          .collection('sightings')
-          .doc(sightingId)
-          .update(updateFields);
-    } catch (e) {
-      debugPrint('Parent sighting last-seen update notice: $e');
-    }
-
-    // 3. Auto-resolve one-time tasks when core goals are completed (e.g. rehomed, vet for injured)
-    try {
-      final sightingDoc =
-          await _firestore.collection('sightings').doc(sightingId).get();
-      if (sightingDoc.exists) {
-        final cat = sightingDoc.data()?['category']?.toString() ?? '';
-        final shouldAutoResolve = markResolved ||
-            action == 'rehomed' ||
-            (action == 'vet' &&
-                (cat == 'Injured' || cat == 'Needs Vet')) ||
-            (action == 'tookIn' &&
-                (cat == 'Urgent Rescue' || cat == 'Kitten')) ||
-            (action == 'sheltered' &&
-                (cat == 'Urgent Rescue' || cat == 'Needs Foster'));
-
-        if (shouldAutoResolve) {
-          await _firestore.collection('sightings').doc(sightingId).update({
-            'urgency': 'resolved',
-            'resolvedByAction': action,
-            'resolvedAt': FieldValue.serverTimestamp(),
-          });
-        }
-      }
-    } catch (e) {
-      debugPrint('Auto-resolve check notice: $e');
-    }
-
-    // 4. Award XP with anti-farming cooldown (2h cooldown per unique sighting report)
-    final isRoamingAction = action == 'stillHere' || action == 'moved' || action == 'notHere';
-    int effectiveXp = xp;
-
-    if (user != null && !anonymous) {
+    // If reporter logged their own action and eligible for XP: award immediately
+    if (user != null && !anonymous && isReporter) {
       try {
         final userDocRef = _firestore.collection('users').doc(uid);
-        final userDoc = await userDocRef.get();
-        final userData = userDoc.data() ?? {};
-
-        if (isRoamingAction) {
-          final now = DateTime.now();
-
-          // Check spot cooldown (2 hours per specific sighting)
-          final spotCooldowns = (userData['spotCooldowns'] as Map<String, dynamic>?) ?? {};
-          final lastSpotTimestamp = spotCooldowns[sightingId];
-          DateTime? lastSpotUpdate;
-          if (lastSpotTimestamp is Timestamp) {
-            lastSpotUpdate = lastSpotTimestamp.toDate();
-          } else if (lastSpotTimestamp is String) {
-            lastSpotUpdate = DateTime.tryParse(lastSpotTimestamp);
-          }
-
-          final isSpotOnCooldown = lastSpotUpdate != null && now.difference(lastSpotUpdate).inMinutes < 120;
-
-          if (isSpotOnCooldown) {
-            effectiveXp = 0; // Already collected XP for this specific cat recently
-          } else {
-            // Award full XP and record cooldown for this specific cat
-            await userDocRef.set({
-              'xp': FieldValue.increment(effectiveXp),
-              'spotCooldowns': {
-                ...spotCooldowns,
-                sightingId: FieldValue.serverTimestamp(),
-              },
-              'lastActive': FieldValue.serverTimestamp(),
-            }, SetOptions(merge: true));
-          }
-        } else {
-          // Major rescue action (Took In, Vet, Rehomed, etc.) - uncapped
-          await userDocRef.set({
-            'xp': FieldValue.increment(effectiveXp),
-            'lastActive': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
+        final updates = <String, dynamic>{
+          'lastActive': FieldValue.serverTimestamp(),
+        };
+        if (effectiveXp > 0) {
+          updates['xp'] = FieldValue.increment(effectiveXp);
         }
+        if (isOngoingAction) {
+          existingCooldowns[sightingId] = FieldValue.serverTimestamp();
+          updates['spotCooldowns'] = existingCooldowns;
+        }
+        await userDocRef.set(updates, SetOptions(merge: true));
       } catch (e) {
-        debugPrint('XP update notice: $e');
+        debugPrint('Direct reporter XP award notice: $e');
       }
     }
 
-    return effectiveXp;
+    return isReporter ? effectiveXp : 0;
   }
 
-  /// Reporter confirms a community rescue action with a verified checkmark
-  Future<void> confirmRescueAction(String sightingId, String updateId) async {
+  /// Reporter confirms a community rescue action with a verified checkmark & awards pending XP
+  Future<int> confirmRescueAction(String sightingId, String updateId) async {
     final user = _auth.currentUser;
-    if (user == null) return;
-    await _firestore
-        .collection('sightings')
-        .doc(sightingId)
-        .collection('updates')
-        .doc(updateId)
-        .update({
-      'isReporterConfirmed': true,
-      'confirmedBy': user.uid,
-      'confirmedAt': FieldValue.serverTimestamp(),
-    });
+    if (user == null) return 0;
+
+    try {
+      final updateRef = _firestore
+          .collection('sightings')
+          .doc(sightingId)
+          .collection('updates')
+          .doc(updateId);
+
+      final updateDoc = await updateRef.get();
+      if (!updateDoc.exists) return 0;
+      final data = updateDoc.data() ?? {};
+      if (data['isReporterConfirmed'] == true) return 0;
+
+      final authorId = data['authorId']?.toString() ?? '';
+      final action = data['action']?.toString() ?? '';
+      final isOngoingAction = action == 'fed' || action == 'stillHere' || action == 'moved' || action == 'notHere';
+      final pendingXp = (data['pendingXp'] is num)
+          ? (data['pendingXp'] as num).toInt()
+          : (action == 'fed'
+              ? 30
+              : (action == 'vet'
+                  ? 100
+                  : (action == 'tookIn'
+                      ? 150
+                      : (action == 'rehomed' ? 200 : 15))));
+
+      // 1. Mark as verified by reporter
+      await updateRef.update({
+        'isReporterConfirmed': true,
+        'confirmedBy': user.uid,
+        'confirmedAt': FieldValue.serverTimestamp(),
+      });
+
+      // 2. Award pending XP to the rescuer and apply spot cooldown
+      if (authorId.isNotEmpty && authorId != 'anon') {
+        final authorDoc = await _firestore.collection('users').doc(authorId).get();
+        final authorData = authorDoc.data() ?? {};
+        final authorCooldowns = Map<String, dynamic>.from((authorData['spotCooldowns'] as Map<String, dynamic>?) ?? {});
+        final updates = <String, dynamic>{
+          'lastActive': FieldValue.serverTimestamp(),
+        };
+        if (pendingXp > 0) {
+          updates['xp'] = FieldValue.increment(pendingXp);
+        }
+        if (isOngoingAction) {
+          authorCooldowns[sightingId] = FieldValue.serverTimestamp();
+          updates['spotCooldowns'] = authorCooldowns;
+        }
+        await _firestore.collection('users').doc(authorId).set(updates, SetOptions(merge: true));
+      }
+
+      return pendingXp;
+    } catch (e) {
+      debugPrint('Confirm rescue action notice: $e');
+      return 0;
+    }
   }
 
   /// Claim "I'm on my way" rescue button

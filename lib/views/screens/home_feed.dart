@@ -923,7 +923,39 @@ class _HomeScreenState extends State<HomeScreen>
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 8),
-                      if (data.rescueClaimed && data.urgency != 'resolved') ...[
+                      if (data.isInCare) ...[
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3.5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF673AB7).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                                color: const Color(0xFF673AB7).withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(data.careIcon,
+                                  size: 12, color: const Color(0xFF673AB7)),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  '${data.careLabel} • with ${data.careTakerName?.isNotEmpty == true ? data.careTakerName : "Rescuer"}',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: const Color(0xFF673AB7),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else if (data.rescueClaimed && data.urgency != 'resolved') ...[
                         Container(
                           margin: const EdgeInsets.only(bottom: 6),
                           padding: const EdgeInsets.symmetric(
@@ -1000,6 +1032,10 @@ class _HomeScreenState extends State<HomeScreen>
       statusColor = _resolved;
       statusLabel = 'Resolved';
       statusIcon = Icons.check_circle;
+    } else if (data.isInCare) {
+      statusColor = const Color(0xFF673AB7);
+      statusLabel = data.careLabel;
+      statusIcon = data.careIcon;
     } else if (data.rescueClaimed) {
       statusColor = _lavender;
       statusLabel = 'On The Way';

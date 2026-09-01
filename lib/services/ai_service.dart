@@ -133,6 +133,24 @@ class AiValidationService {
     'anime',
   };
 
+  // Screen / Monitor Recapture (Taking photos of computer, TV, or phone screens)
+  static final Set<String> _screenRecaptureKeywords = {
+    'computer monitor',
+    'monitor',
+    'display device',
+    'television',
+    'screen',
+    'flat panel display',
+    'laptop',
+    'tablet computer',
+    'lcd screen',
+    'led display',
+    'computer keyboard',
+    'multimedia',
+    'screenshot',
+    'webpage',
+  };
+
   // Specific Non-Cat Small Mammals (Ferrets, Weasels, Rodents, Rabbits)
   static final Set<String> _nonCatSmallMammals = {
     'ferret',
@@ -231,16 +249,19 @@ class AiValidationService {
       bool nonCatSmallMammalFound = false;
       bool dogFound = false;
       bool rescueContextFound = false;
+      bool screenRecaptureFound = false;
 
       double highestCatConf = 0.0;
       double highestSyntheticConf = 0.0;
       double highestNonCatMammalConf = 0.0;
       double highestDogConf = 0.0;
+      double highestScreenConf = 0.0;
 
       String matchedCatLabel = '';
       String matchedSyntheticLabel = '';
       String matchedNonCatMammalLabel = '';
       String matchedDogLabel = '';
+      String matchedScreenLabel = '';
 
       for (final label in labels) {
         final textLower = label.label.toLowerCase().trim();
@@ -292,12 +313,35 @@ class AiValidationService {
           }
         }
 
-        // 5. Rescue Context (Box, Cardboard, Fur, Ear)
+        // 5. Screen / Monitor Recapture
+        for (final screenKey in _screenRecaptureKeywords) {
+          if (textLower == screenKey || textLower.contains(screenKey)) {
+            screenRecaptureFound = true;
+            if (label.confidence > highestScreenConf) {
+              highestScreenConf = label.confidence;
+              matchedScreenLabel = label.label;
+            }
+          }
+        }
+
+        // 6. Rescue Context (Box, Cardboard, Fur, Ear)
         for (final contextKey in _rescueContextKeywords) {
           if (textLower == contextKey || textLower.contains(contextKey)) {
             rescueContextFound = true;
           }
         }
+      }
+
+      // Check 0: Reject Screen Recapture / Photos of digital monitors
+      if (screenRecaptureFound && highestScreenConf >= 0.55 && highestScreenConf > highestCatConf) {
+        return CatValidationResult(
+          isCat: false,
+          confidence: highestScreenConf,
+          primaryLabel: matchedScreenLabel,
+          detectedLabels: detectedNames,
+          message:
+              'Photo appears to be taken of a computer/phone screen or monitor (Detected: $matchedScreenLabel 🖥️). Please upload a direct photo of the cat.',
+        );
       }
 
       // Check 1: Reject Synthetic / Toys / Cartoons
@@ -402,16 +446,19 @@ class AiValidationService {
       bool nonCatSmallMammalFound = false;
       bool dogFound = false;
       bool rescueContextFound = false;
+      bool screenRecaptureFound = false;
 
       double highestCatConf = 0.0;
       double highestSyntheticConf = 0.0;
       double highestNonCatMammalConf = 0.0;
       double highestDogConf = 0.0;
+      double highestScreenConf = 0.0;
 
       String matchedCatLabel = '';
       String matchedSyntheticLabel = '';
       String matchedNonCatMammalLabel = '';
       String matchedDogLabel = '';
+      String matchedScreenLabel = '';
 
       // Action-specific matching
       bool actionCuesFound = false;
@@ -505,20 +552,46 @@ class AiValidationService {
           }
         }
 
-        // 5. Rescue Context
+        // 5. Screen / Monitor Recapture
+        for (final screenKey in _screenRecaptureKeywords) {
+          if (textLower == screenKey || textLower.contains(screenKey)) {
+            screenRecaptureFound = true;
+            if (label.confidence > highestScreenConf) {
+              highestScreenConf = label.confidence;
+              matchedScreenLabel = label.label;
+            }
+          }
+        }
+
+        // 6. Rescue Context
         for (final contextKey in _rescueContextKeywords) {
           if (textLower == contextKey || textLower.contains(contextKey)) {
             rescueContextFound = true;
           }
         }
 
-        // 6. Action-specific match
+        // 7. Action-specific match
         for (final actionKey in targetActionSet) {
           if (textLower == actionKey || textLower.contains(actionKey)) {
             actionCuesFound = true;
             matchedActionCue = label.label;
           }
         }
+      }
+
+      // Check 0: Reject Screen Recapture / Photos of digital monitors
+      if (screenRecaptureFound && highestScreenConf >= 0.55 && highestScreenConf > highestCatConf) {
+        return RescueActionValidationResult(
+          isValid: false,
+          isCat: false,
+          actionProofMatched: false,
+          confidence: highestScreenConf,
+          primaryLabel: matchedScreenLabel,
+          matchedActionDetail: '',
+          detectedLabels: detectedNames,
+          message:
+              'Photo appears to be taken of a computer/phone screen ($matchedScreenLabel 🖥️). Please upload a direct photo of the cat.',
+        );
       }
 
       // Check 1: Reject Synthetic / Toys / Cartoons
@@ -532,7 +605,7 @@ class AiValidationService {
           matchedActionDetail: '',
           detectedLabels: detectedNames,
           message:
-              'Fake proof rejected: Detected toy/cartoon/plush ($matchedSyntheticLabel 🧸). Real living cat proof is required.',
+              'Photo shows a toy or synthetic cat ($matchedSyntheticLabel 🧸). Real living cat proof required.',
         );
       }
 

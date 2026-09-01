@@ -28,6 +28,11 @@ class Sighting {
   final double? updatedLatitude;
   final double? updatedLongitude;
   final String? updatedLocationAddress;
+  final String? careStatus; // 'onStreet', 'inCare_vet', 'inCare_foster', 'inCare_shelter'
+  final String? careTakerId;
+  final String? careTakerName;
+  final DateTime? careStartedAt;
+  final String? resolvedByAction; // 'sheltered', 'rehomed', 'returnedToSpot', etc.
 
   const Sighting({
     required this.id,
@@ -55,7 +60,31 @@ class Sighting {
     this.updatedLatitude,
     this.updatedLongitude,
     this.updatedLocationAddress,
+    this.careStatus,
+    this.careTakerId,
+    this.careTakerName,
+    this.careStartedAt,
+    this.resolvedByAction,
   });
+
+  bool get isInCare =>
+      careStatus != null &&
+      careStatus!.startsWith('inCare_') &&
+      urgency != 'resolved';
+
+  String get careLabel {
+    if (careStatus == 'inCare_vet') return 'At Vet Clinic';
+    if (careStatus == 'inCare_foster') return 'In Foster Care';
+    if (careStatus == 'inCare_shelter') return 'In Shelter';
+    return '';
+  }
+
+  IconData get careIcon {
+    if (careStatus == 'inCare_vet') return Icons.local_hospital_rounded;
+    if (careStatus == 'inCare_foster') return Icons.home_rounded;
+    if (careStatus == 'inCare_shelter') return Icons.domain_rounded;
+    return Icons.favorite_rounded;
+  }
 
   bool get isRescueClaimExpired {
     if (!rescueClaimed || rescueClaimedAt == null) return false;
@@ -158,8 +187,13 @@ class Sighting {
     return parts.last;
   }
 
+  bool get isSheltered =>
+      resolvedByAction == 'sheltered' ||
+      lastSeenStatus == 'sheltered' ||
+      careStatus == 'inCare_shelter';
+
   String get displayLocation {
-    if (urgency == 'resolved') {
+    if (urgency == 'resolved' && !isSheltered) {
       return extractCityOnly(locationAddress);
     }
     return locationAddress;
@@ -237,7 +271,7 @@ class Sighting {
       updatedLocationAddress ?? locationAddress;
 
   String get effectiveDisplayLocation {
-    if (urgency == 'resolved') {
+    if (urgency == 'resolved' && !isSheltered) {
       return Sighting.extractCityOnly(effectiveLocationAddress);
     }
     return effectiveLocationAddress;
@@ -322,6 +356,11 @@ class Sighting {
       'updatedLatitude': updatedLatitude,
       'updatedLongitude': updatedLongitude,
       'updatedLocationAddress': updatedLocationAddress,
+      'careStatus': careStatus,
+      'careTakerId': careTakerId,
+      'careTakerName': careTakerName,
+      'careStartedAt': careStartedAt != null ? Timestamp.fromDate(careStartedAt!) : null,
+      'resolvedByAction': resolvedByAction,
     };
   }
 
@@ -350,6 +389,13 @@ class Sighting {
       parsedRescueClaimedAt = (data['rescueClaimedAt'] as Timestamp).toDate();
     } else if (data['rescueClaimedAt'] is String) {
       parsedRescueClaimedAt = DateTime.tryParse(data['rescueClaimedAt']);
+    }
+
+    DateTime? parsedCareStartedAt;
+    if (data['careStartedAt'] is Timestamp) {
+      parsedCareStartedAt = (data['careStartedAt'] as Timestamp).toDate();
+    } else if (data['careStartedAt'] is String) {
+      parsedCareStartedAt = DateTime.tryParse(data['careStartedAt']);
     }
 
     final rawPhotos = data['photoUrls'];
@@ -400,6 +446,11 @@ class Sighting {
           ? (data['updatedLongitude'] as num).toDouble()
           : null,
       updatedLocationAddress: data['updatedLocationAddress']?.toString(),
+      careStatus: data['careStatus']?.toString(),
+      careTakerId: data['careTakerId']?.toString(),
+      careTakerName: data['careTakerName']?.toString(),
+      careStartedAt: parsedCareStartedAt,
+      resolvedByAction: data['resolvedByAction']?.toString(),
     );
   }
 }
