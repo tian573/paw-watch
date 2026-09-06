@@ -33,6 +33,36 @@ class Sighting {
   final String? careTakerName;
   final DateTime? careStartedAt;
   final String? resolvedByAction; // 'sheltered', 'rehomed', 'returnedToSpot', etc.
+  final String? pendingHandoverRescuerId;
+  final String? pendingHandoverRescuerName;
+  final String? pendingHandoverUpdateId;
+  final String? carePlanGoal;
+  final int carePlanDurationDays;
+  final List<int> careMilestoneDays;
+  final List<String> customMilestoneTitles;
+  final List<int> completedMilestones;
+  final String? latestCondition;
+  final DateTime? lastCheckInAt;
+  final String? pendingOutcomeAction; // 'rehomed', 'returnedToSpot'
+  final String? pendingOutcomeNote;
+  final String? pendingOutcomeProofUrl;
+  final String? pendingOutcomeUpdateId;
+  final List<String> declinedFosterUserIds;
+  final bool hasVetVisitFlag;
+  final DateTime? lastVetVisitAt;
+  final List<String> healthTags;
+  final String? shelterOrClinicName;
+  final String? adoptionContact;
+  final String? pendingVetRescuerId;
+  final String? pendingVetRescuerName;
+  final String? pendingVetProofUrl;
+  final String? pendingVetClinicName;
+  final String? pendingVetNote;
+  final String? pendingVetUpdateId;
+  final String? lastVetRescuerId;
+  final String? lastVetRescuerName;
+  final bool isCommunityFosterRequested;
+  final bool isOpenForAdoption;
 
   const Sighting({
     required this.id,
@@ -65,12 +95,142 @@ class Sighting {
     this.careTakerName,
     this.careStartedAt,
     this.resolvedByAction,
+    this.pendingHandoverRescuerId,
+    this.pendingHandoverRescuerName,
+    this.pendingHandoverUpdateId,
+    this.carePlanGoal,
+    this.carePlanDurationDays = 7,
+    this.careMilestoneDays = const [],
+    this.customMilestoneTitles = const [],
+    this.completedMilestones = const [],
+    this.latestCondition,
+    this.lastCheckInAt,
+    this.pendingOutcomeAction,
+    this.pendingOutcomeNote,
+    this.pendingOutcomeProofUrl,
+    this.pendingOutcomeUpdateId,
+    this.declinedFosterUserIds = const [],
+    this.hasVetVisitFlag = false,
+    this.lastVetVisitAt,
+    this.healthTags = const [],
+    this.shelterOrClinicName,
+    this.adoptionContact,
+    this.pendingVetRescuerId,
+    this.pendingVetRescuerName,
+    this.pendingVetProofUrl,
+    this.pendingVetClinicName,
+    this.pendingVetNote,
+    this.pendingVetUpdateId,
+    this.lastVetRescuerId,
+    this.lastVetRescuerName,
+    this.isCommunityFosterRequested = false,
+    this.isOpenForAdoption = false,
   });
+
+  bool get isVetVisitPending =>
+      pendingVetRescuerId != null &&
+      pendingVetRescuerId!.isNotEmpty;
+
+  bool get isResolved => urgency == 'resolved';
+
+  bool get isAdoptionShowcase =>
+      !isResolved &&
+      (isOpenForAdoption ||
+          category == 'Needs Foster' ||
+          careStatus == 'inCare_shelter' ||
+          (healthTags.isNotEmpty && isInCare));
+
+  bool isFosterDeclinedFor(String? uid) =>
+      uid != null && uid.isNotEmpty && declinedFosterUserIds.contains(uid);
 
   bool get isInCare =>
       careStatus != null &&
-      careStatus!.startsWith('inCare_') &&
+      (careStatus == 'inCare_foster' || careStatus == 'inCare_shelter') &&
       urgency != 'resolved';
+
+  int get daysInCare {
+    final start = careStartedAt ?? createdAt;
+    final diff = DateTime.now().difference(start).inDays;
+    return diff < 0 ? 0 : diff;
+  }
+
+  int get effectiveDurationDays =>
+      carePlanDurationDays >= 3 ? carePlanDurationDays : 7;
+
+  List<int> get effectiveMilestoneDays {
+    if (careMilestoneDays.isNotEmpty) return careMilestoneDays;
+    return List.generate(effectiveDurationDays, (i) => i + 1);
+  }
+
+  DateTime? get careDeadline {
+    if (careStartedAt == null) return null;
+    return careStartedAt!.add(Duration(days: effectiveDurationDays));
+  }
+
+  int get daysRemainingUntilDeadline {
+    if (careDeadline == null) return effectiveDurationDays - daysInCare;
+    final diff = careDeadline!.difference(DateTime.now()).inDays;
+    return diff < 0 ? 0 : diff;
+  }
+
+  bool isMilestoneDone(int day) => completedMilestones.contains(day);
+
+  bool isMilestoneDue(int day) {
+    if (isMilestoneDone(day)) return false;
+    final idx = effectiveMilestoneDays.indexOf(day);
+    if (idx <= 0) return true;
+    final prevDay = effectiveMilestoneDays[idx - 1];
+    return isMilestoneDone(prevDay) || daysInCare >= (day - 1);
+  }
+
+  bool get isAllMilestonesCompleted =>
+      completedMilestones.length >= effectiveMilestoneDays.length;
+
+  bool get areOutcomesUnlocked => isAllMilestonesCompleted;
+
+  List<String> get effectiveMilestoneTitles {
+    final d = effectiveMilestoneDays.length;
+    if (customMilestoneTitles.isNotEmpty) {
+      return List.generate(d, (i) {
+        if (i < customMilestoneTitles.length &&
+            customMilestoneTitles[i].trim().isNotEmpty) {
+          return customMilestoneTitles[i].trim();
+        }
+        if (i == 0) return 'Intake, Quarantine & Safe Settle';
+        if (i == d - 1) return 'Final Target Outcome & Review';
+        return 'Day ${i + 1} Daily Care Check';
+      });
+    }
+
+    return List.generate(d, (i) {
+      if (i == 0) return 'Intake, Quarantine & Safe Settle';
+      if (i == d - 1) return 'Final Target Outcome & Review';
+      return 'Day ${i + 1} Daily Care Check';
+    });
+  }
+
+  bool get isMedicalOrTriagePriority {
+    final cat = category.toLowerCase();
+    if (cat == 'needs foster' ||
+        cat == 'rehomed' ||
+        cat == 'spotted' ||
+        cat == 'stray' ||
+        cat == 'feeding spot') {
+      return false;
+    }
+    return cat == 'injured' ||
+        cat == 'needs vet' ||
+        cat == 'trapped' ||
+        cat == 'urgent rescue' ||
+        cat == 'kitten' ||
+        (urgency == 'urgent');
+  }
+
+  bool get hasVetVisit =>
+      !isVetVisitPending &&
+      (hasVetVisitFlag ||
+          careStatus == 'inCare_vet' ||
+          resolvedByAction == 'vet');
 
   String get careLabel {
     if (careStatus == 'inCare_vet') return 'At Vet Clinic';
@@ -101,7 +261,89 @@ class Sighting {
     return rem > 0 ? rem : 0;
   }
 
-  String get status => urgency;
+  bool get isPendingVerification =>
+      isVetVisitPending ||
+      (pendingVetRescuerId != null && pendingVetRescuerId!.isNotEmpty) ||
+      (pendingHandoverRescuerId != null && pendingHandoverRescuerId!.isNotEmpty) ||
+      (pendingOutcomeAction != null && pendingOutcomeAction!.isNotEmpty);
+
+  bool get isAwaitingPostVetDecision =>
+      hasVetVisit &&
+      !isInCare &&
+      urgency != 'resolved' &&
+      resolvedByAction != 'returnedToSpot' &&
+      resolvedByAction != 'sheltered' &&
+      resolvedByAction != 'rehomed' &&
+      careStatus != 'onStreet' &&
+      careStatus != 'resolved' &&
+      careStatus != 'inCare_foster' &&
+      careStatus != 'inCare_shelter' &&
+      !isCommunityFosterRequested &&
+      (pendingHandoverRescuerId == null || pendingHandoverRescuerId!.isEmpty);
+
+  String get pendingVerificationDescription {
+    if (isVetVisitPending ||
+        (pendingVetRescuerId != null && pendingVetRescuerId!.isNotEmpty)) {
+      final name = pendingVetRescuerName?.isNotEmpty == true
+          ? pendingVetRescuerName!
+          : 'Rescuer';
+      return '$name submitted vet visit • Awaiting verification';
+    }
+    if (pendingHandoverRescuerId != null &&
+        pendingHandoverRescuerId!.isNotEmpty) {
+      final name = pendingHandoverRescuerName?.isNotEmpty == true
+          ? pendingHandoverRescuerName!
+          : 'Rescuer';
+      return '$name requested foster • Awaiting approval';
+    }
+    if (pendingOutcomeAction != null && pendingOutcomeAction!.isNotEmpty) {
+      return 'Outcome proof submitted • Awaiting review';
+    }
+    if (isAwaitingPostVetDecision) {
+      final name = lastVetRescuerName?.isNotEmpty == true
+          ? lastVetRescuerName!
+          : 'Rescuer';
+      return '$name verified vet visit • Next step on hold';
+    }
+    return 'Verification submitted • Awaiting review';
+  }
+
+  bool get isEligibleForRadialDispatch {
+    if (urgency == 'resolved' || isInCare) return false;
+    if (hasVetVisit || isVetVisitPending || isPendingVerification || isAwaitingPostVetDecision) return false;
+    if (rescueClaimed || isRescueClaimActive) return false;
+    if (rescueClaimedBy.isNotEmpty) return false;
+
+    final cat = category.toLowerCase();
+    if (cat == 'needs foster' ||
+        cat == 'rehomed' ||
+        cat == 'stray' ||
+        cat == 'stray cat' ||
+        cat == 'feeding spot' ||
+        cat == 'spotted') {
+      return false;
+    }
+
+    if (cat == 'kitten') {
+      return urgency == 'urgent';
+    }
+
+    return urgency == 'urgent' ||
+        category == 'Injured' ||
+        category == 'Needs Vet' ||
+        category == 'Urgent Rescue';
+  }
+
+  String get status {
+    if (urgency == 'resolved') return 'resolved';
+    if (isInCare && careStatus != null) return careStatus!;
+    if (isPendingVerification || isAwaitingPostVetDecision) return 'waiting';
+    if (rescueClaimed || isRescueClaimActive || rescueClaimedBy.isNotEmpty) {
+      return 'onTheWay';
+    }
+    if (hasVetVisit) return 'vetChecked';
+    return urgency;
+  }
 
   bool get isOneTimeTask =>
       category == 'Injured' ||
@@ -361,6 +603,30 @@ class Sighting {
       'careTakerName': careTakerName,
       'careStartedAt': careStartedAt != null ? Timestamp.fromDate(careStartedAt!) : null,
       'resolvedByAction': resolvedByAction,
+      'pendingHandoverRescuerId': pendingHandoverRescuerId,
+      'pendingHandoverRescuerName': pendingHandoverRescuerName,
+      'pendingHandoverUpdateId': pendingHandoverUpdateId,
+      'carePlanGoal': carePlanGoal,
+      'carePlanDurationDays': carePlanDurationDays,
+      'careMilestoneDays': careMilestoneDays,
+      'customMilestoneTitles': customMilestoneTitles,
+      'completedMilestones': completedMilestones,
+      'latestCondition': latestCondition,
+      'lastCheckInAt': lastCheckInAt != null ? Timestamp.fromDate(lastCheckInAt!) : null,
+      'pendingOutcomeAction': pendingOutcomeAction,
+      'pendingOutcomeNote': pendingOutcomeNote,
+      'pendingOutcomeProofUrl': pendingOutcomeProofUrl,
+      'pendingOutcomeUpdateId': pendingOutcomeUpdateId,
+      'declinedFosterUserIds': declinedFosterUserIds,
+      'pendingVetRescuerId': pendingVetRescuerId,
+      'pendingVetRescuerName': pendingVetRescuerName,
+      'pendingVetProofUrl': pendingVetProofUrl,
+      'pendingVetClinicName': pendingVetClinicName,
+      'pendingVetNote': pendingVetNote,
+      'pendingVetUpdateId': pendingVetUpdateId,
+      'lastVetRescuerId': lastVetRescuerId,
+      'lastVetRescuerName': lastVetRescuerName,
+      'isCommunityFosterRequested': isCommunityFosterRequested,
     };
   }
 
@@ -398,6 +664,20 @@ class Sighting {
       parsedCareStartedAt = DateTime.tryParse(data['careStartedAt']);
     }
 
+    DateTime? parsedLastCheckInAt;
+    if (data['lastCheckInAt'] is Timestamp) {
+      parsedLastCheckInAt = (data['lastCheckInAt'] as Timestamp).toDate();
+    } else if (data['lastCheckInAt'] is String) {
+      parsedLastCheckInAt = DateTime.tryParse(data['lastCheckInAt']);
+    }
+
+    DateTime? parsedLastVetVisitAt;
+    if (data['lastVetVisitAt'] is Timestamp) {
+      parsedLastVetVisitAt = (data['lastVetVisitAt'] as Timestamp).toDate();
+    } else if (data['lastVetVisitAt'] is String) {
+      parsedLastVetVisitAt = DateTime.tryParse(data['lastVetVisitAt']);
+    }
+
     final rawPhotos = data['photoUrls'];
     List<String> photos = [];
     if (rawPhotos is List) {
@@ -416,6 +696,29 @@ class Sighting {
         ? 'resolved'
         : rawUrgency;
 
+    final rawMilestones = data['completedMilestones'];
+    List<int> milestones = [];
+    if (rawMilestones is List) {
+      milestones = rawMilestones.map((e) => (e is num) ? e.toInt() : int.tryParse(e.toString()) ?? 0).where((m) => m > 0).toList();
+    }
+
+    final isPendingVet = data['pendingVetRescuerId'] != null &&
+        data['pendingVetRescuerId'].toString().isNotEmpty;
+
+    final hasVet = !isPendingVet &&
+        (data['hasVetVisitFlag'] == true ||
+            data['hasVetVisit'] == true ||
+            data['careStatus'] == 'inCare_vet' ||
+            data['resolvedByAction'] == 'vet');
+
+    final rawHealthTags = data['healthTags'];
+    List<String> healthTagsList = [];
+    if (rawHealthTags is List) {
+      healthTagsList = rawHealthTags.map((e) => e.toString()).toList();
+    } else if (hasVet) {
+      healthTagsList = ['Vet Checked'];
+    }
+
     return Sighting(
       id: id,
       title: data['title'] ?? '',
@@ -431,9 +734,11 @@ class Sighting {
       createdAt: parsedDate,
       commentCount: (data['commentCount'] is num) ? (data['commentCount'] as num).toInt() : 0,
       upvotes: (data['upvotes'] is num) ? (data['upvotes'] as num).toInt() : 0,
-      rescueClaimed: data['rescueClaimed'] == true,
-      rescueClaimedBy: data['rescueClaimedBy'] ?? '',
-      rescueClaimedByName: data['rescueClaimedByName'] ?? '',
+      rescueClaimed: data['rescueClaimed'] == true ||
+          (data['rescueClaimedBy'] != null &&
+              data['rescueClaimedBy'].toString().trim().isNotEmpty),
+      rescueClaimedBy: data['rescueClaimedBy']?.toString() ?? '',
+      rescueClaimedByName: data['rescueClaimedByName']?.toString() ?? '',
       rescueClaimedAt: parsedRescueClaimedAt,
       lastSeenAt: parsedLastSeen,
       lastSeenStatus: data['lastSeenStatus']?.toString(),
@@ -451,6 +756,56 @@ class Sighting {
       careTakerName: data['careTakerName']?.toString(),
       careStartedAt: parsedCareStartedAt,
       resolvedByAction: data['resolvedByAction']?.toString(),
+      pendingHandoverRescuerId: data['pendingHandoverRescuerId']?.toString(),
+      pendingHandoverRescuerName:
+          data['pendingHandoverRescuerName']?.toString(),
+      pendingHandoverUpdateId: data['pendingHandoverUpdateId']?.toString(),
+      carePlanGoal: data['carePlanGoal']?.toString(),
+      carePlanDurationDays: (data['carePlanDurationDays'] is num)
+          ? (data['carePlanDurationDays'] as num).toInt()
+          : 7,
+      careMilestoneDays: (data['careMilestoneDays'] is List)
+          ? (data['careMilestoneDays'] as List)
+              .map((e) => (e is num) ? e.toInt() : int.tryParse(e.toString()) ?? 0)
+              .where((m) => m > 0)
+              .toList()
+          : [],
+      customMilestoneTitles: (data['customMilestoneTitles'] is List)
+          ? (data['customMilestoneTitles'] as List)
+              .map((e) => e.toString())
+              .toList()
+          : [],
+      completedMilestones: milestones,
+      latestCondition: data['latestCondition']?.toString(),
+      lastCheckInAt: parsedLastCheckInAt,
+      pendingOutcomeAction: data['pendingOutcomeAction']?.toString(),
+      pendingOutcomeNote: data['pendingOutcomeNote']?.toString(),
+      pendingOutcomeProofUrl: data['pendingOutcomeProofUrl']?.toString(),
+      pendingOutcomeUpdateId: data['pendingOutcomeUpdateId']?.toString(),
+      declinedFosterUserIds: (data['declinedFosterUserIds'] is List)
+          ? (data['declinedFosterUserIds'] as List)
+              .map((e) => e.toString())
+              .toList()
+          : [],
+      hasVetVisitFlag: hasVet,
+      lastVetVisitAt: parsedLastVetVisitAt,
+      healthTags: healthTagsList,
+      shelterOrClinicName: data['shelterOrClinicName']?.toString(),
+      adoptionContact: data['adoptionContact']?.toString(),
+      pendingVetRescuerId: data['pendingVetRescuerId']?.toString(),
+      pendingVetRescuerName: data['pendingVetRescuerName']?.toString(),
+      pendingVetProofUrl: data['pendingVetProofUrl']?.toString(),
+      pendingVetClinicName: data['pendingVetClinicName']?.toString(),
+      pendingVetNote: data['pendingVetNote']?.toString(),
+      pendingVetUpdateId: data['pendingVetUpdateId']?.toString(),
+      lastVetRescuerId: data['lastVetRescuerId']?.toString() ??
+          (data['pendingVetRescuerId']?.toString().isNotEmpty == true
+              ? data['pendingVetRescuerId']?.toString()
+              : null),
+      lastVetRescuerName: data['lastVetRescuerName']?.toString() ??
+          data['pendingVetRescuerName']?.toString(),
+      isCommunityFosterRequested: data['isCommunityFosterRequested'] == true,
+      isOpenForAdoption: data['isOpenForAdoption'] == true,
     );
   }
 }

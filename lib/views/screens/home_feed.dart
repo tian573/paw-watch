@@ -5,10 +5,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/sighting.dart';
+import '../../models/user_profile.dart';
 import '../../services/firebase_service.dart';
 import '../../services/location_service.dart';
 import 'report_form.dart';
 import 'sighting_detail.dart';
+import 'profile_screen.dart';
+import 'conversations_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -21,6 +24,7 @@ class _HomeScreenState extends State<HomeScreen>
     with SingleTickerProviderStateMixin {
   static const Color _navy = Color(0xFF1B2A4A);
   static const Color _lavender = Color(0xFF9B8EC4);
+  static const Color _lavLight = Color(0xFFF3F0FA);
   static const Color _green = Color(0xFF7BBF5E);
   static const Color _bgWhite = Color(0xFFFAF9F7);
   static const Color _urgent = Color(0xFFE53935);
@@ -31,6 +35,8 @@ class _HomeScreenState extends State<HomeScreen>
   int _currentTab = 0;
   String _activeFilter = 'All';
   bool _showNewUserTip = false;
+  final Set<String> _dismissedDispatchIds = {};
+  final Set<String> _promptedVetDecisionSightingIds = {};
   double? _userLat;
   double? _userLng;
   late AnimationController _arrowAnimController;
@@ -90,6 +96,8 @@ class _HomeScreenState extends State<HomeScreen>
 
   final List<String> _filters = [
     'All',
+    'Adoption Showcase',
+    'Waiting',
     'Trapped',
     'Vulnerable',
     'Injured',
@@ -102,7 +110,12 @@ class _HomeScreenState extends State<HomeScreen>
     if (s.urgency == 'resolved' || s.status == 'resolved' || s.category == 'Resolved') {
       return 20;
     }
-    final isClaimed = s.rescueClaimed;
+    final isClaimed = s.rescueClaimed ||
+        s.isRescueClaimActive ||
+        s.rescueClaimedBy.isNotEmpty ||
+        s.isPendingVerification ||
+        s.isAwaitingPostVetDecision ||
+        s.isInCare;
     final int baseOffset = isClaimed ? 5 : 0;
 
     switch (s.category) {
@@ -128,6 +141,15 @@ class _HomeScreenState extends State<HomeScreen>
     List<Sighting> filtered;
     if (_activeFilter == 'All') {
       filtered = List<Sighting>.from(list);
+    } else if (_activeFilter == 'Adoption Showcase') {
+      filtered = list.where((s) => s.isAdoptionShowcase).toList();
+    } else if (_activeFilter == 'Waiting') {
+      filtered = list
+          .where((s) =>
+              s.isPendingVerification ||
+              s.isAwaitingPostVetDecision ||
+              s.status == 'waiting')
+          .toList();
     } else if (_activeFilter == 'Trapped') {
       filtered = list.where((s) => s.category == 'Urgent Rescue').toList();
     } else if (_activeFilter == 'Vulnerable') {
@@ -201,8 +223,8 @@ class _HomeScreenState extends State<HomeScreen>
                 _buildHomeTab(),
                 _buildPlaceholderTab('Map', Icons.map_outlined),
                 const SizedBox.shrink(),
-                _buildPlaceholderTab('Notifications', Icons.notifications_outlined),
-                _buildPlaceholderTab('Profile', Icons.person_outline),
+                const ConversationsScreen(),
+                const ProfileScreen(),
               ],
             ),
           ),
@@ -225,10 +247,56 @@ class _HomeScreenState extends State<HomeScreen>
             builder: (context, snapshot) {
               final allSightings = snapshot.data ?? [];
               final filtered = _filterAndSortSightings(allSightings);
+              final currentUid = FirebaseAuth.instance.currentUser?.uid;
+              final postVetDecisionSightings = allSightings
+                  .where((s) =>
+                      s.isAwaitingPostVetDecision &&
+                      currentUid != null &&
+                      (s.lastVetRescuerId == currentUid ||
+                          s.pendingVetRescuerId == currentUid ||
+                          (s.lastVetRescuerId == null && s.rescueClaimedBy == currentUid)))
+                  .toList();
+
+              if (postVetDecisionSightings.isNotEmpty) {
+                for (final s in postVetDecisionSightings) {
+                  if (!_promptedVetDecisionSightingIds.contains(s.id)) {
+                    _promptedVetDecisionSightingIds.add(s.id);
+                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                      if (mounted) {
+                        _showPostVetRescuerHomeDialog(s);
+                      }
+                    });
+                    break;
+                  }
+                }
+              }
+
+              final urgentDispatches = allSightings
+                  .where((s) =>
+                      s.isEligibleForRadialDispatch &&
+                      (currentUid == null || s.reporterId != currentUid) &&
+                      !_dismissedDispatchIds.contains(s.id))
+                  .toList();
 
               return CustomScrollView(
                 physics: const BouncingScrollPhysics(),
                 slivers: [
+                  if (postVetDecisionSightings.isNotEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                        child: _buildPostVetReminderBanner(
+                            postVetDecisionSightings.first),
+                      ),
+                    ),
+                  if (urgentDispatches.isNotEmpty)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                        child: _buildRadialDispatchAlertBanner(
+                            urgentDispatches.first),
+                      ),
+                    ),
                   SliverToBoxAdapter(child: _buildFilterChips()),
                   if (snapshot.connectionState == ConnectionState.waiting && allSightings.isEmpty)
                     const SliverToBoxAdapter(
@@ -379,38 +447,61 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildNotificationBell() {
-    return Stack(
-      children: [
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: _navy.withValues(alpha: 0.07),
-                blurRadius: 8,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Icon(Icons.notifications_outlined, color: _navy, size: 22),
-        ),
-        Positioned(
-          top: 6,
-          right: 6,
-          child: Container(
-            width: 9,
-            height: 9,
+    return GestureDetector(
+      onTap: _showNotificationsModal,
+      behavior: HitTestBehavior.opaque,
+      child: Stack(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
             decoration: BoxDecoration(
-              color: _lavender,
+              color: Colors.white,
               shape: BoxShape.circle,
-              border: Border.all(color: _bgWhite, width: 1.5),
+              boxShadow: [
+                BoxShadow(
+                  color: _navy.withValues(alpha: 0.07),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: Icon(Icons.notifications_outlined, color: _navy, size: 22),
+          ),
+          Positioned(
+            top: 6,
+            right: 6,
+            child: Container(
+              width: 9,
+              height: 9,
+              decoration: BoxDecoration(
+                color: _lavender,
+                shape: BoxShape.circle,
+                border: Border.all(color: _bgWhite, width: 1.5),
+              ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  void _showNotificationsModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        height: MediaQuery.of(ctx).size.height * 0.85,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
-      ],
+        child: ClipRRect(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+          child: _buildDispatchAndNotificationsTab(),
+        ),
+      ),
     );
   }
 
@@ -441,75 +532,113 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildUserXpWidget(String initials) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: _lavender.withValues(alpha: 0.2),
-                shape: BoxShape.circle,
-                border: Border.all(color: _lavender, width: 2),
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid ?? 'anon';
+
+    return StreamBuilder<UserProfile>(
+      stream: FirebaseService.instance.streamUserProfile(uid),
+      builder: (context, snapshot) {
+        final profile = snapshot.data ??
+            UserProfile(
+              uid: uid,
+              displayName: user?.displayName ?? 'PawWatcher',
+              email: user?.email ?? '',
+              joinedAt: DateTime.now(),
+            );
+
+        return GestureDetector(
+          onTap: () => setState(() => _currentTab = 4),
+          behavior: HitTestBehavior.opaque,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: profile.trustTierColor.withValues(alpha: 0.18),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: profile.trustTierColor, width: 2),
+                    ),
+                    child: Center(
+                      child: Text(
+                        profile.initials,
+                        style: GoogleFonts.nunito(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: profile.trustTierColor,
+                        ),
+                      ),
+                    ),
+                  ),
+                  Positioned(
+                    bottom: -3,
+                    right: -3,
+                    child: Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: profile.trustTierColor,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Lv.${profile.level}',
+                        style: GoogleFonts.nunito(
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
-              child: Center(
-                child: Text(
-                  initials,
-                  style: GoogleFonts.nunito(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: _lavender,
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.star_rounded, size: 11, color: const Color(0xFFFFA000)),
+                  const SizedBox(width: 1),
+                  Text(
+                    profile.trustScore.toStringAsFixed(1),
+                    style: GoogleFonts.nunito(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w800,
+                      color: _navy.withValues(alpha: 0.75),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${profile.totalXp} XP',
+                    style: GoogleFonts.nunito(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
+                      color: _navy.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 2),
+              SizedBox(
+                width: 58,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: profile.levelProgress,
+                    minHeight: 4,
+                    backgroundColor: _lavLight,
+                    valueColor:
+                        AlwaysStoppedAnimation<Color>(profile.trustTierColor),
                   ),
                 ),
               ),
-            ),
-            Positioned(
-              bottom: -4,
-              right: -4,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                decoration: BoxDecoration(
-                  color: _lavender,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  'Lv.4',
-                  style: GoogleFonts.nunito(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w800,
-                    color: Colors.white,
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Text(
-          '640 / 800 XP',
-          style: GoogleFonts.nunito(
-            fontSize: 9,
-            fontWeight: FontWeight.w700,
-            color: _navy.withValues(alpha: 0.6),
+            ],
           ),
-        ),
-        const SizedBox(height: 2),
-        SizedBox(
-          width: 60,
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: 640 / 800,
-              minHeight: 5,
-              backgroundColor: _lavender.withValues(alpha: 0.2),
-              valueColor: AlwaysStoppedAnimation<Color>(_lavender),
-            ),
-          ),
-        ),
-      ],
+        );
+      },
     );
   }
 
@@ -747,6 +876,14 @@ class _HomeScreenState extends State<HomeScreen>
     IconData? chipIcon;
 
     switch (label) {
+      case 'Adoption Showcase':
+        chipColor = const Color(0xFF673AB7);
+        chipIcon = Icons.volunteer_activism_rounded;
+        break;
+      case 'Waiting':
+        chipColor = const Color(0xFFF57C00);
+        chipIcon = Icons.hourglass_top_rounded;
+        break;
       case 'Trapped':
         chipColor = const Color(0xFFFF5722);
         chipIcon = Icons.warning_amber_rounded;
@@ -923,7 +1060,70 @@ class _HomeScreenState extends State<HomeScreen>
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 8),
-                      if (data.isInCare) ...[
+                      if (data.isAdoptionShowcase) ...[
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3.5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF673AB7).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                                color: const Color(0xFF673AB7).withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.volunteer_activism_rounded,
+                                  size: 12, color: Color(0xFF673AB7)),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  data.shelterOrClinicName?.isNotEmpty == true
+                                      ? '🏡 Ready for Home • ${data.shelterOrClinicName}'
+                                      : (data.isSheltered
+                                          ? '🏛️ Sheltered • Ready for Adoption'
+                                          : '🏡 Ready for Foster / Adoption'),
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: const Color(0xFF673AB7),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (data.healthTags.isNotEmpty) ...[
+                          Wrap(
+                            spacing: 4,
+                            runSpacing: 4,
+                            children: data.healthTags.take(3).map((tag) {
+                              return Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF2E7D32).withValues(alpha: 0.09),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                      color: const Color(0xFF2E7D32).withValues(alpha: 0.25)),
+                                ),
+                                child: Text(
+                                  tag,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: const Color(0xFF2E7D32),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 6),
+                        ],
+                      ] else if (data.isInCare) ...[
                         Container(
                           margin: const EdgeInsets.only(bottom: 6),
                           padding: const EdgeInsets.symmetric(
@@ -947,6 +1147,38 @@ class _HomeScreenState extends State<HomeScreen>
                                     fontSize: 11,
                                     fontWeight: FontWeight.w800,
                                     color: const Color(0xFF673AB7),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else if (data.isPendingVerification || data.isAwaitingPostVetDecision) ...[
+                        Container(
+                          margin: const EdgeInsets.only(bottom: 6),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3.5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF57C00).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                                color: const Color(0xFFF57C00).withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.hourglass_top_rounded,
+                                  size: 12, color: Color(0xFFF57C00)),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  data.pendingVerificationDescription,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    color: const Color(0xFFF57C00),
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -1036,10 +1268,29 @@ class _HomeScreenState extends State<HomeScreen>
       statusColor = const Color(0xFF673AB7);
       statusLabel = data.careLabel;
       statusIcon = data.careIcon;
-    } else if (data.rescueClaimed) {
+    } else if (data.isPendingVerification ||
+        data.isAwaitingPostVetDecision ||
+        data.status == 'waiting' ||
+        data.isVetVisitPending ||
+        (data.pendingVetRescuerId != null &&
+            data.pendingVetRescuerId!.isNotEmpty) ||
+        (data.pendingHandoverRescuerId != null &&
+            data.pendingHandoverRescuerId!.isNotEmpty) ||
+        (data.pendingOutcomeAction != null &&
+            data.pendingOutcomeAction!.isNotEmpty)) {
+      statusColor = const Color(0xFFF57C00);
+      statusLabel = 'Waiting';
+      statusIcon = Icons.hourglass_top_rounded;
+    } else if (data.rescueClaimed ||
+        data.isRescueClaimActive ||
+        data.rescueClaimedBy.isNotEmpty) {
       statusColor = _lavender;
       statusLabel = 'On The Way';
       statusIcon = Icons.directions_run;
+    } else if (data.hasVetVisit) {
+      statusColor = const Color(0xFF2E7D32);
+      statusLabel = 'Vet Checked';
+      statusIcon = Icons.verified_rounded;
     } else if (data.status == 'urgent' || data.urgency == 'urgent') {
       statusColor = _urgent;
       statusLabel = 'Urgent';
@@ -1271,9 +1522,23 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   List<Widget> _buildActionButtons(Sighting data) {
-    final Color outlineColor = data.status == 'urgent'
-        ? _urgent
-        : (data.status == 'resolved' ? _resolved : _needsHelp);
+    final Color outlineColor = (data.status == 'resolved' || data.urgency == 'resolved')
+        ? _resolved
+        : (data.isPendingVerification ||
+                data.isAwaitingPostVetDecision ||
+                data.status == 'waiting')
+            ? const Color(0xFFF57C00)
+            : data.isInCare
+                ? const Color(0xFF673AB7)
+                : (data.rescueClaimed ||
+                        data.isRescueClaimActive ||
+                        data.rescueClaimedBy.isNotEmpty)
+                    ? _lavender
+                    : (data.hasVetVisit)
+                        ? const Color(0xFF2E7D32)
+                        : ((data.status == 'urgent' || data.urgency == 'urgent')
+                            ? _urgent
+                            : _needsHelp);
 
     return [
       GestureDetector(
@@ -1366,8 +1631,8 @@ class _HomeScreenState extends State<HomeScreen>
               _buildNavItem(0, Icons.home_rounded, Icons.home_outlined, 'Home'),
               _buildNavItem(1, Icons.map_rounded, Icons.map_outlined, 'Map'),
               const SizedBox(width: 60),
-              _buildNavItemWithBadge(3, Icons.notifications_rounded,
-                  Icons.notifications_outlined, 'Notifications'),
+              _buildNavItemWithBadge(3, Icons.chat_bubble_rounded,
+                  Icons.chat_bubble_outline_rounded, 'Chats'),
               _buildNavItem(
                   4, Icons.person_rounded, Icons.person_outlined, 'Profile'),
             ],
@@ -1460,6 +1725,799 @@ class _HomeScreenState extends State<HomeScreen>
     Navigator.push(
       context,
       MaterialPageRoute(builder: (_) => const ReportFormScreen()),
+    );
+  }
+
+  Widget _buildPostVetReminderBanner(Sighting s) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            const Color(0xFFF57C00).withValues(alpha: 0.14),
+            const Color(0xFFFFA000).withValues(alpha: 0.08),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFFF57C00).withValues(alpha: 0.45),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFF57C00).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE65100),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.celebration_rounded,
+                        color: Colors.white, size: 13),
+                    const SizedBox(width: 4),
+                    Text(
+                      'VET VISIT VERIFIED',
+                      style: GoogleFonts.nunito(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFA000).withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '+100 XP',
+                  style: GoogleFonts.nunito(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w900,
+                    color: const Color(0xFFE65100),
+                  ),
+                ),
+              ),
+              const Spacer(),
+              InkWell(
+                onTap: () => _showPostVetRescuerHomeDialog(s),
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(Icons.open_in_new_rounded,
+                      size: 18, color: const Color(0xFFE65100).withValues(alpha: 0.7)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Text(
+            '${s.title.isNotEmpty ? s.title : "Cat Rescue"} • Next Step On Hold',
+            style: GoogleFonts.nunito(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w900,
+              color: _navy,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            'Reporter verified the vet visit! You have physical custody of this cat. Please decide whether to foster, transfer to a shelter, or safe release.',
+            style: GoogleFonts.nunito(
+              fontSize: 11.5,
+              color: _navy.withValues(alpha: 0.75),
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFE65100),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                  ),
+                  onPressed: () => _showPostVetRescuerHomeDialog(s),
+                  icon: const Icon(Icons.touch_app_rounded, size: 16),
+                  label: Text(
+                    'Decide Next Step 🐾',
+                    style: GoogleFonts.nunito(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPostVetRescuerHomeDialog(Sighting s) {
+    showDialog(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+        contentPadding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
+        titlePadding: EdgeInsets.zero,
+        title: Container(
+          padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF57C00).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.celebration_rounded,
+                    color: Color(0xFFF57C00), size: 22),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Vet Visit Verified! 🎉',
+                      style: GoogleFonts.nunito(
+                        fontSize: 16.5,
+                        fontWeight: FontWeight.w900,
+                        color: _navy,
+                      ),
+                    ),
+                    Text(
+                      '+100 XP awarded to you',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFFE65100),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 8),
+            Text(
+              'Reporter verified your vet care report. Since you currently have custody of ${s.title.isNotEmpty ? s.title : "this cat"}, please choose what to do next:',
+              style: GoogleFonts.nunito(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: _navy.withValues(alpha: 0.75),
+              ),
+            ),
+            const SizedBox(height: 14),
+            _buildPostVetHomeOptionTile(
+              icon: Icons.volunteer_activism_rounded,
+              color: const Color(0xFF673AB7),
+              title: '🏡 Foster at My Place',
+              subtitle: 'Quarantine & start daily recovery milestone (+150 XP)',
+              onTap: () {
+                Navigator.pop(dCtx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SightingDetailScreen(
+                      sighting: s,
+                      initialAction: 'tookIn',
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            _buildPostVetHomeOptionTile(
+              icon: Icons.house_rounded,
+              color: const Color(0xFFE65100),
+              title: '🏛️ Transfer to Shelter',
+              subtitle: 'Admit to verified shelter center (+120 XP)',
+              onTap: () {
+                Navigator.pop(dCtx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SightingDetailScreen(
+                      sighting: s,
+                      initialAction: 'sheltered',
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            _buildPostVetHomeOptionTile(
+              icon: Icons.nature_people_rounded,
+              color: const Color(0xFF2E7D32),
+              title: '🌿 Return to Spot (TNR)',
+              subtitle: 'Cat was safely released back to territory',
+              onTap: () {
+                Navigator.pop(dCtx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SightingDetailScreen(
+                      sighting: s,
+                      initialAction: 'returnedToSpot',
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: 8),
+            _buildPostVetHomeOptionTile(
+              icon: Icons.group_rounded,
+              color: const Color(0xFF1E88E5),
+              title: '💬 Can\'t Foster — Ask Community',
+              subtitle: 'Request volunteer foster parents from PawWatch',
+              onTap: () {
+                Navigator.pop(dCtx);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SightingDetailScreen(
+                      sighting: s,
+                      initialAction: 'askCommunity',
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx),
+            child: Text(
+              'Decide Later',
+              style: GoogleFonts.nunito(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: Colors.grey.shade600,
+              ),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _navy,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            ),
+            onPressed: () {
+              Navigator.pop(dCtx);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => SightingDetailScreen(sighting: s),
+                ),
+              );
+            },
+            child: Text(
+              'View Details 🐾',
+              style: GoogleFonts.nunito(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPostVetHomeOptionTile({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: color.withValues(alpha: 0.25)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(7),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.15),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 16, color: color),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: GoogleFonts.nunito(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w900,
+                      color: _navy,
+                    ),
+                  ),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.nunito(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: _navy.withValues(alpha: 0.65),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, size: 18, color: color),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRadialDispatchAlertBanner(Sighting s) {
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            const Color(0xFFE53935).withValues(alpha: 0.12),
+            const Color(0xFFFF7043).withValues(alpha: 0.08),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFFE53935).withValues(alpha: 0.4),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFFE53935).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE53935),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.emergency_rounded,
+                        color: Colors.white, size: 14),
+                    const SizedBox(width: 4),
+                    Text(
+                      'URGENT DISPATCH',
+                      style: GoogleFonts.nunito(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '•  ~${s.distance} away',
+                style: GoogleFonts.nunito(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFFE53935),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              if (s.photoUrls.isNotEmpty)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: s.photoUrls.first.startsWith('http')
+                      ? Image.network(
+                          s.photoUrls.first,
+                          width: 54,
+                          height: 54,
+                          fit: BoxFit.cover,
+                          errorBuilder: (c, e, st) => Container(
+                            width: 54,
+                            height: 54,
+                            color: _lavender.withValues(alpha: 0.2),
+                            child: const Icon(Icons.pets,
+                                size: 24, color: _lavender),
+                          ),
+                        )
+                      : Image.file(
+                          File(s.photoUrls.first),
+                          width: 54,
+                          height: 54,
+                          fit: BoxFit.cover,
+                          errorBuilder: (c, e, st) => Container(
+                            width: 54,
+                            height: 54,
+                            color: _lavender.withValues(alpha: 0.2),
+                            child: const Icon(Icons.pets,
+                                size: 24, color: _lavender),
+                          ),
+                        ),
+                )
+              else
+                Container(
+                  width: 54,
+                  height: 54,
+                  decoration: BoxDecoration(
+                    color: _lavender.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.pets, size: 24, color: _lavender),
+                ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      s.displayTitle,
+                      style: GoogleFonts.nunito(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        color: _navy,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      s.displayLocation,
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: _navy.withValues(alpha: 0.6),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _navy.withValues(alpha: 0.7),
+                    side: BorderSide(color: _navy.withValues(alpha: 0.2)),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () {
+                    setState(() => _dismissedDispatchIds.add(s.id));
+                  },
+                  child: Text('Can\'t Help',
+                      style: GoogleFonts.nunito(
+                          fontSize: 12, fontWeight: FontWeight.w700)),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                flex: 2,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFE53935),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                    elevation: 2,
+                  ),
+                  onPressed: () async {
+                    await FirebaseService.instance.claimRescue(s.id);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            'Dispatch accepted! You have a 45-minute arrival window ⏱️🐾',
+                            style: GoogleFonts.nunito(
+                                fontWeight: FontWeight.w700),
+                          ),
+                          backgroundColor: _navy,
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                      );
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (_) =>
+                                SightingDetailScreen(sighting: s)),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.directions_run_rounded, size: 16),
+                  label: Text(
+                    'I\'m on my way (45m)',
+                    style: GoogleFonts.nunito(
+                        fontSize: 12.5, fontWeight: FontWeight.w800),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildDispatchAndNotificationsTab() {
+    return Column(
+      children: [
+        Container(
+          color: _bgWhite,
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: _lavender.withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.notifications_active_rounded,
+                    color: _lavender, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Dispatch & Activity',
+                style: GoogleFonts.nunito(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  color: _navy,
+                ),
+              ),
+            ],
+          ),
+        ),
+        Divider(color: _navy.withValues(alpha: 0.08), height: 1),
+        Expanded(
+          child: StreamBuilder<List<Sighting>>(
+            stream: FirebaseService.instance.streamSightings(),
+            builder: (context, snapshot) {
+              final sightings = snapshot.data ?? [];
+              final currentUid = FirebaseAuth.instance.currentUser?.uid;
+              final urgentList = sightings
+                  .where((s) =>
+                      s.isEligibleForRadialDispatch &&
+                      (currentUid == null || s.reporterId != currentUid) &&
+                      !_dismissedDispatchIds.contains(s.id))
+                  .toList();
+              final inCareList =
+                  sightings.where((s) => s.isInCare).toList();
+
+              if (urgentList.isEmpty && inCareList.isEmpty) {
+                return Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.done_all_rounded,
+                          size: 48,
+                          color: _lavender.withValues(alpha: 0.4)),
+                      const SizedBox(height: 12),
+                      Text(
+                        'All Quiet on the Front 🐾',
+                        style: GoogleFonts.nunito(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: _navy,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'No urgent rescue dispatches pending nearby.',
+                        style: GoogleFonts.nunito(
+                          fontSize: 12.5,
+                          color: _navy.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
+                children: [
+                  if (urgentList.isNotEmpty) ...[
+                    Row(
+                      children: [
+                        const Icon(Icons.emergency_rounded,
+                            color: Color(0xFFE53935), size: 16),
+                        const SizedBox(width: 6),
+                        Text(
+                          'URGENT RESCUE DISPATCHES (${urgentList.length})',
+                          style: GoogleFonts.nunito(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w900,
+                            color: const Color(0xFFE53935),
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    ...urgentList.map((s) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: _buildRadialDispatchAlertBanner(s),
+                        )),
+                    const SizedBox(height: 10),
+                  ],
+                  if (inCareList.isNotEmpty) ...[
+                    Row(
+                      children: [
+                        Icon(Icons.timeline_rounded,
+                            color: _lavender, size: 16),
+                        const SizedBox(width: 6),
+                        Text(
+                          'CATS CURRENTLY IN CARE (${inCareList.length})',
+                          style: GoogleFonts.nunito(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w900,
+                            color: _lavender,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    ...inCareList.map((s) => Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: GestureDetector(
+                            onTap: () => Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    SightingDetailScreen(sighting: s),
+                              ),
+                            ),
+                            child: Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                    color: _navy.withValues(alpha: 0.08)),
+                              ),
+                              child: Row(
+                                children: [
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(10),
+                                    child: s.photoUrls.isNotEmpty
+                                        ? (s.photoUrls.first
+                                                .startsWith('http')
+                                            ? Image.network(
+                                                s.photoUrls.first,
+                                                width: 44,
+                                                height: 44,
+                                                fit: BoxFit.cover)
+                                            : Image.file(
+                                                File(s.photoUrls.first),
+                                                width: 44,
+                                                height: 44,
+                                                fit: BoxFit.cover))
+                                        : Container(
+                                            width: 44,
+                                            height: 44,
+                                            color: _lavender
+                                                .withValues(alpha: 0.2),
+                                            child: const Icon(Icons.pets,
+                                                color: _lavender, size: 20),
+                                          ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          s.displayTitle,
+                                          style: GoogleFonts.nunito(
+                                            fontSize: 13.5,
+                                            fontWeight: FontWeight.w800,
+                                            color: _navy,
+                                          ),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                        Text(
+                                          '${s.careLabel} with ${s.careTakerName ?? "Volunteer"} • ${s.daysInCare}d in care',
+                                          style: GoogleFonts.nunito(
+                                            fontSize: 11.5,
+                                            color: _navy
+                                                .withValues(alpha: 0.6),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(Icons.chevron_right,
+                                      color: _navy.withValues(alpha: 0.3),
+                                      size: 18),
+                                ],
+                              ),
+                            ),
+                          ),
+                        )),
+                  ],
+                ],
+              );
+            },
+          ),
+        ),
+      ],
     );
   }
 

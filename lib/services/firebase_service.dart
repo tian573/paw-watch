@@ -4,6 +4,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../models/sighting.dart';
+import '../models/user_profile.dart';
+import '../models/chat_message.dart';
 
 class FirebaseService {
   static final FirebaseService instance = FirebaseService._internal();
@@ -228,6 +230,10 @@ class FirebaseService {
     double? updatedLongitude,
     String? updatedLocationAddress,
     bool markResolved = false,
+    String? carePlanGoal,
+    int? carePlanDurationDays,
+    List<int>? careMilestoneDays,
+    List<String>? customMilestoneTitles,
   }) async {
     final user = _auth.currentUser;
     final uid = user?.uid ?? 'anon';
@@ -321,21 +327,56 @@ class FirebaseService {
         }
 
         // Custody State Transitions:
+        final isReporter = uid == reporterId;
         if (action == 'vet') {
-          updateFields['careStatus'] = 'inCare_vet';
-          updateFields['careTakerId'] = uid;
-          updateFields['careTakerName'] = name;
-          updateFields['careStartedAt'] = FieldValue.serverTimestamp();
+          if (isReporter) {
+            updateFields['hasVetVisit'] = true;
+            updateFields['lastVetVisitAt'] = FieldValue.serverTimestamp();
+            if (sightingDoc.data()?['urgency']?.toString() == 'urgent') {
+              updateFields['urgency'] = 'needsHelp';
+            }
+          } else {
+            updateFields['pendingVetRescuerId'] = uid;
+            updateFields['pendingVetRescuerName'] = name;
+            updateFields['pendingVetProofUrl'] = finalProofUrl;
+            if (customNote != null && customNote.trim().isNotEmpty) {
+              updateFields['pendingVetNote'] = customNote.trim();
+            }
+          }
         } else if (action == 'tookIn' || action == 'holding') {
           updateFields['careStatus'] = 'inCare_foster';
           updateFields['careTakerId'] = uid;
           updateFields['careTakerName'] = name;
           updateFields['careStartedAt'] = FieldValue.serverTimestamp();
+          if (carePlanGoal != null && carePlanGoal.isNotEmpty) {
+            updateFields['carePlanGoal'] = carePlanGoal;
+          }
+          if (carePlanDurationDays != null && carePlanDurationDays >= 3) {
+            updateFields['carePlanDurationDays'] = carePlanDurationDays;
+          }
+          if (careMilestoneDays != null && careMilestoneDays.isNotEmpty) {
+            updateFields['careMilestoneDays'] = careMilestoneDays;
+          }
+          if (customMilestoneTitles != null && customMilestoneTitles.isNotEmpty) {
+            updateFields['customMilestoneTitles'] = customMilestoneTitles;
+          }
+          // Clear physical rescue dispatch claim
+          updateFields['rescueClaimed'] = false;
+          updateFields['rescueClaimedBy'] = FieldValue.delete();
+          updateFields['rescueClaimedByName'] = FieldValue.delete();
+          updateFields['rescueClaimedAt'] = FieldValue.delete();
+          updateFields['pendingHandoverRescuerId'] = FieldValue.delete();
+          updateFields['pendingHandoverRescuerName'] = FieldValue.delete();
+          updateFields['pendingHandoverUpdateId'] = FieldValue.delete();
         } else if (action == 'sheltered' || markResolved) {
           updateFields['careStatus'] = 'resolved';
           updateFields['urgency'] = 'resolved';
           updateFields['resolvedByAction'] = action;
           updateFields['resolvedAt'] = FieldValue.serverTimestamp();
+          updateFields['rescueClaimed'] = false;
+          updateFields['rescueClaimedBy'] = FieldValue.delete();
+          updateFields['rescueClaimedByName'] = FieldValue.delete();
+          updateFields['rescueClaimedAt'] = FieldValue.delete();
           if (updatedLatitude != null && updatedLongitude != null) {
             updateFields['latitude'] = updatedLatitude;
             updateFields['longitude'] = updatedLongitude;
@@ -348,11 +389,21 @@ class FirebaseService {
           updateFields['careTakerId'] = null;
           updateFields['careTakerName'] = null;
           updateFields['careStartedAt'] = null;
+          updateFields['rescueClaimed'] = false;
+          updateFields['rescueClaimedBy'] = FieldValue.delete();
+          updateFields['rescueClaimedByName'] = FieldValue.delete();
+          updateFields['rescueClaimedAt'] = FieldValue.delete();
         } else if (action == 'rehomed') {
           updateFields['careStatus'] = 'resolved';
           updateFields['urgency'] = 'resolved';
+          updateFields['category'] = 'Rehomed';
+          updateFields['isOpenForAdoption'] = false;
           updateFields['resolvedByAction'] = action;
           updateFields['resolvedAt'] = FieldValue.serverTimestamp();
+          updateFields['rescueClaimed'] = false;
+          updateFields['rescueClaimedBy'] = FieldValue.delete();
+          updateFields['rescueClaimedByName'] = FieldValue.delete();
+          updateFields['rescueClaimedAt'] = FieldValue.delete();
         }
 
         await _firestore
@@ -405,11 +456,17 @@ class FirebaseService {
     }
 
     // 1. Post update to community feed
-    await _firestore
+    final updateDocRef = await _firestore
         .collection('sightings')
         .doc(sightingId)
         .collection('updates')
         .add(docData);
+
+    if (action == 'vet' && !isReporter) {
+      await _firestore.collection('sightings').doc(sightingId).update({
+        'pendingVetUpdateId': updateDocRef.id,
+      });
+    }
 
     // If reporter logged their own action and eligible for XP: award immediately
     if (user != null && !anonymous && isReporter) {
@@ -452,6 +509,7 @@ class FirebaseService {
       if (data['isReporterConfirmed'] == true) return 0;
 
       final authorId = data['authorId']?.toString() ?? '';
+      final authorName = data['authorName']?.toString() ?? 'Rescuer';
       final action = data['action']?.toString() ?? '';
       final isOngoingAction = action == 'fed' || action == 'stillHere' || action == 'moved' || action == 'notHere';
       final pendingXp = (data['pendingXp'] is num)
@@ -471,22 +529,76 @@ class FirebaseService {
         'confirmedAt': FieldValue.serverTimestamp(),
       });
 
-      // 2. Award pending XP to the rescuer and apply spot cooldown
+      // 2. Award pending XP, update trust stats, and apply spot cooldown
       if (authorId.isNotEmpty && authorId != 'anon') {
-        final authorDoc = await _firestore.collection('users').doc(authorId).get();
+        final authorDoc =
+            await _firestore.collection('users').doc(authorId).get();
         final authorData = authorDoc.data() ?? {};
-        final authorCooldowns = Map<String, dynamic>.from((authorData['spotCooldowns'] as Map<String, dynamic>?) ?? {});
+        final authorCooldowns = Map<String, dynamic>.from(
+            (authorData['spotCooldowns'] as Map<String, dynamic>?) ?? {});
         final updates = <String, dynamic>{
           'lastActive': FieldValue.serverTimestamp(),
+          'successfulRescues': FieldValue.increment(1),
         };
         if (pendingXp > 0) {
           updates['xp'] = FieldValue.increment(pendingXp);
+          updates['totalXp'] = FieldValue.increment(pendingXp);
         }
+        if (action == 'tookIn' || action == 'holding') {
+          updates['activeFosters'] = FieldValue.increment(1);
+        } else if (action == 'rehomed' || action == 'sheltered') {
+          updates['completedFosters'] = FieldValue.increment(1);
+        }
+
+        // Trust tier progression calculation
+        final int currentSucc =
+            ((authorData['successfulRescues'] is num)
+                ? (authorData['successfulRescues'] as num).toInt()
+                : 0) + 1;
+        final double curScore = (authorData['trustScore'] is num)
+            ? (authorData['trustScore'] as num).toDouble()
+            : 5.0;
+        final int compFosters = (authorData['completedFosters'] is num)
+            ? (authorData['completedFosters'] as num).toInt()
+            : 0;
+
+        if (currentSucc >= 10 && compFosters >= 3 && curScore >= 4.7) {
+          updates['trustTier'] = 'trustedFoster';
+        } else if (currentSucc >= 3 && curScore >= 4.2) {
+          updates['trustTier'] = 'verifiedRescuer';
+        }
+
         if (isOngoingAction) {
           authorCooldowns[sightingId] = FieldValue.serverTimestamp();
           updates['spotCooldowns'] = authorCooldowns;
         }
-        await _firestore.collection('users').doc(authorId).set(updates, SetOptions(merge: true));
+        await _firestore
+            .collection('users')
+            .doc(authorId)
+            .set(updates, SetOptions(merge: true));
+      }
+
+      if (action == 'vet') {
+        final updateData = <String, dynamic>{
+          'hasVetVisit': true,
+          'hasVetVisitFlag': true,
+          'lastVetVisitAt': FieldValue.serverTimestamp(),
+          'lastVetRescuerId': authorId,
+          'lastVetRescuerName': authorName,
+          'pendingVetRescuerId': FieldValue.delete(),
+          'pendingVetRescuerName': FieldValue.delete(),
+          'pendingVetProofUrl': FieldValue.delete(),
+          'pendingVetClinicName': FieldValue.delete(),
+          'pendingVetNote': FieldValue.delete(),
+          'pendingVetUpdateId': FieldValue.delete(),
+        };
+        try {
+          final sightingDoc = await _firestore.collection('sightings').doc(sightingId).get();
+          if (sightingDoc.data()?['urgency']?.toString() == 'urgent') {
+            updateData['urgency'] = 'needsHelp';
+          }
+          await _firestore.collection('sightings').doc(sightingId).update(updateData);
+        } catch (_) {}
       }
 
       return pendingXp;
@@ -494,6 +606,264 @@ class FirebaseService {
       debugPrint('Confirm rescue action notice: $e');
       return 0;
     }
+  }
+
+  /// Request Foster Custody Handover (when rescuer is not yet auto-certified Trusted Foster)
+  Future<void> requestCustodyHandover({
+    required String sightingId,
+    required String customNote,
+    File? proofPhotoFile,
+    String? carePlanGoal,
+    int carePlanDurationDays = 7,
+    List<int>? careMilestoneDays,
+    List<String>? customMilestoneTitles,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final uid = user.uid;
+    final name = user.displayName?.isNotEmpty == true
+        ? user.displayName!
+        : (user.email?.split('@').first ?? 'PawWatcher');
+
+    String? proofUrl;
+    if (proofPhotoFile != null) {
+      final urls = await uploadPhotos([proofPhotoFile], sightingId);
+      if (urls.isNotEmpty) proofUrl = urls.first;
+    }
+
+    final userDoc = await _firestore.collection('users').doc(uid).get();
+    final uData = userDoc.data() ?? {};
+    final double trustScore = (uData['trustScore'] is num)
+        ? (uData['trustScore'] as num).toDouble()
+        : 5.0;
+    final int succRescues = (uData['successfulRescues'] is num)
+        ? (uData['successfulRescues'] as num).toInt()
+        : 0;
+    final String tier = uData['trustTier']?.toString() ?? 'community';
+
+    final effectiveGoal = carePlanGoal?.trim().isNotEmpty == true
+        ? carePlanGoal!.trim()
+        : 'Foster & Welfare Care';
+
+    // 1. Post Handover Request update
+    final updateRef = await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .add({
+      'type': 'custodyRequest',
+      'action': 'tookIn',
+      'authorId': uid,
+      'authorName': name,
+      'trustScore': trustScore,
+      'successfulRescues': succRescues,
+      'trustTier': tier,
+      'proofPhotoUrl': proofUrl,
+      'carePlanGoal': effectiveGoal,
+      'carePlanDurationDays': carePlanDurationDays,
+      'careMilestoneDays': careMilestoneDays ?? [],
+      'customMilestoneTitles': customMilestoneTitles ?? [],
+      'text':
+          'offered to take this cat into Foster Care for $carePlanDurationDays days ($effectiveGoal). Awaiting reporter confirmation. 🐾',
+      'customNote': customNote.trim(),
+      'status': 'pending', // 'pending', 'approved', 'declined'
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    // 2. Set pending handover on sighting doc
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'pendingHandoverRescuerId': uid,
+      'pendingHandoverRescuerName': name,
+      'pendingHandoverUpdateId': updateRef.id,
+      'carePlanGoal': effectiveGoal,
+      'carePlanDurationDays': carePlanDurationDays,
+      'careMilestoneDays': careMilestoneDays ?? [],
+      'customMilestoneTitles': customMilestoneTitles ?? [],
+    });
+  }
+
+  /// Reporter approves Foster Custody Handover
+  Future<void> approveCustodyHandover({
+    required String sightingId,
+    String? updateId,
+    required String rescuerUid,
+    required String rescuerName,
+    String? carePlanGoal,
+    int? carePlanDurationDays,
+    List<int>? careMilestoneDays,
+    List<String>? customMilestoneTitles,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    // 1. Mark request update approved if updateId exists
+    if (updateId != null && updateId.isNotEmpty) {
+      try {
+        await _firestore
+            .collection('sightings')
+            .doc(sightingId)
+            .collection('updates')
+            .doc(updateId)
+            .update({
+          'status': 'approved',
+          'approvedBy': user.uid,
+          'approvedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {
+        // Document might not exist or ID format differs
+      }
+    }
+
+    final updateData = <String, dynamic>{
+      'careStatus': 'inCare_foster',
+      'careTakerId': rescuerUid,
+      'careTakerName': rescuerName,
+      'careStartedAt': FieldValue.serverTimestamp(),
+      'pendingHandoverRescuerId': FieldValue.delete(),
+      'pendingHandoverRescuerName': FieldValue.delete(),
+      'pendingHandoverUpdateId': FieldValue.delete(),
+      'rescueClaimed': false,
+      'rescueClaimedBy': FieldValue.delete(),
+      'rescueClaimedByName': FieldValue.delete(),
+      'rescueClaimedAt': FieldValue.delete(),
+    };
+
+    if (carePlanGoal != null && carePlanGoal.isNotEmpty) {
+      updateData['carePlanGoal'] = carePlanGoal;
+    }
+    if (carePlanDurationDays != null && carePlanDurationDays >= 3) {
+      updateData['carePlanDurationDays'] = carePlanDurationDays;
+    }
+    if (careMilestoneDays != null && careMilestoneDays.isNotEmpty) {
+      updateData['careMilestoneDays'] = careMilestoneDays;
+    }
+    if (customMilestoneTitles != null && customMilestoneTitles.isNotEmpty) {
+      updateData['customMilestoneTitles'] = customMilestoneTitles;
+    }
+
+    // 2. Transition Sighting to inCare_foster with rescuer custody
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .update(updateData);
+
+    // 3. Post approved notice to feed
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .add({
+      'type': 'handoverApproved',
+      'authorId': user.uid,
+      'authorName': user.displayName ?? 'Reporter',
+      'text':
+          'approved foster custody handover to $rescuerName! 🐾 Care plan activated.',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    // 4. Award XP (+150 XP) and increment active fosters on rescuer
+    await _firestore.collection('users').doc(rescuerUid).set({
+      'xp': FieldValue.increment(150),
+      'totalXp': FieldValue.increment(150),
+      'successfulRescues': FieldValue.increment(1),
+      'activeFosters': FieldValue.increment(1),
+      'lastActive': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
+  /// Reporter declines Foster Custody Handover
+  Future<void> declineCustodyHandover({
+    required String sightingId,
+    String? updateId,
+    String? rescuerId,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    if (updateId != null && updateId.isNotEmpty) {
+      try {
+        await _firestore
+            .collection('sightings')
+            .doc(sightingId)
+            .collection('updates')
+            .doc(updateId)
+            .update({
+          'status': 'declined',
+          'declinedBy': user.uid,
+          'declinedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+    }
+
+    final Map<String, dynamic> updateData = {
+      'pendingHandoverRescuerId': FieldValue.delete(),
+      'pendingHandoverRescuerName': FieldValue.delete(),
+      'pendingHandoverUpdateId': FieldValue.delete(),
+    };
+
+    if (rescuerId != null && rescuerId.isNotEmpty) {
+      updateData['declinedFosterUserIds'] = FieldValue.arrayUnion([rescuerId]);
+    }
+
+    await _firestore.collection('sightings').doc(sightingId).update(updateData);
+  }
+
+  /// Submit Day 1, Day 3, or Day 7 Care Milestone Check-In
+  Future<int> submitCareMilestoneCheckIn({
+    required String sightingId,
+    required int milestoneDay,
+    required String conditionStatus,
+    required String careNote,
+    File? proofPhotoFile,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return 0;
+    final uid = user.uid;
+    final name = user.displayName?.isNotEmpty == true
+        ? user.displayName!
+        : (user.email?.split('@').first ?? 'PawWatcher');
+
+    String? proofUrl;
+    if (proofPhotoFile != null) {
+      final urls = await uploadPhotos([proofPhotoFile], sightingId);
+      if (urls.isNotEmpty) proofUrl = urls.first;
+    }
+
+    final int xp = milestoneDay == 1 ? 30 : (milestoneDay == 3 ? 40 : 60);
+
+    // 1. Post to updates feed
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .add({
+      'type': 'milestoneCheckIn',
+      'authorId': uid,
+      'authorName': name,
+      'milestoneDay': milestoneDay,
+      'conditionStatus': conditionStatus,
+      'proofPhotoUrl': proofUrl,
+      'text':
+          'completed Day $milestoneDay Care Check-In: "$conditionStatus" • $careNote 🐾',
+      'xpAwarded': xp,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    // 2. Update sighting doc
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'latestCondition': conditionStatus,
+      'lastCheckInAt': FieldValue.serverTimestamp(),
+      'completedMilestones': FieldValue.arrayUnion([milestoneDay]),
+    });
+
+    // 3. Award XP to caretaker
+    await _firestore.collection('users').doc(uid).set({
+      'xp': FieldValue.increment(xp),
+      'totalXp': FieldValue.increment(xp),
+      'lastActive': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    return xp;
   }
 
   /// Claim "I'm on my way" rescue button
@@ -585,7 +955,7 @@ class FirebaseService {
         'type': 'onMyWayCancelled',
         'authorId': 'system',
         'authorName': 'PawWatch Bot',
-        'text': 'Rescue claim timed out after 45m without action proof. Spot is open again for rescuers! 🐾',
+        'text': 'Rescue claim by $claimerName timed out after 45m without action proof. Spot is open again for rescuers! 🐾',
         'isAnonymous': false,
         'parentId': '',
         'createdAt': FieldValue.serverTimestamp(),
@@ -742,6 +1112,101 @@ class FirebaseService {
     });
   }
 
+  /// Stream UserProfile with real-time trust score, trust tier, and XP progress
+  Stream<UserProfile> streamUserProfile(String uid) {
+    return _firestore.collection('users').doc(uid).snapshots().map((doc) {
+      if (!doc.exists) {
+        final curUser = _auth.currentUser;
+        return UserProfile(
+          uid: uid,
+          displayName: curUser?.displayName ?? 'PawWatcher',
+          email: curUser?.email ?? '',
+          joinedAt: DateTime.now(),
+        );
+      }
+      return UserProfile.fromFirestore(doc);
+    });
+  }
+
+  /// Submit a reporter review & rating for a rescuer after handover or rescue
+  Future<void> submitRescuerReview({
+    required String rescuerUid,
+    required double rating, // 1.0 - 5.0
+    required String comment,
+    required String sightingId,
+  }) async {
+    final user = _auth.currentUser;
+    final reviewerName = user?.displayName?.isNotEmpty == true
+        ? user!.displayName!
+        : (user?.email?.split('@').first ?? 'Reporter');
+    final userRef = _firestore.collection('users').doc(rescuerUid);
+
+    await _firestore.runTransaction((tx) async {
+      final snap = await tx.get(userRef);
+      if (!snap.exists) return;
+      final data = snap.data() ?? {};
+      final rawReviews = data['reviews'] as List? ?? [];
+      final reviews =
+          List<Map<String, dynamic>>.from(rawReviews.whereType<Map>());
+
+      reviews.add({
+        'reviewerId': user?.uid ?? 'anon',
+        'reviewerName': reviewerName,
+        'rating': rating,
+        'comment': comment.trim(),
+        'sightingId': sightingId,
+        'createdAt': Timestamp.now(),
+      });
+
+      // Recalculate average trust score
+      double sum = 0.0;
+      for (final r in reviews) {
+        sum += (r['rating'] as num?)?.toDouble() ?? 5.0;
+      }
+      final double newAvg = reviews.isNotEmpty ? (sum / reviews.length) : 5.0;
+      final int succRescues = (data['successfulRescues'] is num)
+          ? (data['successfulRescues'] as num).toInt()
+          : 0;
+      final int compFosters = (data['completedFosters'] is num)
+          ? (data['completedFosters'] as num).toInt()
+          : 0;
+
+      // Check trust tier upgrade:
+      String newTier = 'community';
+      if (succRescues >= 10 && compFosters >= 3 && newAvg >= 4.7) {
+        newTier = 'trustedFoster';
+      } else if (succRescues >= 3 && newAvg >= 4.2) {
+        newTier = 'verifiedRescuer';
+      }
+
+      tx.update(userRef, {
+        'reviews': reviews,
+        'trustScore': double.parse(newAvg.toStringAsFixed(1)),
+        'trustTier': newTier,
+      });
+    });
+  }
+
+  /// Update user profile details
+  Future<void> updateUserProfile({
+    required String uid,
+    String? displayName,
+    String? bio,
+    String? city,
+  }) async {
+    final data = <String, dynamic>{};
+    if (displayName != null) data['displayName'] = displayName.trim();
+    if (bio != null) data['bio'] = bio.trim();
+    if (city != null) data['city'] = city.trim();
+
+    if (data.isNotEmpty) {
+      await _firestore.collection('users').doc(uid).set(data, SetOptions(merge: true));
+      if (displayName != null && _auth.currentUser != null) {
+        await _auth.currentUser!.updateDisplayName(displayName.trim());
+      }
+    }
+  }
+
   /// Sample seed sightings for initial empty state display
   static List<Sighting> get sampleSightings => [
         Sighting(
@@ -815,4 +1280,616 @@ class FirebaseService {
           commentCount: 12,
         ),
       ];
+
+  // =========================================================================
+  // DIRECT COORDINATION CHAT & CONVERSATIONS INBOX
+  // =========================================================================
+
+  /// Generate a consistent chatId for a sighting and two participants
+  String getCoordinationChatId(String sightingId, String user1, String user2) {
+    final list = [user1, user2]..sort();
+    return '${sightingId}_${list[0]}_${list[1]}';
+  }
+
+  /// Stream messages in a coordination chat thread
+  Stream<List<ChatMessage>> streamChatMessages(String chatId) {
+    return _firestore
+        .collection('coordinationChats')
+        .doc(chatId)
+        .collection('messages')
+        .orderBy('createdAt', descending: false)
+        .snapshots()
+        .map((snap) =>
+            snap.docs.map((d) => ChatMessage.fromFirestore(d)).toList());
+  }
+
+  /// Stream all conversations for a user
+  Stream<List<Map<String, dynamic>>> streamUserChatThreads(String userId) {
+    return _firestore
+        .collection('coordinationChats')
+        .where('participants', arrayContains: userId)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              final data = d.data();
+              data['chatId'] = d.id;
+              return data;
+            }).toList());
+  }
+
+  /// Stream the coordination chat document itself (for participants and block status)
+  Stream<DocumentSnapshot<Map<String, dynamic>>> streamChatDoc(String chatId) {
+    return _firestore.collection('coordinationChats').doc(chatId).snapshots();
+  }
+
+  /// Delete a coordination chat thread and its messages
+  Future<void> deleteChatThread(String chatId) async {
+    final chatDocRef = _firestore.collection('coordinationChats').doc(chatId);
+    final messagesSnap = await chatDocRef.collection('messages').get();
+    final batch = _firestore.batch();
+    for (final doc in messagesSnap.docs) {
+      batch.delete(doc.reference);
+    }
+    batch.delete(chatDocRef);
+    await batch.commit();
+  }
+
+  /// Block a user in the chat thread
+  Future<void> blockUserInChat({
+    required String chatId,
+    required String targetUserId,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final myUid = user.uid;
+
+    final chatDocRef = _firestore.collection('coordinationChats').doc(chatId);
+    await chatDocRef.set({
+      'blockedBy': FieldValue.arrayUnion([myUid]),
+      'lastUpdatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await chatDocRef.collection('messages').add({
+      'senderId': 'system',
+      'senderName': 'System',
+      'text': '${user.displayName ?? 'User'} blocked this conversation.',
+      'createdAt': FieldValue.serverTimestamp(),
+      'isSystemMessage': true,
+    });
+  }
+
+  /// Unblock a user in the chat thread
+  Future<void> unblockUserInChat({
+    required String chatId,
+    required String targetUserId,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final myUid = user.uid;
+
+    final chatDocRef = _firestore.collection('coordinationChats').doc(chatId);
+    await chatDocRef.set({
+      'blockedBy': FieldValue.arrayRemove([myUid]),
+      'lastUpdatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await chatDocRef.collection('messages').add({
+      'senderId': 'system',
+      'senderName': 'System',
+      'text': '${user.displayName ?? 'User'} unblocked this conversation.',
+      'createdAt': FieldValue.serverTimestamp(),
+      'isSystemMessage': true,
+    });
+  }
+
+  /// Send a message in a coordination chat
+  Future<void> sendChatMessage({
+    required String chatId,
+    required String sightingId,
+    required String text,
+    String? photoUrl,
+    String? otherUserId,
+    String? otherUserName,
+    String? sightingTitle,
+    String? sightingPhoto,
+    bool isSystemMessage = false,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null && !isSystemMessage) return;
+
+    final senderId = user?.uid ?? 'system';
+    final senderName = user?.displayName ?? 'Rescuer';
+
+    final chatDocRef =
+        _firestore.collection('coordinationChats').doc(chatId);
+
+    // Check if chat is currently blocked
+    if (!isSystemMessage) {
+      final docSnap = await chatDocRef.get();
+      if (docSnap.exists) {
+        final data = docSnap.data();
+        final blockedBy = (data?['blockedBy'] as List<dynamic>?)?.cast<String>() ?? [];
+        if (blockedBy.isNotEmpty) {
+          // Chat is blocked, do not allow sending
+          return;
+        }
+      }
+    }
+
+    // Ensure participants list
+    final List<String> parts = [senderId];
+    if (otherUserId != null && otherUserId.isNotEmpty && otherUserId != senderId) {
+      parts.add(otherUserId);
+    } else {
+      final segments = chatId.split('_');
+      if (segments.length >= 3) {
+        if (!parts.contains(segments[1])) parts.add(segments[1]);
+        if (!parts.contains(segments[2])) parts.add(segments[2]);
+      }
+    }
+
+    final metadata = <String, dynamic>{
+      'chatId': chatId,
+      'sightingId': sightingId,
+      'participants': parts,
+      'lastMessage': text.trim(),
+      'lastSenderId': senderId,
+      'lastSenderName': senderName,
+      'lastUpdatedAt': FieldValue.serverTimestamp(),
+    };
+
+    if (sightingTitle != null) metadata['sightingTitle'] = sightingTitle;
+    if (sightingPhoto != null) metadata['sightingPhoto'] = sightingPhoto;
+    if (otherUserName != null) metadata['otherUserName'] = otherUserName;
+
+    await chatDocRef.set(metadata, SetOptions(merge: true));
+
+    // Add message
+    await chatDocRef.collection('messages').add({
+      'senderId': senderId,
+      'senderName': senderName,
+      'text': text.trim(),
+      'createdAt': FieldValue.serverTimestamp(),
+      'photoUrl': photoUrl,
+      'isSystemMessage': isSystemMessage,
+    });
+  }
+
+  // =========================================================================
+  // CARETAKER OUTCOME CONFIRMATION & RESOLUTION (Rehomed / Sheltered / Return)
+  // =========================================================================
+
+  /// Caretaker directly completes and resolves care outcome (Rehomed, Sheltered, Returned TNR)
+  /// without requiring reporter confirmation since caretaker has full custody.
+  Future<int> completeCareOutcome({
+    required String sightingId,
+    required String outcomeAction, // 'rehomed', 'sheltered', 'returnedToSpot'
+    required String note,
+    File? proofPhotoFile,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return 0;
+    final uid = user.uid;
+    final name = user.displayName?.isNotEmpty == true
+        ? user.displayName!
+        : (user.email?.split('@').first ?? 'Caretaker');
+
+    String? proofUrl;
+    if (proofPhotoFile != null) {
+      final urls = await uploadPhotos([proofPhotoFile], sightingId);
+      if (urls.isNotEmpty) proofUrl = urls.first;
+    }
+
+    final int earnedXp = outcomeAction == 'rehomed'
+        ? 200
+        : (outcomeAction == 'sheltered' ? 120 : 100);
+
+    // 1. Post celebration announcement update to feed
+    final actionText = outcomeAction == 'rehomed'
+        ? 'successfully rehomed this cat with a loving forever family! 🏡🎉'
+        : (outcomeAction == 'sheltered'
+            ? 'safely transferred this cat to an animal shelter partner! 🏛️🐾'
+            : 'completed recovery care and safely returned this cat to its territory! 🌿🐾');
+
+    final fullText = note.trim().isNotEmpty
+        ? '$actionText "${note.trim()}"'
+        : actionText;
+
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .add({
+      'type': 'outcomeResolved',
+      'action': outcomeAction,
+      'authorId': uid,
+      'authorName': name,
+      'proofPhotoUrl': proofUrl,
+      'text': fullText,
+      'customNote': note.trim(),
+      'xpAwarded': earnedXp,
+      'status': 'completed',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    // 2. Award XP to caretaker & increment rescue count
+    await _firestore.collection('users').doc(uid).set({
+      'xp': FieldValue.increment(earnedXp),
+      'totalXp': FieldValue.increment(earnedXp),
+      'successfulRescues': FieldValue.increment(1),
+      'totalRescues': FieldValue.increment(1),
+      'lastActive': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    // 3. Mark sighting resolved
+    final updateFields = <String, dynamic>{
+      'urgency': 'resolved',
+      'resolvedByAction': outcomeAction,
+      'resolvedAt': FieldValue.serverTimestamp(),
+      'careStatus': outcomeAction == 'returnedToSpot' ? 'onStreet' : 'resolved',
+      'category': outcomeAction == 'rehomed'
+          ? 'Rehomed'
+          : (outcomeAction == 'sheltered' ? 'Sheltered' : 'Resolved'),
+      'isOpenForAdoption': false,
+      'rescueClaimed': false,
+      'rescueClaimedBy': FieldValue.delete(),
+      'rescueClaimedByName': FieldValue.delete(),
+      'rescueClaimedAt': FieldValue.delete(),
+      'pendingOutcomeAction': FieldValue.delete(),
+      'pendingOutcomeNote': FieldValue.delete(),
+      'pendingOutcomeProofUrl': FieldValue.delete(),
+      'pendingOutcomeUpdateId': FieldValue.delete(),
+    };
+
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .update(updateFields);
+
+    return earnedXp;
+  }
+
+  /// Caretaker completes foster milestones and opens cat for permanent adoption
+  Future<int> openCatForAdoption({
+    required String sightingId,
+    required String note,
+    File? showcasePhotoFile,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return 0;
+    final uid = user.uid;
+    final name = user.displayName?.isNotEmpty == true
+        ? user.displayName!
+        : (user.email?.split('@').first ?? 'Caretaker');
+
+    String? photoUrl;
+    if (showcasePhotoFile != null) {
+      final urls = await uploadPhotos([showcasePhotoFile], sightingId);
+      if (urls.isNotEmpty) photoUrl = urls.first;
+    }
+
+    const int earnedXp = 100;
+
+    // 1. Post adoption announcement to feed
+    final fullText = note.trim().isNotEmpty
+        ? 'completed foster rehabilitation and officially opened this cat for permanent adoption! 🏡🐾 "${note.trim()}"'
+        : 'completed foster rehabilitation and officially opened this cat for permanent adoption! 🏡🐾';
+
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .add({
+      'type': 'adoptionOpened',
+      'action': 'adoptionOpened',
+      'authorId': uid,
+      'authorName': name,
+      'proofPhotoUrl': photoUrl,
+      'text': fullText,
+      'customNote': note.trim(),
+      'xpAwarded': earnedXp,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    // 2. Award XP to caretaker
+    await _firestore.collection('users').doc(uid).set({
+      'xp': FieldValue.increment(earnedXp),
+      'totalXp': FieldValue.increment(earnedXp),
+      'lastActive': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    // 3. Update sighting category to 'Needs Foster' and flag isOpenForAdoption = true
+    final updateFields = <String, dynamic>{
+      'category': 'Needs Foster',
+      'isOpenForAdoption': true,
+      'careStatus': 'inCare_foster',
+      'urgency': 'needsHelp',
+    };
+    if (note.trim().isNotEmpty) {
+      updateFields['adoptionNote'] = note.trim();
+    }
+
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .update(updateFields);
+
+    return earnedXp;
+  }
+
+  /// Caretaker requests outcome confirmation from reporter
+  Future<void> requestOutcomeConfirmation({
+    required String sightingId,
+    required String outcomeAction, // 'rehomed', 'returnedToSpot'
+    required String note,
+    File? proofPhotoFile,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    String? proofUrl;
+    if (proofPhotoFile != null) {
+      final urls = await uploadPhotos([proofPhotoFile], sightingId);
+      if (urls.isNotEmpty) proofUrl = urls.first;
+    }
+
+    final updateRef = await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .add({
+      'type': 'outcomeRequest',
+      'action': outcomeAction,
+      'authorId': user.uid,
+      'authorName': user.displayName ?? 'Caretaker',
+      'proofPhotoUrl': proofUrl,
+      'customNote': note.trim(),
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'pendingOutcomeAction': outcomeAction,
+      'pendingOutcomeNote': note.trim(),
+      'pendingOutcomeProofUrl': proofUrl,
+      'pendingOutcomeUpdateId': updateRef.id,
+    });
+  }
+
+  /// Reporter approves the outcome confirmation
+  Future<void> approveOutcomeConfirmation({
+    required String sightingId,
+    required String outcomeAction,
+    String? updateId,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    if (updateId != null && updateId.isNotEmpty) {
+      try {
+        await _firestore
+            .collection('sightings')
+            .doc(sightingId)
+            .collection('updates')
+            .doc(updateId)
+            .update({
+          'status': 'approved',
+          'approvedBy': user.uid,
+          'approvedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+    }
+
+    if (outcomeAction == 'rehomed') {
+      await logRescueAction(
+        sightingId: sightingId,
+        action: 'rehomed',
+        customNote: 'Adopted and permanently rehomed! 🎉',
+      );
+    } else if (outcomeAction == 'sheltered') {
+      await logRescueAction(
+        sightingId: sightingId,
+        action: 'sheltered',
+        customNote: 'Transferred safely to registered animal shelter partner. 🏛️',
+        markResolved: true,
+      );
+    } else {
+      await _firestore.collection('sightings').doc(sightingId).update({
+        'urgency': 'safe',
+        'careStatus': 'returnedToSpot',
+        'resolvedByAction': 'returnedToSpot',
+        'pendingOutcomeAction': FieldValue.delete(),
+        'pendingOutcomeNote': FieldValue.delete(),
+        'pendingOutcomeProofUrl': FieldValue.delete(),
+        'pendingOutcomeUpdateId': FieldValue.delete(),
+      });
+    }
+
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'pendingOutcomeAction': FieldValue.delete(),
+      'pendingOutcomeNote': FieldValue.delete(),
+      'pendingOutcomeProofUrl': FieldValue.delete(),
+      'pendingOutcomeUpdateId': FieldValue.delete(),
+    });
+  }
+
+  /// Reporter declines outcome confirmation
+  Future<void> declineOutcomeConfirmation({
+    required String sightingId,
+    String? updateId,
+  }) async {
+    if (updateId != null && updateId.isNotEmpty) {
+      try {
+        await _firestore
+            .collection('sightings')
+            .doc(sightingId)
+            .collection('updates')
+            .doc(updateId)
+            .update({
+          'status': 'declined',
+          'declinedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+    }
+
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'pendingOutcomeAction': FieldValue.delete(),
+      'pendingOutcomeNote': FieldValue.delete(),
+      'pendingOutcomeProofUrl': FieldValue.delete(),
+      'pendingOutcomeUpdateId': FieldValue.delete(),
+    });
+  }
+
+  /// Update Adoption Showcase profile (health badges, shelter name, contact)
+  Future<void> updateAdoptionShowcaseProfile({
+    required String sightingId,
+    required List<String> healthTags,
+    String? shelterOrClinicName,
+    String? adoptionContact,
+  }) async {
+    final updateData = <String, dynamic>{
+      'healthTags': healthTags,
+    };
+    if (shelterOrClinicName != null && shelterOrClinicName.trim().isNotEmpty) {
+      updateData['shelterOrClinicName'] = shelterOrClinicName.trim();
+    }
+    if (adoptionContact != null && adoptionContact.trim().isNotEmpty) {
+      updateData['adoptionContact'] = adoptionContact.trim();
+    }
+
+    await _firestore.collection('sightings').doc(sightingId).update(updateData);
+  }
+
+  /// Reporter approves a pending vet visit confirmation
+  Future<void> approveVetVisitConfirmation({
+    required String sightingId,
+    required String rescuerId,
+    String? updateId,
+    int xp = 100,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    // 1. Mark update as approved if updateId exists
+    if (updateId != null && updateId.isNotEmpty) {
+      try {
+        await _firestore
+            .collection('sightings')
+            .doc(sightingId)
+            .collection('updates')
+            .doc(updateId)
+            .update({
+          'status': 'approved',
+          'isReporterConfirmed': true,
+          'confirmedBy': user.uid,
+          'confirmedAt': FieldValue.serverTimestamp(),
+          'approvedBy': user.uid,
+          'approvedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+    }
+
+    // 2. Award XP to rescuer
+    try {
+      await _firestore.collection('users').doc(rescuerId).update({
+        'xp': FieldValue.increment(xp),
+        'totalRescues': FieldValue.increment(1),
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {}
+
+    // 3. Update sighting: hasVetVisit = true, clear pending fields, demote urgent to needsHelp
+    final sightingDoc =
+        await _firestore.collection('sightings').doc(sightingId).get();
+    final currentUrgency = sightingDoc.data()?['urgency']?.toString();
+
+    final rescuerName =
+        sightingDoc.data()?['pendingVetRescuerName']?.toString() ?? 'Rescuer';
+
+    final updateData = <String, dynamic>{
+      'hasVetVisit': true,
+      'hasVetVisitFlag': true,
+      'lastVetVisitAt': FieldValue.serverTimestamp(),
+      'lastVetRescuerId': rescuerId,
+      'lastVetRescuerName': rescuerName,
+      'pendingVetRescuerId': FieldValue.delete(),
+      'pendingVetRescuerName': FieldValue.delete(),
+      'pendingVetProofUrl': FieldValue.delete(),
+      'pendingVetClinicName': FieldValue.delete(),
+      'pendingVetNote': FieldValue.delete(),
+      'pendingVetUpdateId': FieldValue.delete(),
+      'rescueClaimed': false,
+      'rescueClaimedBy': FieldValue.delete(),
+      'rescueClaimedByName': FieldValue.delete(),
+      'rescueClaimedAt': FieldValue.delete(),
+    };
+
+    if (currentUrgency == 'urgent') {
+      updateData['urgency'] = 'needsHelp';
+    }
+
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .update(updateData);
+  }
+
+  /// Rescuer completed vet visit but cannot foster; requests community foster
+  Future<void> requestCommunityFoster({
+    required String sightingId,
+    String? note,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final name = user.displayName?.isNotEmpty == true
+        ? user.displayName!
+        : (user.email?.split('@').first ?? 'Rescuer');
+
+    final sightingRef = _firestore.collection('sightings').doc(sightingId);
+    await sightingRef.update({
+      'category': 'Needs Foster',
+      'urgency': 'needsHelp',
+      'isCommunityFosterRequested': true,
+    });
+
+    await sightingRef.collection('updates').add({
+      'type': 'fosterRequest',
+      'authorId': user.uid,
+      'authorName': name,
+      'text': note?.trim().isNotEmpty == true
+          ? note!.trim()
+          : "completed the veterinary checkup! Cat is medically cleared and looking for a community foster home. 🏡🐾",
+      'isAnonymous': false,
+      'parentId': '',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  /// Reporter declines a pending vet visit confirmation
+  Future<void> declineVetVisitConfirmation({
+    required String sightingId,
+    String? updateId,
+  }) async {
+    if (updateId != null && updateId.isNotEmpty) {
+      try {
+        await _firestore
+            .collection('sightings')
+            .doc(sightingId)
+            .collection('updates')
+            .doc(updateId)
+            .update({
+          'status': 'declined',
+          'declinedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
+    }
+
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'pendingVetRescuerId': FieldValue.delete(),
+      'pendingVetRescuerName': FieldValue.delete(),
+      'pendingVetProofUrl': FieldValue.delete(),
+      'pendingVetClinicName': FieldValue.delete(),
+      'pendingVetNote': FieldValue.delete(),
+      'pendingVetUpdateId': FieldValue.delete(),
+    });
+  }
 }

@@ -765,7 +765,8 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
       context: context,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 28),
+        padding: EdgeInsets.fromLTRB(
+            20, 16, 20, 28 + MediaQuery.of(ctx).padding.bottom),
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -1851,7 +1852,8 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
     } else {
       finalCategory = _selectedCategory;
       finalUrgency = (_selectedCategory == 'Injured' ||
-              _selectedCategory == 'Urgent Rescue')
+              _selectedCategory == 'Urgent Rescue' ||
+              _selectedCategory == 'Kitten')
           ? 'urgent'
           : 'needsHelp';
     }
