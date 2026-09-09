@@ -12,6 +12,7 @@ import '../../services/firebase_service.dart';
 import '../../services/ai_service.dart';
 import '../../services/location_service.dart';
 import 'chat_screen.dart';
+import '../widgets/paw_image.dart';
 
 class SightingDetailScreen extends StatefulWidget {
   final Sighting sighting;
@@ -41,6 +42,43 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   bool _isAnon = false;
   bool _hasActed = false;
   String? _myAction;
+  bool _isPostingComment = false;
+  static DateTime? _lastGlobalCommentAt;
+  static String? _lastGlobalCommentText;
+  static const Duration _commentCooldownDuration = Duration(seconds: 15);
+
+  String? _validateCommentSpam(String text) {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return 'Please enter a comment.';
+    if (trimmed.length < 2) return 'Comment is too short.';
+
+    // 1. Anti-spam: Rate-limit cooldown
+    if (_lastGlobalCommentAt != null) {
+      final elapsed = DateTime.now().difference(_lastGlobalCommentAt!);
+      if (elapsed < _commentCooldownDuration) {
+        final remaining = (_commentCooldownDuration - elapsed).inSeconds + 1;
+        return '⏳ Please wait ${remaining}s before posting another comment (spam cooldown).';
+      }
+    }
+
+    // 2. Anti-spam: Duplicate comment filter within 2 minutes
+    if (_lastGlobalCommentText != null &&
+        _lastGlobalCommentText!.toLowerCase() == trimmed.toLowerCase()) {
+      if (_lastGlobalCommentAt != null &&
+          DateTime.now().difference(_lastGlobalCommentAt!) <
+              const Duration(minutes: 2)) {
+        return '⚠️ Duplicate comment detected. Please avoid posting identical messages.';
+      }
+    }
+
+    // 3. Anti-spam: Excessive repeated characters (e.g. 8+ identical consecutive chars)
+    final repeatedCharRegex = RegExp(r'(.)\1{7,}');
+    if (repeatedCharRegex.hasMatch(trimmed)) {
+      return '⚠️ Your comment contains repetitive characters. Please write a meaningful message.';
+    }
+
+    return null;
+  }
 
   String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
@@ -71,9 +109,49 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
   bool _isOwner(Sighting s) => _uid != null && _uid == s.reporterId;
 
-  Color _sColor(String u) => u == 'urgent' ? _urgent : (u == 'resolved' ? _resolved : _needsHelp);
-  String _sLabel(String u) => u == 'urgent' ? 'Urgent' : u == 'resolved' ? 'Resolved' : 'Needs Help';
-  IconData _sIcon(String u) => u == 'resolved' ? Icons.check_circle : Icons.error;
+  bool _isVetRescuer(Sighting s) {
+    final uid = _uid;
+    if (uid == null) return false;
+
+    // 1. Explicitly designated as the vet rescuer
+    if (s.lastVetRescuerId == uid) return true;
+    if (s.pendingVetRescuerId == uid) return true;
+
+    // 2. If a specific different rescuer is recorded, current user is not the vet rescuer
+    if (s.lastVetRescuerId != null &&
+        s.lastVetRescuerId!.isNotEmpty &&
+        s.lastVetRescuerId != uid) {
+      return false;
+    }
+    if (s.pendingVetRescuerId != null &&
+        s.pendingVetRescuerId!.isNotEmpty &&
+        s.pendingVetRescuerId != uid) {
+      return false;
+    }
+
+    // 3. If someone explicitly claimed the rescue
+    if (s.rescueClaimedBy.isNotEmpty) {
+      return s.rescueClaimedBy == uid;
+    }
+
+    // 4. No separate rescuer is recorded. If current user is the reporter,
+    // they provided veterinary care and have physical custody!
+    if (_isOwner(s)) {
+      return true;
+    }
+
+    return false;
+  }
+
+  Color _sColor(String u) => u == 'communityCare'
+      ? const Color(0xFF00897B)
+      : (u == 'urgent' ? _urgent : (u == 'resolved' ? _resolved : _needsHelp));
+  String _sLabel(String u) => u == 'communityCare'
+      ? 'Community Cat'
+      : (u == 'urgent' ? 'Urgent' : u == 'resolved' ? 'Resolved' : 'Needs Help');
+  IconData _sIcon(String u) => u == 'communityCare'
+      ? Icons.pets
+      : (u == 'resolved' ? Icons.check_circle : Icons.error);
 
   static const _aLabels = {
     'fed': 'Fed',
@@ -201,6 +279,56 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
   void _confirmDelete(Sighting s) {
     Navigator.pop(context);
+    final hasActiveInvestment = s.hasVetVisit ||
+        s.isVetVisitPending ||
+        s.isInCare ||
+        s.rescueClaimed ||
+        s.isResolved;
+
+    if (hasActiveInvestment) {
+      showDialog(
+        context: context,
+        builder: (_) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Row(
+            children: [
+              const Icon(Icons.lock_rounded, color: Color(0xFFE65100), size: 22),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text('Cannot Delete Report',
+                    style: GoogleFonts.nunito(
+                        fontWeight: FontWeight.w800,
+                        color: _navy,
+                        fontSize: 16.5)),
+              ),
+            ],
+          ),
+          content: Text(
+            'This report cannot be deleted because a rescuer or clinic has already committed time, medical care, or custody to this cat (vet visit logged, foster custody active, or rescue mission underway).\n\nTo protect rescue accountability and medical records, active rescue posts remain permanent. You can coordinate next steps via chat or mark the report as resolved when completed.',
+            style: GoogleFonts.nunito(
+                fontSize: 12.5,
+                color: _navy.withValues(alpha: 0.75),
+                height: 1.4),
+          ),
+          actions: [
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _navy,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () => Navigator.pop(context),
+              child: Text('Understood',
+                  style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
@@ -216,8 +344,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           TextButton(
             onPressed: () async {
               Navigator.pop(context);
-              await FirebaseService.instance.deleteSighting(s.id);
-              if (mounted) Navigator.pop(context, true);
+              try {
+                await FirebaseService.instance.deleteSighting(s.id);
+                if (mounted) Navigator.pop(context, true);
+              } catch (e) {
+                if (mounted) {
+                  _snack('$e');
+                }
+              }
             },
             child: Text('Delete',
                 style: GoogleFonts.nunito(color: _urgent, fontWeight: FontWeight.w800)),
@@ -554,6 +688,21 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   void _showPostVetFollowUpDialog(Sighting s) {
+    final isFeralCat = s.isFeral;
+    final rescuerName = s.lastVetRescuerName?.isNotEmpty == true
+        ? s.lastVetRescuerName!
+        : (s.pendingVetRescuerName?.isNotEmpty == true
+            ? s.pendingVetRescuerName!
+            : (s.careTakerName?.isNotEmpty == true
+                ? s.careTakerName!
+                : (s.rescueClaimedByName.isNotEmpty
+                    ? s.rescueClaimedByName
+                    : 'Rescuer')));
+    final rescuerId = s.lastVetRescuerId ??
+        s.pendingVetRescuerId ??
+        s.careTakerId ??
+        s.rescueClaimedBy;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -595,12 +744,18 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF673AB7).withValues(alpha: 0.12),
+                          color: isFeralCat
+                              ? const Color(0xFF00897B).withValues(alpha: 0.12)
+                              : const Color(0xFF673AB7).withValues(alpha: 0.12),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(
-                          Icons.medical_services_rounded,
-                          color: Color(0xFF673AB7),
+                        child: Icon(
+                          isFeralCat
+                              ? Icons.nature_people_rounded
+                              : Icons.medical_services_rounded,
+                          color: isFeralCat
+                              ? const Color(0xFF00897B)
+                              : const Color(0xFF673AB7),
                           size: 24,
                         ),
                       ),
@@ -610,7 +765,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '🩺 Vet Visit Verified!',
+                              isFeralCat
+                                  ? '🌿 Feral Cat TNR Mandate'
+                                  : '🩺 Vet Visit Verified!',
                               style: GoogleFonts.nunito(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w900,
@@ -618,7 +775,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               ),
                             ),
                             Text(
-                              'What is the next post-clinic step for this cat?',
+                              isFeralCat
+                                  ? 'Mandatory post-clinic outcome for feral cats'
+                                  : 'What is the next post-clinic step for this cat?',
                               style: GoogleFonts.nunito(
                                 fontSize: 12.5,
                                 fontWeight: FontWeight.w700,
@@ -631,70 +790,161 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ],
                   ),
                   const SizedBox(height: 18),
+                  if (isFeralCat) ...[
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF00897B).withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: const Color(0xFF00897B).withValues(alpha: 0.25),
+                        ),
+                      ),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Icon(Icons.info_outline_rounded,
+                              size: 18, color: Color(0xFF00897B)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'This cat is an unsocialized feral adult. Domestic foster and shelter adoptions are prohibited under humane TNR guidelines. The mandated path is safe Return to Colony / Spot (TNR).',
+                              style: GoogleFonts.nunito(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: const Color(0xFF00695C),
+                                height: 1.35,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    if (rescuerId.isNotEmpty && rescuerId != _uid)
+                      _buildPostVetOptionTile(
+                        icon: Icons.chat_bubble_rounded,
+                        iconColor: const Color(0xFF1E88E5),
+                        title: '💬 Discuss Release Spot with $rescuerName',
+                        subtitle:
+                            'Coordinate via chat on where and when to safely release the healed feral cat.',
+                        badgeText: 'Coordinate Chat',
+                        badgeColor: const Color(0xFF1E88E5),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => CoordinationChatScreen(
+                                sighting: s,
+                                otherUserId: rescuerId,
+                                otherUserName: rescuerName,
+                                otherUserRole: 'Vet Rescuer',
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    if (_isVetRescuer(s))
+                      _buildPostVetOptionTile(
+                        icon: Icons.nature_people_rounded,
+                        iconColor: const Color(0xFF00897B),
+                        title: '🌿 Confirm Return to Colony / Spot',
+                        subtitle:
+                            'You have custody of this feral cat. Safely release the cat back to its territory.',
+                        badgeText: 'Release Cat',
+                        badgeColor: const Color(0xFF00897B),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          _confirmReturnToSpot(s);
+                        },
+                      ),
+                  ] else ...[
+                    // 1. Rescuer in Charge (Delegate placement authority to Rescuer)
+                    _buildPostVetOptionTile(
+                      icon: Icons.public_rounded,
+                      iconColor: const Color(0xFF1E88E5),
+                      title: '🐾 Delegate to $rescuerName (Rescuer in Charge)',
+                      subtitle:
+                          'Grants custody authority to $rescuerName to decide and log next steps (foster, shelter, or adoption).',
+                      badgeText: 'Delegate Power',
+                      badgeColor: const Color(0xFF1E88E5),
+                      onTap: () async {
+                        Navigator.pop(ctx);
+                        try {
+                          await FirebaseService.instance
+                              .delegatePostVetCustodyToRescuer(s.id);
+                          if (mounted) {
+                            _snack(
+                                'Custody delegated to $rescuerName! Rescuer now has access to log next placement steps. 🐾');
+                          }
+                        } catch (e) {
+                          if (mounted) {
+                            _snack('Failed to delegate custody: $e');
+                          }
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 10),
 
-                  // 1. Rescuer / Community Has The Cat (Default)
-                  _buildPostVetOptionTile(
-                    icon: Icons.public_rounded,
-                    iconColor: const Color(0xFF1E88E5),
-                    title: '🐾 Rescuer / Community Has The Cat',
-                    subtitle:
-                        'The rescuer will decide and log next steps (foster, shelter, or release). Post stays active.',
-                    badgeText: 'Default',
-                    badgeColor: const Color(0xFF1E88E5),
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      _snack(
-                          'Vet visit verified! Rescuer and community can now log custody or shelter steps. 🐾');
-                    },
-                  ),
-                  const SizedBox(height: 10),
+                    // 2. Take In for Foster Care (Reporter Takes Cat)
+                    _buildPostVetOptionTile(
+                      icon: Icons.volunteer_activism_rounded,
+                      iconColor: const Color(0xFF673AB7),
+                      title: '🏡 I Will Take In for Foster Care',
+                      subtitle:
+                          'Bring cat into your own care for quarantine & recovery. Sets up daily milestone journey.',
+                      badgeText: '+150 XP',
+                      badgeColor: const Color(0xFF673AB7),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _showActionProofSheet('tookIn', s);
+                      },
+                    ),
+                    const SizedBox(height: 10),
 
-                  // 2. Take In for Foster Care (Reporter Takes Cat)
-                  _buildPostVetOptionTile(
-                    icon: Icons.volunteer_activism_rounded,
-                    iconColor: const Color(0xFF673AB7),
-                    title: '🏡 I Will Take In for Foster Care',
-                    subtitle:
-                        'Bring cat into your own care for quarantine & recovery. Sets up daily milestone journey.',
-                    badgeText: '+150 XP',
-                    badgeColor: const Color(0xFF673AB7),
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      _showActionProofSheet('tookIn', s);
-                    },
-                  ),
-                  const SizedBox(height: 10),
+                    // 3. Transfer to Shelter
+                    _buildPostVetOptionTile(
+                      icon: Icons.house_rounded,
+                      iconColor: const Color(0xFFE65100),
+                      title: '🏛️ Transfer to Animal Shelter',
+                      subtitle:
+                          'Direct admission to a verified rescue center or shelter.',
+                      badgeText: '+120 XP',
+                      badgeColor: const Color(0xFFE65100),
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _showActionProofSheet('sheltered', s);
+                      },
+                    ),
+                    const SizedBox(height: 10),
 
-                  // 3. Transfer to Shelter
-                  _buildPostVetOptionTile(
-                    icon: Icons.house_rounded,
-                    iconColor: const Color(0xFFE65100),
-                    title: '🏛️ Transfer to Animal Shelter',
-                    subtitle:
-                        'Direct admission to a verified rescue center or shelter.',
-                    badgeText: '+120 XP',
-                    badgeColor: const Color(0xFFE65100),
-                    onTap: () {
-                      Navigator.pop(ctx);
-                      _showActionProofSheet('sheltered', s);
-                    },
-                  ),
-                  const SizedBox(height: 10),
-
-                  // 4. Return to Spot (TNR / Safe Release)
-                  _buildPostVetOptionTile(
-                    icon: Icons.nature_people_rounded,
-                    iconColor: const Color(0xFF2E7D32),
-                    title: '🌿 Return to Spot (TNR / Safe Release)',
-                    subtitle:
-                        'Cat was treated/neutered and returned safely to its original territory.',
-                    badgeText: 'Safe Release',
-                    badgeColor: const Color(0xFF2E7D32),
-                    onTap: () async {
-                      Navigator.pop(ctx);
-                      await _confirmReturnToSpot(s);
-                    },
-                  ),
+                    // 4. Discuss Next Steps with Rescuer (Coordinate before deciding)
+                    if (rescuerId.isNotEmpty && rescuerId != _uid)
+                      _buildPostVetOptionTile(
+                        icon: Icons.chat_bubble_rounded,
+                        iconColor: const Color(0xFF1E88E5),
+                        title: '💬 Discuss Next Steps with $rescuerName',
+                        subtitle:
+                            'Coordinate via chat before deciding between foster care, shelter, or rescuer custody.',
+                        badgeText: 'Coordinate Chat',
+                        badgeColor: const Color(0xFF1E88E5),
+                        onTap: () {
+                          Navigator.pop(ctx);
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => CoordinationChatScreen(
+                                sighting: s,
+                                otherUserId: rescuerId,
+                                otherUserName: rescuerName,
+                                otherUserRole: 'Vet Rescuer',
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                  ],
                 ],
               ),
             ),
@@ -705,102 +955,946 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   Future<void> _confirmReturnToSpot(Sighting s) async {
+    if (!s.canTnrReturn && !s.isFeral) {
+      _snack(
+          'Kittens and domestic fosters cannot be released to the street. Please choose Foster, Shelter, or Adoption.');
+      return;
+    }
     if (s.isVetVisitPending) {
-      _snack('⏳ Vet visit verification is pending. Actions are currently locked.');
+      _snack(
+          '⏳ Vet visit verification is pending. Actions are currently locked.');
       return;
     }
     if (s.isAwaitingPostVetDecision) {
-      final isVetRescuer = _uid != null &&
-          (s.lastVetRescuerId == _uid ||
-              s.pendingVetRescuerId == _uid ||
-              (s.lastVetRescuerId == null && s.rescueClaimedBy == _uid));
-      if (!isVetRescuer) {
+      if (!_isVetRescuer(s)) {
         _snack(
             '⏳ Only ${s.lastVetRescuerName?.isNotEmpty == true ? s.lastVetRescuerName : "the rescuer"} who has custody can confirm return to spot.');
         return;
       }
     }
+
+    double releaseLat = s.effectiveLatitude;
+    double releaseLng = s.effectiveLongitude;
+    String releaseAddress = s.effectiveLocationAddress;
+    final addressCtrl = TextEditingController(text: releaseAddress);
     final noteCtrl = TextEditingController(
-        text:
-            'Cat received veterinary care and was safely returned to original spot (TNR).');
-    final confirmed = await showDialog<bool>(
+      text:
+          'Cat received veterinary care and was safely returned to colony territory (TNR). 🌿',
+    );
+    bool isCustomLocationMarked = false;
+    bool showLocationPicker = false;
+    bool isLocating = false;
+    File? proofFile;
+    bool isSubmitting = false;
+
+    await showModalBottomSheet<void>(
       context: context,
-      builder: (dCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            const Icon(Icons.nature_people_rounded, color: Color(0xFF2E7D32)),
-            const SizedBox(width: 8),
-            Text('Return to Spot',
-                style: GoogleFonts.nunito(
-                    fontWeight: FontWeight.w900, color: _navy)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Confirm that the cat has been safely returned to its original location following vet treatment:',
-              style: GoogleFonts.nunito(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
-                  color: _navy.withValues(alpha: 0.75)),
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (bCtx) => StatefulBuilder(
+        builder: (context, setSheetState) {
+          final canSubmit = proofFile != null && !isSubmitting;
+          final bottomPadding = MediaQuery.of(context).viewInsets.bottom +
+              MediaQuery.of(context).padding.bottom +
+              32;
+
+          Future<void> pickProof(ImageSource src) async {
+            try {
+              final picker = ImagePicker();
+              final picked = await picker.pickImage(
+                source: src,
+                maxWidth: 1200,
+                maxHeight: 1200,
+                imageQuality: 80,
+              );
+              if (picked != null) {
+                setSheetState(() => proofFile = File(picked.path));
+              }
+            } catch (e) {
+              _snack('Could not pick photo: $e');
+            }
+          }
+
+          return Container(
+            constraints: BoxConstraints(
+              maxHeight: MediaQuery.of(context).size.height * 0.90,
             ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: noteCtrl,
-              maxLines: 2,
-              style: GoogleFonts.nunito(fontSize: 13, color: _navy),
-              decoration: InputDecoration(
-                labelText: 'Release Notes (Optional)',
-                filled: true,
-                fillColor: _lavLight,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
-                ),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            padding: EdgeInsets.fromLTRB(
+              20,
+              14,
+              20,
+              bottomPadding,
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Drag Handle
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade300,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Header
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color:
+                              const Color(0xFF00897B).withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.nature_people_rounded,
+                          color: Color(0xFF00897B),
+                          size: 24,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Confirm TNR Colony Return 🌿',
+                              style: GoogleFonts.nunito(
+                                fontSize: 17,
+                                fontWeight: FontWeight.w900,
+                                color: _navy,
+                              ),
+                            ),
+                            Text(
+                              'Return unsocialized adult feral cat to colony territory.',
+                              style: GoogleFonts.nunito(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: _navy.withValues(alpha: 0.65),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Feral Welfare Standard Notice
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00897B).withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color:
+                            const Color(0xFF00897B).withValues(alpha: 0.25),
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Icon(
+                          Icons.verified_user_rounded,
+                          size: 18,
+                          color: Color(0xFF00897B),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'TNR Welfare Protocol: Feral cats thrive in their bonded outdoor colony. By default, release is set to the cat’s original territory coordinates.',
+                            style: GoogleFonts.nunito(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: const Color(0xFF00695C),
+                              height: 1.35,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+
+                  // Location Section
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Release Location',
+                        style: GoogleFonts.nunito(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w900,
+                          color: _navy,
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: isCustomLocationMarked
+                              ? const Color(0xFF1E88E5)
+                                  .withValues(alpha: 0.12)
+                              : const Color(0xFF00897B)
+                                  .withValues(alpha: 0.12),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          isCustomLocationMarked
+                              ? '📍 Specific Pin Updated'
+                              : '🌿 Original Colony (Default)',
+                          style: GoogleFonts.nunito(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                            color: isCustomLocationMarked
+                                ? const Color(0xFF1976D2)
+                                : const Color(0xFF00897B),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+
+                  // Location Display Card
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _lavLight,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: _lavender.withValues(alpha: 0.25),
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(
+                              isCustomLocationMarked
+                                  ? Icons.location_on_rounded
+                                  : Icons.nature_people_rounded,
+                              size: 16,
+                              color: isCustomLocationMarked
+                                  ? const Color(0xFF1976D2)
+                                  : const Color(0xFF00897B),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                addressCtrl.text.isNotEmpty
+                                    ? addressCtrl.text
+                                    : 'Colony Territory (${releaseLat.toStringAsFixed(4)}, ${releaseLng.toStringAsFixed(4)})',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: _navy,
+                                ),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Coordinates: ${releaseLat.toStringAsFixed(5)}, ${releaseLng.toStringAsFixed(5)}',
+                          style: GoogleFonts.nunito(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: _navy.withValues(alpha: 0.55),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        InkWell(
+                          onTap: () {
+                            setSheetState(
+                                () => showLocationPicker = !showLocationPicker);
+                          },
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: _lavender.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  showLocationPicker
+                                      ? Icons.keyboard_arrow_up_rounded
+                                      : Icons.edit_location_alt_outlined,
+                                  size: 15,
+                                  color: const Color(0xFF00897B),
+                                ),
+                                const SizedBox(width: 5),
+                                Text(
+                                  showLocationPicker
+                                      ? 'Hide Location Map'
+                                      : 'Mark Specific Release Point (Optional)',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: const Color(0xFF00897B),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Optional Location Map & GPS Picker
+                  if (showLocationPicker) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      height: 180,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                            color: _navy.withValues(alpha: 0.15)),
+                      ),
+                      clipBehavior: Clip.antiAlias,
+                      child: Stack(
+                        children: [
+                          FlutterMap(
+                            options: MapOptions(
+                              initialCenter:
+                                  ll.LatLng(releaseLat, releaseLng),
+                              initialZoom: 16.0,
+                              onTap: (tapPos, point) async {
+                                releaseLat = point.latitude;
+                                releaseLng = point.longitude;
+                                isCustomLocationMarked = true;
+                                setSheetState(() => isLocating = true);
+                                try {
+                                  final addr = await LocationService()
+                                      .getAddressFromCoordinates(
+                                          point.latitude, point.longitude);
+                                  releaseAddress = addr;
+                                  addressCtrl.text = addr;
+                                } catch (_) {}
+                                setSheetState(() => isLocating = false);
+                              },
+                            ),
+                            children: [
+                              TileLayer(
+                                urlTemplate:
+                                    'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                userAgentPackageName: 'com.pawwatch.app',
+                              ),
+                              MarkerLayer(
+                                markers: [
+                                  Marker(
+                                    point:
+                                        ll.LatLng(releaseLat, releaseLng),
+                                    width: 38,
+                                    height: 38,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFF00897B),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                            color: Colors.white, width: 2),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black
+                                                .withValues(alpha: 0.3),
+                                            blurRadius: 4,
+                                          ),
+                                        ],
+                                      ),
+                                      child: const Center(
+                                        child: Icon(
+                                          Icons.nature_people_rounded,
+                                          size: 18,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                          if (isLocating)
+                            Container(
+                              color: Colors.black26,
+                              child: const Center(
+                                child: CircularProgressIndicator(
+                                    color: Color(0xFF00897B)),
+                              ),
+                            ),
+                          Positioned(
+                            bottom: 6,
+                            left: 6,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.65),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                'Tap map to place release pin',
+                                style: GoogleFonts.nunito(
+                                  color: Colors.white,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () async {
+                            setSheetState(() => isLocating = true);
+                            try {
+                              final loc = await LocationService()
+                                  .getCurrentUserLocation();
+                              releaseLat = loc.latitude;
+                              releaseLng = loc.longitude;
+                              releaseAddress = loc.formattedAddress;
+                              addressCtrl.text = loc.formattedAddress;
+                              isCustomLocationMarked = true;
+                            } catch (e) {
+                              _snack('Could not get GPS: $e');
+                            }
+                            setSheetState(() => isLocating = false);
+                          },
+                          icon: const Icon(Icons.my_location_rounded,
+                              size: 14, color: Color(0xFF00897B)),
+                          label: Text(
+                            'Use Current GPS',
+                            style: GoogleFonts.nunito(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: const Color(0xFF00897B),
+                            ),
+                          ),
+                        ),
+                        if (isCustomLocationMarked) ...[
+                          const SizedBox(width: 8),
+                          TextButton.icon(
+                            onPressed: () {
+                              setSheetState(() {
+                                releaseLat = s.effectiveLatitude;
+                                releaseLng = s.effectiveLongitude;
+                                releaseAddress = s.effectiveLocationAddress;
+                                addressCtrl.text = releaseAddress;
+                                isCustomLocationMarked = false;
+                              });
+                            },
+                            icon: const Icon(Icons.restore_rounded,
+                                size: 14, color: Colors.grey),
+                            label: Text(
+                              'Reset to Default',
+                              style: GoogleFonts.nunito(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: Colors.grey.shade700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+
+                  // Photo Proof (Mandatory)
+                  Row(
+                    children: [
+                      Text(
+                        'Release Photo Proof',
+                        style: GoogleFonts.nunito(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w900,
+                          color: _navy,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.red.shade300),
+                        ),
+                        child: Text(
+                          'Required *',
+                          style: GoogleFonts.nunito(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.red.shade700,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Community members want verified photo updates of the cat safely released back to colony territory.',
+                    style: GoogleFonts.nunito(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: _navy.withValues(alpha: 0.65),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (proofFile != null)
+                    Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(12),
+                          child: Image.file(
+                            proofFile!,
+                            width: 100,
+                            height: 100,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        Positioned(
+                          top: 4,
+                          right: 4,
+                          child: GestureDetector(
+                            onTap: () =>
+                                setSheetState(() => proofFile = null),
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(
+                                color: Colors.black87,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.close_rounded,
+                                  size: 14, color: Colors.white),
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  else
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => pickProof(ImageSource.camera),
+                            icon: const Icon(Icons.camera_alt_rounded,
+                                size: 16, color: Color(0xFF00897B)),
+                            label: Text(
+                              'Camera',
+                              style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: _navy,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            onPressed: () => pickProof(ImageSource.gallery),
+                            icon: const Icon(Icons.photo_library_rounded,
+                                size: 16, color: Color(0xFF1E88E5)),
+                            label: Text(
+                              'Gallery',
+                              style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: _navy,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  const SizedBox(height: 16),
+
+                  // Release Notes
+                  Text(
+                    'Release Notes',
+                    style: GoogleFonts.nunito(
+                      fontSize: 13.5,
+                      fontWeight: FontWeight.w900,
+                      color: _navy,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: noteCtrl,
+                    maxLines: 2,
+                    style: GoogleFonts.nunito(fontSize: 13, color: _navy),
+                    decoration: InputDecoration(
+                      filled: true,
+                      fillColor: _lavLight,
+                      contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14, vertical: 10),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 20),
+
+                  // Submit Button Guidance (when photo is missing)
+                  if (proofFile == null) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade50,
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: Colors.amber.shade300),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.lock_rounded,
+                              size: 16, color: Colors.amber.shade900),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Release photo proof is required above to enable this button.',
+                              style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFFE65100),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  // Submit Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00897B),
+                        foregroundColor: Colors.white,
+                        disabledBackgroundColor: Colors.grey.shade300,
+                        disabledForegroundColor: Colors.grey.shade500,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        elevation: 0,
+                      ),
+                      onPressed: !canSubmit
+                          ? null
+                          : () async {
+                              setSheetState(() => isSubmitting = true);
+                              try {
+                                await FirebaseService.instance.logRescueAction(
+                                  sightingId: s.id,
+                                  action: 'returnedToSpot',
+                                  customNote: noteCtrl.text.trim(),
+                                  proofPhotoFile: proofFile,
+                                  updatedLatitude: isCustomLocationMarked
+                                      ? releaseLat
+                                      : null,
+                                  updatedLongitude: isCustomLocationMarked
+                                      ? releaseLng
+                                      : null,
+                                  updatedLocationAddress: isCustomLocationMarked
+                                      ? addressCtrl.text.trim()
+                                      : null,
+                                  markResolved: true,
+                                );
+                                if (bCtx.mounted) {
+                                  Navigator.pop(bCtx);
+                                }
+                                if (mounted) {
+                                  _snack(
+                                      '🌿 Feral cat safely returned to colony territory! (+100 XP)');
+                                }
+                              } catch (e) {
+                                if (mounted) {
+                                  _snack('Failed to complete return: $e');
+                                }
+                              } finally {
+                                if (mounted) {
+                                  setSheetState(() => isSubmitting = false);
+                                }
+                              }
+                            },
+                      icon: isSubmitting
+                          ? const SizedBox.shrink()
+                          : Icon(
+                              proofFile != null
+                                  ? Icons.nature_people_rounded
+                                  : Icons.lock_outline_rounded,
+                              size: 18,
+                            ),
+                      label: isSubmitting
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                          : Text(
+                              proofFile != null
+                                  ? 'Confirm Release to Colony (+100 XP)'
+                                  : 'Attach Photo Proof to Confirm',
+                              style: GoogleFonts.nunito(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                    ),
+                  ),
+                  SizedBox(
+                    height: MediaQuery.of(context).padding.bottom > 0
+                        ? MediaQuery.of(context).padding.bottom + 20
+                        : 24,
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dCtx, false),
-            child: Text('Cancel',
-                style: GoogleFonts.nunito(
-                    fontWeight: FontWeight.w700, color: Colors.grey)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2E7D32),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-            ),
-            onPressed: () => Navigator.pop(dCtx, true),
-            child: Text('Confirm Release',
-                style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
-          ),
-        ],
+          );
+        },
       ),
     );
+  }
 
-    if (confirmed == true) {
-      try {
-        await FirebaseService.instance.logRescueAction(
-          sightingId: s.id,
-          action: 'returnedToSpot',
-          customNote: noteCtrl.text.trim(),
-        );
-        if (mounted) {
-          _snack(
-              'Cat marked as safely returned to spot after vet treatment! 🌿');
-        }
-      } catch (e) {
-        if (mounted) _snack('Failed to update: $e');
-      }
+  Future<void> _showUpdateCatTemperamentDialog(Sighting s) async {
+    if (s.isVetVisitVerified) {
+      _snack('Vet visit has already been verified. Diagnosis cannot be modified.');
+      return;
     }
+    String selectedTemp = s.temperament ?? 'feral';
+    final noteCtrl = TextEditingController();
+
+    await showDialog<void>(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              const Icon(Icons.psychology_alt_rounded,
+                  color: Color(0xFF673AB7)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Update Cat Temperament',
+                  style: GoogleFonts.nunito(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16.5,
+                    color: _navy,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Did the clinic veterinarian determine that this cat is feral, timid, or friendly during the exam or procedure?',
+                  style: GoogleFonts.nunito(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: _navy.withValues(alpha: 0.75),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ...[
+                  {
+                    'key': 'feral',
+                    'label': '🌿 Feral / Colony Adult (Mandatory TNR)',
+                    'desc':
+                        'Unsocialized to humans. Cannot be adopted indoors; must be safely returned to colony.',
+                    'color': const Color(0xFF00897B),
+                  },
+                  {
+                    'key': 'shy',
+                    'label': '🐾 Shy / Timid Stray',
+                    'desc':
+                        'Cautious but socializable indoors through quiet foster care.',
+                    'color': const Color(0xFF1E88E5),
+                  },
+                  {
+                    'key': 'friendly',
+                    'label': '💖 Friendly Pet (Adoptable)',
+                    'desc':
+                        'Approachable and gentle. Suitable for indoor home adoption.',
+                    'color': const Color(0xFF9C27B0),
+                  },
+                  {
+                    'key': 'kitten',
+                    'label': '🍼 Kitten (Under 4 Months)',
+                    'desc':
+                        'Young kitten. Highly socializable indoors, requires specialized foster care, nursing, or adoption.',
+                    'color': const Color(0xFFE91E63),
+                  },
+                ].map((opt) {
+                  final key = opt['key'] as String;
+                  final label = opt['label'] as String;
+                  final desc = opt['desc'] as String;
+                  final color = opt['color'] as Color;
+                  final isSelected = selectedTemp == key;
+
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: InkWell(
+                      onTap: () => setDlgState(() => selectedTemp = key),
+                      borderRadius: BorderRadius.circular(12),
+                      child: Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? color.withValues(alpha: 0.1)
+                              : _lavLight.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: isSelected
+                                ? color
+                                : _navy.withValues(alpha: 0.15),
+                            width: isSelected ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(
+                              isSelected
+                                  ? Icons.radio_button_checked_rounded
+                                  : Icons.radio_button_unchecked_rounded,
+                              size: 18,
+                              color: isSelected ? color : Colors.grey,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    label,
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w800,
+                                      color: isSelected ? color : _navy,
+                                    ),
+                                  ),
+                                  Text(
+                                    desc,
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 10.5,
+                                      fontWeight: FontWeight.w600,
+                                      color: _navy.withValues(alpha: 0.65),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+                const SizedBox(height: 8),
+                TextField(
+                  controller: noteCtrl,
+                  maxLines: 2,
+                  style: GoogleFonts.nunito(fontSize: 12, color: _navy),
+                  decoration: InputDecoration(
+                    labelText: 'Clinic / Vet Notes (Optional)',
+                    labelStyle: GoogleFonts.nunito(fontSize: 12),
+                    hintText:
+                        'e.g. Dr. Jane at City Vet verified unsocialized feral; ear-tipped',
+                    hintStyle:
+                        GoogleFonts.nunito(fontSize: 11, color: Colors.grey),
+                    filled: true,
+                    fillColor: _lavLight,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dCtx),
+              child: Text('Cancel',
+                  style: GoogleFonts.nunito(
+                      fontWeight: FontWeight.w700, color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF673AB7),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () async {
+                Navigator.pop(dCtx);
+                try {
+                  await FirebaseService.instance.updateCatTemperament(
+                    sightingId: s.id,
+                    temperament: selectedTemp,
+                    reason: noteCtrl.text.trim(),
+                  );
+                  if (mounted) {
+                    final label = selectedTemp == 'feral'
+                        ? '🌿 Feral / Colony Adult'
+                        : (selectedTemp == 'friendly'
+                            ? '💖 Friendly Pet'
+                            : '🐾 Shy Stray');
+                    _snack(
+                        'Cat temperament updated to $label!${selectedTemp == "feral" ? " Mandatory TNR protocol active." : ""}');
+                  }
+                } catch (e) {
+                  if (mounted) _snack('Failed to update temperament: $e');
+                }
+              },
+              child: Text('Save Diagnosis',
+                  style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _showRequestCommunityFosterDialog(Sighting s) async {
@@ -996,22 +2090,219 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     );
   }
 
-  void _showActionProofSheet(String action, Sighting s) {
+  Future<bool> _ensureNoConflictingRescueTrip(Sighting targetSighting) async {
+    if (_uid == null) return true;
+    final activeTrip = await FirebaseService.instance.getActiveRescueTrip(_uid!);
+    if (activeTrip != null && activeTrip.id != targetSighting.id) {
+      if (!mounted) return false;
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE65100).withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.directions_run_rounded,
+                    color: Color(0xFFE65100), size: 24),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Active Rescue in Progress',
+                  style: GoogleFonts.nunito(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                    color: _navy,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'You are currently on your way to another rescue mission (${activeTrip.title.isNotEmpty ? activeTrip.title : "Active Rescue"} • ${activeTrip.locationAddress}).',
+                style: GoogleFonts.nunito(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: _navy,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'To maintain community reliability and prioritize the cat in transit, you cannot claim or log actions on other cats until you complete or cancel your active trip.',
+                style: GoogleFonts.nunito(
+                  fontSize: 12,
+                  color: _navy.withValues(alpha: 0.75),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Close', style: GoogleFonts.nunito(color: _navy)),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE65100),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SightingDetailScreen(sighting: activeTrip),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+              label: Text(
+                'Go to Active Rescue',
+                style: GoogleFonts.nunito(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+    return true;
+  }
+
+  Future<bool> _ensureNoConflictingVetCare(Sighting targetSighting) async {
+    if (_uid == null) return true;
+    final activeVetCare =
+        await FirebaseService.instance.getActiveVetCareSighting(_uid!);
+    if (activeVetCare != null && activeVetCare.id != targetSighting.id) {
+      if (!mounted) return false;
+      final isDecidingNextStep = activeVetCare.isAwaitingPostVetDecision;
+      await showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF673AB7).withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.local_hospital_rounded,
+                    color: Color(0xFF673AB7), size: 24),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  isDecidingNextStep
+                      ? 'Decide Next Step Required'
+                      : 'Vet Care Pending Verification',
+                  style: GoogleFonts.nunito(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16,
+                    color: _navy,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                isDecidingNextStep
+                    ? 'You currently have physical custody of ${activeVetCare.title.isNotEmpty ? activeVetCare.title : "this cat"} after vet care.'
+                    : 'You submitted vet clinic proof for ${activeVetCare.title.isNotEmpty ? activeVetCare.title : "this cat"} and are waiting for reporter verification.',
+                style: GoogleFonts.nunito(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: _navy,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                isDecidingNextStep
+                    ? 'You must decide the next step (foster care, shelter transfer, or safe release) for this cat before you can claim or log actions on other cats.'
+                    : 'Please wait for the reporter to verify your vet visit before taking on or logging actions on another cat.',
+                style: GoogleFonts.nunito(
+                  fontSize: 12,
+                  color: _navy.withValues(alpha: 0.75),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: Text('Dismiss', style: GoogleFonts.nunito(color: _navy)),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF673AB7),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
+              ),
+              onPressed: () {
+                Navigator.pop(ctx);
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        SightingDetailScreen(sighting: activeVetCare),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.arrow_forward_rounded, size: 16),
+              label: Text(
+                isDecidingNextStep ? 'Decide Next Step 🐾' : 'View Vet Care Cat',
+                style: GoogleFonts.nunito(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+    return true;
+  }
+
+  Future<void> _showActionProofSheet(String action, Sighting s) async {
+    if (!await _ensureNoConflictingRescueTrip(s)) return;
+    if (!await _ensureNoConflictingVetCare(s)) return;
     if (s.isVetVisitPending) {
       _snack(
           '⏳ A vet visit report has been submitted by ${s.pendingVetRescuerName?.isNotEmpty == true ? s.pendingVetRescuerName : "a rescuer"}. Actions are locked pending verification.');
       return;
     }
     if (s.isAwaitingPostVetDecision) {
-      final isVetRescuer = _uid != null &&
-          (s.lastVetRescuerId == _uid ||
-              s.pendingVetRescuerId == _uid ||
-              (s.lastVetRescuerId == null && s.rescueClaimedBy == _uid));
-      if (!isVetRescuer) {
+      if (!_isVetRescuer(s) && !_isOwner(s) && !s.isRescuerCustodyDelegated) {
         _snack(
             '⏳ ${s.lastVetRescuerName?.isNotEmpty == true ? s.lastVetRescuerName : "The rescuer"} currently has custody of this cat after vet care. Please coordinate via chat.');
         return;
       }
+    }
+    if (s.isFeral &&
+        (action == 'tookIn' || action == 'holding' || action == 'sheltered')) {
+      _snack(
+          '🌿 This is an unsocialized feral cat. Foster and shelter adoptions are not suitable for feral cats. Mandatory TNR Return to Colony is the only permitted outcome.');
+      return;
     }
     if ((action == 'tookIn' || action == 'holding') &&
         s.isFosterDeclinedFor(_uid)) {
@@ -1030,6 +2321,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     final isShelteredAction = action == 'sheltered';
     final isTookInAction = action == 'tookIn' || action == 'holding';
     final isOwner = _isOwner(s);
+    String? selectedDiagnosedTemperament = s.temperament;
     int planDurationDays = 7;
     String selectedCareGoal = '🍼 Kitten Care & Weaning';
     final customGoalCtrl = TextEditingController();
@@ -1053,6 +2345,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     final shelterAddressCtrl = TextEditingController(text: isShelteredAction ? s.effectiveLocationAddress : '');
     final noteCtrl = TextEditingController();
 
+    if (!mounted) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1787,6 +3080,131 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       ),
                       const SizedBox(height: 12),
                     ],
+                    if (action == 'vet') ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF673AB7).withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color:
+                                const Color(0xFF673AB7).withValues(alpha: 0.2),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Icon(Icons.psychology_alt_rounded,
+                                    size: 17, color: Color(0xFF673AB7)),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    'Clinic Temperament Diagnosis (Vet Assessment)',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: _navy,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              s.temperament != null && s.temperament!.isNotEmpty
+                                  ? 'Current classification: "${s.temperament == "feral" ? "Feral / Colony Adult" : (s.temperament == "friendly" ? "Friendly Pet" : "Shy Stray")}". If the vet determined otherwise (e.g. diagnosed as feral), select the updated diagnosis:'
+                                  : 'Did the veterinarian assess whether this cat is friendly, timid, or an unsocialized feral adult?',
+                              style: GoogleFonts.nunito(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: _navy.withValues(alpha: 0.65),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                {
+                                  'key': 'friendly',
+                                  'label': '💖 Friendly Pet',
+                                  'color': const Color(0xFF9C27B0),
+                                },
+                                {
+                                  'key': 'shy',
+                                  'label': '🐾 Shy Stray',
+                                  'color': const Color(0xFF1E88E5),
+                                },
+                                {
+                                  'key': 'feral',
+                                  'label': '🌿 Feral Adult (TNR)',
+                                  'color': const Color(0xFF00897B),
+                                },
+                                {
+                                  'key': 'kitten',
+                                  'label': '🍼 Kitten',
+                                  'color': const Color(0xFFE91E63),
+                                },
+                              ].map((opt) {
+                                final optKey = opt['key'] as String;
+                                final optLabel = opt['label'] as String;
+                                final optColor = opt['color'] as Color;
+                                final isSelected =
+                                    selectedDiagnosedTemperament == optKey;
+                                return InkWell(
+                                  onTap: () {
+                                    setSheetState(() {
+                                      selectedDiagnosedTemperament =
+                                          isSelected ? null : optKey;
+                                    });
+                                  },
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: isSelected
+                                          ? optColor.withValues(alpha: 0.15)
+                                          : Colors.white,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: isSelected
+                                            ? optColor
+                                            : _navy.withValues(alpha: 0.15),
+                                        width: isSelected ? 1.5 : 1,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (isSelected) ...[
+                                          Icon(Icons.check_circle_rounded,
+                                              size: 13, color: optColor),
+                                          const SizedBox(width: 4),
+                                        ],
+                                        Text(
+                                          optLabel,
+                                          style: GoogleFonts.nunito(
+                                            fontSize: 11,
+                                            fontWeight: isSelected
+                                                ? FontWeight.w800
+                                                : FontWeight.w700,
+                                            color: isSelected ? optColor : _navy,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     Text(
                       'Custom Note / Details (Optional)',
                       style: GoogleFonts.nunito(
@@ -2027,6 +3445,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                     carePlanDurationDays: careDuration,
                                     careMilestoneDays: milestones,
                                     customMilestoneTitles: milestoneTitles,
+                                    temperament: action == 'vet'
+                                        ? selectedDiagnosedTemperament
+                                        : null,
                                   );
                                   if (ctx.mounted) {
                                     Navigator.pop(ctx);
@@ -2176,17 +3597,58 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     );
   }
 
+  Widget _buildArchivedBanner(Sighting s) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFF455A64).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFF455A64).withValues(alpha: 0.25),
+        ),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.inventory_2_outlined,
+              size: 20, color: Color(0xFF455A64)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Archived Case Record',
+                  style: GoogleFonts.nunito(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFF455A64),
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'This rescue was successfully completed over 30 days ago and auto-archived from the active feed. All medical notes, treatment records, and rescuer achievements remain permanently preserved.',
+                  style: GoogleFonts.nunito(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w600,
+                    color: _navy.withValues(alpha: 0.7),
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showRoamingUpdateSheet(Sighting s) {
     if (s.isVetVisitPending) {
       _snack('⏳ Vet visit verification is pending. Actions are currently locked.');
       return;
     }
     if (s.isAwaitingPostVetDecision) {
-      final isVetRescuer = _uid != null &&
-          (s.lastVetRescuerId == _uid ||
-              s.pendingVetRescuerId == _uid ||
-              (s.lastVetRescuerId == null && s.rescueClaimedBy == _uid));
-      if (!isVetRescuer) {
+      if (!_isVetRescuer(s) && !_isOwner(s) && !s.isRescuerCustodyDelegated) {
         _snack(
             '⏳ ${s.lastVetRescuerName?.isNotEmpty == true ? s.lastVetRescuerName : "The rescuer"} currently has custody of this cat after vet care.');
         return;
@@ -2372,7 +3834,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     );
   }
 
-  void _showRelocationSheet(Sighting s) {
+  void _showRelocationSheet(Sighting s) async {
+    if (!await _ensureNoConflictingRescueTrip(s)) return;
+    if (!await _ensureNoConflictingVetCare(s)) return;
     File? proofFile;
     bool isScanning = false;
     CatValidationResult? scanResult;
@@ -2394,6 +3858,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       isLocating = false;
     });
 
+    if (!mounted) return;
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -2828,11 +4293,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     );
   }
 
-  void _showNotHereDialog(Sighting s) {
+  void _showNotHereDialog(Sighting s) async {
+    if (!await _ensureNoConflictingRescueTrip(s)) return;
+    if (!await _ensureNoConflictingVetCare(s)) return;
     final noteCtrl = TextEditingController();
     String selectedReason = 'roaming'; // 'roaming' or 'helpedOffline'
     final isOwner = _isOwner(s);
 
+    if (!mounted) return;
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
@@ -3071,6 +4539,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
   Future<void> _claimRescue(Sighting s) async {
     try {
+      if (!await _ensureNoConflictingRescueTrip(s)) return;
+      if (!await _ensureNoConflictingVetCare(s)) return;
+
       // Distance check
       LocationResult? userLoc;
       try {
@@ -3166,23 +4637,61 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   Future<void> _postComment(String sid) async {
-    final t = _commentCtrl.text.trim();
-    if (t.isEmpty) return;
-    await FirebaseService.instance
-        .addComment(sightingId: sid, text: t, anonymous: _isAnon);
-    _commentCtrl.clear();
+    if (_isPostingComment) return;
+    final t = _commentCtrl.text;
+    final error = _validateCommentSpam(t);
+    if (error != null) {
+      _snack(error);
+      return;
+    }
+
+    setState(() => _isPostingComment = true);
+    try {
+      await FirebaseService.instance
+          .addComment(sightingId: sid, text: t.trim(), anonymous: _isAnon);
+      _lastGlobalCommentAt = DateTime.now();
+      _lastGlobalCommentText = t.trim();
+      _commentCtrl.clear();
+      if (mounted) FocusScope.of(context).unfocus();
+    } catch (e) {
+      if (mounted) _snack('$e');
+    } finally {
+      if (mounted) setState(() => _isPostingComment = false);
+    }
   }
 
   Future<void> _postReply(String sid) async {
-    final t = _replyCtrl.text.trim();
-    if (t.isEmpty || _replyingToId == null) return;
-    await FirebaseService.instance.addComment(
-        sightingId: sid, text: t, parentId: _replyingToId, anonymous: _isAnon);
-    _replyCtrl.clear();
-    setState(() {
-      _replyingToId = null;
-      _replyingToName = null;
-    });
+    if (_isPostingComment) return;
+    if (_replyingToId == null) return;
+    final t = _replyCtrl.text;
+    final error = _validateCommentSpam(t);
+    if (error != null) {
+      _snack(error);
+      return;
+    }
+
+    setState(() => _isPostingComment = true);
+    try {
+      await FirebaseService.instance.addComment(
+          sightingId: sid,
+          text: t.trim(),
+          parentId: _replyingToId,
+          anonymous: _isAnon);
+      _lastGlobalCommentAt = DateTime.now();
+      _lastGlobalCommentText = t.trim();
+      _replyCtrl.clear();
+      if (mounted) {
+        FocusScope.of(context).unfocus();
+        setState(() {
+          _replyingToId = null;
+          _replyingToName = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) _snack('$e');
+    } finally {
+      if (mounted) setState(() => _isPostingComment = false);
+    }
   }
 
   @override
@@ -3219,10 +4728,92 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   height: 1.2)),
                           const SizedBox(height: 10),
                           _buildCategoryBadge(s),
+                          Builder(builder: (context) {
+                            final canEditTemperament = !s.isVetVisitVerified &&
+                                s.urgency != 'resolved' &&
+                                (_isOwner(s) ||
+                                    (_uid != null &&
+                                        (s.pendingVetRescuerId == _uid ||
+                                            s.careTakerId == _uid)));
+                            if (!canEditTemperament &&
+                                s.temperament == null &&
+                                !s.hasEarTip) {
+                              return const SizedBox.shrink();
+                            }
+
+                            return Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Wrap(
+                                spacing: 6,
+                                runSpacing: 4,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  if (s.temperament == 'feral')
+                                    _traitChip('🌿 Feral / Colony Adult',
+                                        const Color(0xFF00897B)),
+                                  if (s.temperament == 'friendly')
+                                    _traitChip('😻 Friendly Pet (Adoptable)',
+                                        const Color(0xFF9C27B0)),
+                                  if (s.temperament == 'shy')
+                                    _traitChip('🙈 Shy / Timid Stray',
+                                        const Color(0xFF1E88E5)),
+                                  if (s.temperament == 'kitten')
+                                    _traitChip('🍼 Kitten (Under 4 Months)',
+                                        const Color(0xFFE91E63)),
+                                  if (s.hasEarTip)
+                                    _traitChip('✂️ Ear-Tipped (TNR Fixed)',
+                                        const Color(0xFF2E7D32)),
+                                  if (canEditTemperament)
+                                    InkWell(
+                                      onTap: () =>
+                                          _showUpdateCatTemperamentDialog(s),
+                                      borderRadius: BorderRadius.circular(20),
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 8, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF673AB7)
+                                              .withValues(alpha: 0.08),
+                                          borderRadius:
+                                              BorderRadius.circular(20),
+                                          border: Border.all(
+                                            color: const Color(0xFF673AB7)
+                                                .withValues(alpha: 0.3),
+                                            width: 0.8,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.edit_rounded,
+                                                size: 11,
+                                                color: Color(0xFF673AB7)),
+                                            const SizedBox(width: 3),
+                                            Text(
+                                              s.temperament != null
+                                                  ? 'Change Diagnosis'
+                                                  : '+ Add Vet Diagnosis',
+                                              style: GoogleFonts.nunito(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w800,
+                                                color: const Color(0xFF673AB7),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            );
+                          }),
                           const SizedBox(height: 12),
                           _buildReporter(s),
                           const SizedBox(height: 12),
-                          if (s.urgency != 'resolved') ...[
+                          if (s.isAutoArchived) ...[
+                            _buildArchivedBanner(s),
+                            const SizedBox(height: 12),
+                          ] else if (s.urgency != 'resolved') ...[
                             _buildFreshnessBanner(s),
                             const SizedBox(height: 12),
                           ],
@@ -3266,6 +4857,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             _buildAdoptionShowcaseCard(s, isCaretaker),
                             const SizedBox(height: 16),
                           ],
+                          if (s.isTnrCommunityCat && s.urgency != 'resolved') ...[
+                            _buildCommunityCatBanner(s),
+                            const SizedBox(height: 16),
+                          ],
                           if (s.urgency != 'resolved') ...[
                             _buildActions(s),
                             if (_hasActed) ...[
@@ -3278,7 +4873,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           const SizedBox(height: 20),
                           _buildCommunity(s),
                           SizedBox(
-                            height: (s.urgency != 'resolved' ? 140.0 : 60.0) +
+                            height: ((s.urgency != 'resolved') ? 140.0 : 60.0) +
                                 MediaQuery.of(context).padding.bottom,
                           ),
                         ],
@@ -3309,13 +4904,11 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   onPageChanged: (i) => setState(() => _photoPage = i),
                   itemBuilder: (_, i) {
                     final url = photos[i];
-                    return url.startsWith('http')
-                        ? Image.network(url,
-                            fit: BoxFit.cover,
-                            errorBuilder: (ctx, err, st) => _placeholder())
-                        : Image.file(File(url),
-                            fit: BoxFit.cover,
-                            errorBuilder: (ctx, err, st) => _placeholder());
+                    return PawImage(
+                      url: url,
+                      fit: BoxFit.cover,
+                      placeholder: _placeholder(),
+                    );
                   })
               : _placeholder(),
           Positioned(
@@ -3323,81 +4916,101 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               left: 0,
               right: 0,
               child: Container(
-                  height: 80,
-                  decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                        Colors.transparent,
-                        Colors.black.withValues(alpha: 0.4)
-                      ])))),
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: Container(
-              decoration: BoxDecoration(
+                height: 90,
+                decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                    Colors.black.withValues(alpha: 0.45),
-                    Colors.transparent
-                  ])),
-              child: SafeArea(
-                bottom: false,
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Row(children: [
-                    IconButton(
-                        icon: const Icon(Icons.arrow_back, color: Colors.white),
-                        onPressed: () => Navigator.pop(context)),
-                    Expanded(
-                        child: Text('Sighting Detail',
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.nunito(
-                                fontSize: 17,
-                                fontWeight: FontWeight.w800,
-                                color: Colors.white))),
-                    StreamBuilder<Sighting?>(
-                      stream: FirebaseService.instance
-                          .streamSightingById(widget.sighting.id),
-                      builder: (_, snap2) {
-                        final live = snap2.data ?? widget.sighting;
-                        return IconButton(
-                            icon: const Icon(Icons.more_horiz,
-                                color: Colors.white),
-                            onPressed: () => _showMore(live));
-                      },
-                    ),
-                  ]),
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.transparent, Colors.black54],
+                  ),
                 ),
+              )),
+          SafeArea(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Row(children: [
+                  IconButton(
+                      icon: const Icon(Icons.arrow_back, color: Colors.white),
+                      onPressed: () => Navigator.pop(context)),
+                  Expanded(
+                      child: Text('Sighting Detail',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.nunito(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w800,
+                              color: Colors.white))),
+                  StreamBuilder<Sighting?>(
+                    stream: FirebaseService.instance
+                        .streamSightingById(widget.sighting.id),
+                    builder: (_, snap2) {
+                      final live = snap2.data ?? widget.sighting;
+                      return IconButton(
+                          icon: const Icon(Icons.more_horiz,
+                              color: Colors.white),
+                          onPressed: () => _showMore(live));
+                    },
+                  ),
+                ]),
               ),
             ),
           ),
           Positioned(
               top: kToolbarHeight + MediaQuery.of(context).padding.top - 8,
               left: 16,
-              child: s.isInCare
+              child: s.isTnrCommunityCat
                   ? Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 5),
                       decoration: BoxDecoration(
-                          color: const Color(0xFF673AB7),
+                          color: const Color(0xFF00897B),
                           borderRadius: BorderRadius.circular(10)),
                       child: Row(mainAxisSize: MainAxisSize.min, children: [
-                        Icon(s.careIcon, size: 12, color: Colors.white),
+                        const Icon(Icons.pets, size: 12, color: Colors.white),
                         const SizedBox(width: 5),
-                        Text(s.careLabel,
+                        Text('Community Cat',
                             style: GoogleFonts.nunito(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w800,
                                 color: Colors.white)),
                       ]),
                     )
-                  : _badge(s.urgency)),
+                  : (s.isOpenForAdoption || s.category == 'Needs Home')
+                      ? Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                              color: const Color(0xFF9C27B0),
+                              borderRadius: BorderRadius.circular(10)),
+                          child: Row(mainAxisSize: MainAxisSize.min, children: [
+                            const Icon(Icons.home_outlined, size: 12, color: Colors.white),
+                            const SizedBox(width: 5),
+                            Text('Needs Home',
+                                style: GoogleFonts.nunito(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.white)),
+                          ]),
+                        )
+                      : s.isInCare
+                          ? Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 5),
+                              decoration: BoxDecoration(
+                                  color: const Color(0xFF673AB7),
+                                  borderRadius: BorderRadius.circular(10)),
+                              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                                Icon(s.careIcon, size: 12, color: Colors.white),
+                                const SizedBox(width: 5),
+                                Text(s.careLabel,
+                                    style: GoogleFonts.nunito(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.white)),
+                              ]),
+                            )
+                          : _badge(s.urgency)),
           if (has && photos.length > 1)
             Positioned(
               top: kToolbarHeight + MediaQuery.of(context).padding.top - 8,
@@ -3493,6 +5106,114 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         ]),
       );
 
+  Widget _buildCommunityCatBanner(Sighting s) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF00897B).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: const Color(0xFF00897B).withValues(alpha: 0.3),
+          width: 1.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00897B).withValues(alpha: 0.16),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.pets,
+                    color: Color(0xFF00897B), size: 22),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Community Cat • TNR Care 🌿',
+                      style: GoogleFonts.nunito(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w900,
+                        color: const Color(0xFF00897B),
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      'This cat completed its recovery care and was safely returned to its territory. Neighbors and local feeders are welcome to log daily feeding, share photos, and check in on its well-being below! 🐾',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12,
+                        color: _navy.withValues(alpha: 0.75),
+                        fontWeight: FontWeight.w600,
+                        height: 1.35,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              _communityChip('✂️ Spayed / Neutered'),
+              _communityChip('🩺 Vet Checked'),
+              _communityChip('🍲 Open for Feeding'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _communityChip(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+            color: const Color(0xFF00897B).withValues(alpha: 0.25)),
+      ),
+      child: Text(
+        label,
+        style: GoogleFonts.nunito(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: const Color(0xFF00897B),
+        ),
+      ),
+    );
+  }
+
+  Widget _traitChip(String text, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        text,
+        style: GoogleFonts.nunito(
+          fontSize: 11,
+          fontWeight: FontWeight.w800,
+          color: color,
+        ),
+      ),
+    );
+  }
+
   Widget _buildCategoryBadge(Sighting s) {
     Color col;
     IconData icon;
@@ -3500,7 +5221,17 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     String subtitle;
 
     final cat = s.category;
-    if (cat == 'Urgent Rescue' || cat == 'Trapped') {
+    if (cat == 'Feral / Colony Cat') {
+      col = const Color(0xFF00897B);
+      icon = Icons.nature_people_rounded;
+      label = 'Feral / Colony Cat (TNR)';
+      subtitle = '🌿 Wild Adult • Outdoor Colony Care';
+    } else if (s.isTnrCommunityCat || cat == 'Community Cat' || cat == 'Community Care') {
+      col = const Color(0xFF00897B);
+      icon = Icons.pets;
+      label = 'Community Cat (TNR)';
+      subtitle = '🌿 Sterilized & Under Community Care';
+    } else if (cat == 'Urgent Rescue' || cat == 'Trapped') {
       col = const Color(0xFFFF5722);
       icon = Icons.warning_amber_rounded;
       label = 'Trapped / In Danger';
@@ -3515,7 +5246,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       icon = Icons.pets;
       label = 'Vulnerable Kitten(s)';
       subtitle = '🍼 Needs Safe Foster or Care';
-    } else if (cat == 'Needs Foster' || cat == 'Rehomed') {
+    } else if (cat == 'Needs Foster' || cat == 'Needs Home' || cat == 'Rehomed') {
       col = const Color(0xFF9C27B0);
       icon = Icons.home_outlined;
       label = 'Needs Foster / Adopter';
@@ -4868,16 +6599,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           if (s.pendingVetProofUrl != null &&
               s.pendingVetProofUrl!.isNotEmpty) ...[
             const SizedBox(height: 8),
-            ClipRRect(
+            PawImage(
+              url: s.pendingVetProofUrl!,
+              height: 140,
+              width: double.infinity,
+              fit: BoxFit.cover,
               borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                s.pendingVetProofUrl!,
-                height: 140,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) =>
-                    const SizedBox.shrink(),
-              ),
+              placeholder: const SizedBox.shrink(),
             ),
           ],
           const SizedBox(height: 12),
@@ -5154,14 +6882,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ],
           if (s.pendingOutcomeProofUrl != null && s.pendingOutcomeProofUrl!.isNotEmpty) ...[
             const SizedBox(height: 8),
-            ClipRRect(
+            PawImage(
+              url: s.pendingOutcomeProofUrl!,
+              height: 140,
+              width: double.infinity,
+              fit: BoxFit.cover,
               borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                s.pendingOutcomeProofUrl!,
-                height: 140,
-                width: double.infinity,
-                fit: BoxFit.cover,
-              ),
+              placeholder: const SizedBox.shrink(),
             ),
           ],
           if (canFinalize) ...[
@@ -5221,11 +6948,43 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   void _showOpenForAdoptionSheet(Sighting s) {
+    if (s.isFeral) {
+      _snack(
+          '🌿 Unsocialized feral cats cannot be adopted into indoor homes. TNR Colony Return is the mandated outcome.');
+      return;
+    }
     File? showcaseFile;
     bool isSubmitting = false;
-    final noteCtrl = TextEditingController(
-      text: 'Rehabilitation complete! Healthy, socialized, and ready for a loving forever home. Contact to adopt! 🏡🐾',
+
+    final facilityCtrl = TextEditingController(
+      text: s.shelterOrClinicName?.isNotEmpty == true
+          ? s.shelterOrClinicName!
+          : (s.isSheltered ? 'Animal Shelter' : '${s.careTakerName ?? "Foster"} Home'),
     );
+    final contactCtrl = TextEditingController(
+      text: s.adoptionContact?.isNotEmpty == true
+          ? s.adoptionContact!
+          : '',
+    );
+    final List<String> currentTags = List.from(s.healthTags);
+    if (currentTags.isEmpty && (s.hasVetVisit || s.pendingVetRescuerId != null)) {
+      currentTags.add('🩺 Vet Checked');
+    }
+
+    final noteCtrl = TextEditingController(
+      text: s.adoptionNote?.isNotEmpty == true
+          ? s.adoptionNote!
+          : 'Ready for a loving forever home! Healthy, friendly, and socialized. Contact to adopt! 🏡🐾',
+    );
+
+    final availableTags = [
+      '🩺 Vet Checked',
+      '💉 Vaccinated',
+      '✂️ Spayed / Neutered',
+      '🪱 Dewormed',
+      '🏷️ Microchipped',
+      '🩹 Medical Clear',
+    ];
 
     showModalBottomSheet(
       context: context,
@@ -5249,12 +7008,16 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           return Padding(
             padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
             child: Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(ctx).size.height * 0.88,
+              ),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
               padding: EdgeInsets.fromLTRB(20, 16, 20, bottomPadding > 0 ? bottomPadding + 20 : 28),
               child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -5275,11 +7038,11 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFE65100).withValues(alpha: 0.12),
+                            color: const Color(0xFF2E7D32).withValues(alpha: 0.12),
                             shape: BoxShape.circle,
                           ),
                           child: const Icon(Icons.volunteer_activism_rounded,
-                              color: Color(0xFFE65100), size: 20),
+                              color: Color(0xFF2E7D32), size: 22),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -5295,7 +7058,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                 ),
                               ),
                               Text(
-                                'List this cat on PawWatch so community members can apply to adopt.',
+                                'Fill in the Adoption Showcase Profile. Report status will update to Needs Home.',
                                 style: GoogleFonts.nunito(
                                   fontSize: 11.5,
                                   color: _navy.withValues(alpha: 0.65),
@@ -5309,7 +7072,143 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'Adoption Description & Notes',
+                      'Foster Home / Shelter / Facility Name',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: _navy,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: facilityCtrl,
+                      style: GoogleFonts.nunito(fontSize: 13, color: _navy),
+                      decoration: InputDecoration(
+                        hintText: 'e.g. Miaw Foster Home, Pejaten Animal Shelter',
+                        hintStyle: GoogleFonts.nunito(
+                          fontSize: 12.5,
+                          color: _navy.withValues(alpha: 0.4),
+                        ),
+                        prefixIcon: const Icon(Icons.home_work_outlined, size: 18, color: Color(0xFF2E7D32)),
+                        filled: true,
+                        fillColor: _bgWhite,
+                        contentPadding: const EdgeInsets.all(12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _navy.withValues(alpha: 0.15)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _navy.withValues(alpha: 0.15)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFF2E7D32)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Adoption Contact Info (WhatsApp / Phone / IG)',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: _navy,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: contactCtrl,
+                      style: GoogleFonts.nunito(fontSize: 13, color: _navy),
+                      decoration: InputDecoration(
+                        hintText: 'e.g. WhatsApp: +62 812-3456-7890 or @instagram',
+                        hintStyle: GoogleFonts.nunito(
+                          fontSize: 12.5,
+                          color: _navy.withValues(alpha: 0.4),
+                        ),
+                        prefixIcon: const Icon(Icons.contact_phone_outlined, size: 18, color: Color(0xFF2E7D32)),
+                        filled: true,
+                        fillColor: _bgWhite,
+                        contentPadding: const EdgeInsets.all(12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _navy.withValues(alpha: 0.15)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: _navy.withValues(alpha: 0.15)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Color(0xFF2E7D32)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Verified Health Clearance Badges',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: _navy,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: availableTags.map((tag) {
+                        final isSelected = currentTags.contains(tag);
+                        return GestureDetector(
+                          onTap: () {
+                            setSheetState(() {
+                              if (isSelected) {
+                                currentTags.remove(tag);
+                              } else {
+                                currentTags.add(tag);
+                              }
+                            });
+                          },
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: isSelected ? const Color(0xFF2E7D32) : _bgWhite,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: isSelected
+                                    ? const Color(0xFF2E7D32)
+                                    : _navy.withValues(alpha: 0.15),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  isSelected
+                                      ? Icons.check_circle_rounded
+                                      : Icons.add_circle_outline_rounded,
+                                  size: 14,
+                                  color: isSelected ? Colors.white : _navy,
+                                ),
+                                const SizedBox(width: 6),
+                                Text(
+                                  tag,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: isSelected ? Colors.white : _navy,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Adoption Story & Personality Notes',
                       style: GoogleFonts.nunito(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w800,
@@ -5322,7 +7221,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       maxLines: 3,
                       style: GoogleFonts.nunito(fontSize: 13, color: _navy),
                       decoration: InputDecoration(
-                        hintText: 'Share personality, habits, vaccination status, and adopter preferences...',
+                        hintText: 'Share personality, habits, temperament, and ideal adopter preferences...',
                         hintStyle: GoogleFonts.nunito(
                           fontSize: 12.5,
                           color: _navy.withValues(alpha: 0.4),
@@ -5340,7 +7239,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: const BorderSide(color: Color(0xFFE65100)),
+                          borderSide: const BorderSide(color: Color(0xFF2E7D32)),
                         ),
                       ),
                     ),
@@ -5416,15 +7315,16 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ],
                       ),
                     ],
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 20),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFE65100),
+                          backgroundColor: const Color(0xFF2E7D32),
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          elevation: 0,
                         ),
                         onPressed: isSubmitting
                             ? null
@@ -5435,13 +7335,16 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                     sightingId: s.id,
                                     note: noteCtrl.text.trim(),
                                     showcasePhotoFile: showcaseFile,
+                                    healthTags: currentTags,
+                                    shelterOrClinicName: facilityCtrl.text.trim(),
+                                    adoptionContact: contactCtrl.text.trim(),
                                   );
                                   if (ctx.mounted) Navigator.pop(ctx);
                                   if (mounted) {
                                     setState(() {
                                       _hasActed = true;
                                     });
-                                    _snack('🏡 Cat is now actively listed for adoption! +$earnedXp XP');
+                                    _snack('🏡 Adoption Showcase Profile published! Report updated to Needs Home (+$earnedXp XP)');
                                   }
                                 } catch (e) {
                                   setSheetState(() => isSubmitting = false);
@@ -5455,7 +7358,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                 child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                               )
                             : Text(
-                                'Publish Adoption Listing (+100 XP)',
+                                'Publish Adoption Showcase (+100 XP)',
                                 style: GoogleFonts.nunito(fontWeight: FontWeight.w900, fontSize: 13.5),
                               ),
                       ),
@@ -5471,6 +7374,16 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   void _showOutcomeConfirmationRequestSheet(String outcomeAction, Sighting s) {
+    if (s.isFeral && outcomeAction != 'returnedToSpot') {
+      _snack(
+          '🌿 Feral cats cannot be rehomed or sheltered. TNR colony return is the only permitted outcome.');
+      return;
+    }
+    if (outcomeAction == 'returnedToSpot' && !s.canTnrReturn && !s.isFeral) {
+      _snack(
+          'Kittens and domestic fosters cannot be released to the street. Please choose Foster, Shelter, or Adoption.');
+      return;
+    }
     File? proofFile;
     bool isSubmitting = false;
     final isRehome = outcomeAction == 'rehomed';
@@ -5482,6 +7395,17 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               ? 'Completed foster care and transferred safely to registered animal shelter partner. 🏛️'
               : 'Healthy, recovered, and returned to community spot. 🐾'),
     );
+    final shelterNameCtrl = TextEditingController(
+      text: isSheltered && s.shelterOrClinicName?.isNotEmpty == true
+          ? s.shelterOrClinicName!
+          : '',
+    );
+    final shelterAddressCtrl = TextEditingController(
+      text: isSheltered ? s.effectiveLocationAddress : '',
+    );
+    double shelterLat = s.effectiveLatitude;
+    double shelterLng = s.effectiveLongitude;
+    bool isLocatingShelter = false;
 
     showModalBottomSheet(
       context: context,
@@ -5505,15 +7429,22 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               ? 'Celebrate Rehomed Cat! 🏡🎉'
               : (isSheltered
                   ? 'Confirm Shelter Transfer 🏛️'
-                  : 'Confirm Return to Spot (TNR) 🌿');
+                  : 'Confirm Return to Spot (Community Cat) 🌿');
           final sheetSubtitle = isRehome
               ? 'Marks this rescue as resolved and celebrates the forever home with the community!'
               : (isSheltered
                   ? 'Marks this rescue as resolved and safely admitted to a verified shelter partner.'
-                  : 'Marks this rescue as resolved and safely returned to its territory.');
+                  : 'Returns this cat to its territory as a protected Community Cat for ongoing feeding & care.');
           final sheetIcon = isRehome
               ? Icons.celebration
               : (isSheltered ? Icons.house : Icons.pets);
+          final primaryCol = isSheltered
+              ? const Color(0xFF673AB7)
+              : (outcomeAction == 'returnedToSpot'
+                  ? const Color(0xFF00897B)
+                  : const Color(0xFF2E7D32));
+          final canSubmit = proofFile != null &&
+              (!isSheltered || shelterNameCtrl.text.trim().isNotEmpty);
 
           return Padding(
             padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
@@ -5544,11 +7475,11 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF2E7D32).withValues(alpha: 0.12),
+                            color: primaryCol.withValues(alpha: 0.12),
                             shape: BoxShape.circle,
                           ),
                           child: Icon(sheetIcon,
-                              color: const Color(0xFF2E7D32), size: 20),
+                              color: primaryCol, size: 20),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -5577,6 +7508,200 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       ],
                     ),
                     const SizedBox(height: 14),
+                    if (outcomeAction == 'returnedToSpot') ...[
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF00897B).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                              color: const Color(0xFF00897B)
+                                  .withValues(alpha: 0.25)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.info_outline,
+                                size: 16, color: Color(0xFF00897B)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Feral / Colony Cats Only: This outcome is strictly for unsocialized adult cats returning to their territory with community caretakers.',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFF00897B),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                    ],
+                    if (isSheltered) ...[
+                      Text(
+                        'Shelter / Organization Name *',
+                        style: GoogleFonts.nunito(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: _navy,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: shelterNameCtrl,
+                        onChanged: (_) => setSheetState(() {}),
+                        style: GoogleFonts.nunito(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: _navy),
+                        decoration: InputDecoration(
+                          hintText:
+                              'e.g. Pejaten Animal Shelter, ASPERA, etc.',
+                          filled: true,
+                          fillColor: _lavLight,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Shelter Address / Contact (Optional)',
+                        style: GoogleFonts.nunito(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: _navy,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: shelterAddressCtrl,
+                        style: GoogleFonts.nunito(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: _navy),
+                        decoration: InputDecoration(
+                          hintText:
+                              'e.g. Jl. Pejaten Barat No. 23 (Open for adoption)',
+                          filled: true,
+                          fillColor: _lavLight,
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 10),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Container(
+                        height: 140,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                              color: _navy.withValues(alpha: 0.15)),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Stack(
+                            children: [
+                              FlutterMap(
+                                options: MapOptions(
+                                  initialCenter:
+                                      ll.LatLng(shelterLat, shelterLng),
+                                  initialZoom: 16.0,
+                                  onTap: (tapPos, point) async {
+                                    shelterLat = point.latitude;
+                                    shelterLng = point.longitude;
+                                    setSheetState(
+                                        () => isLocatingShelter = true);
+                                    final addr = await LocationService()
+                                        .getAddressFromCoordinates(
+                                            point.latitude, point.longitude);
+                                    shelterAddressCtrl.text = addr;
+                                    setSheetState(
+                                        () => isLocatingShelter = false);
+                                  },
+                                ),
+                                children: [
+                                  TileLayer(
+                                    urlTemplate:
+                                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                    userAgentPackageName:
+                                        'com.pawwatch.app',
+                                  ),
+                                  MarkerLayer(
+                                    markers: [
+                                      Marker(
+                                        point:
+                                            ll.LatLng(shelterLat, shelterLng),
+                                        width: 38,
+                                        height: 38,
+                                        child: Container(
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF673AB7),
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                                color: Colors.white, width: 2),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black
+                                                    .withValues(alpha: 0.25),
+                                                blurRadius: 6,
+                                              ),
+                                            ],
+                                          ),
+                                          child: const Center(
+                                            child: Icon(Icons.apartment,
+                                                size: 18,
+                                                color: Colors.white),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              if (isLocatingShelter)
+                                Container(
+                                  color: Colors.black.withValues(alpha: 0.2),
+                                  child: const Center(
+                                    child: CircularProgressIndicator(
+                                      color: Color(0xFF673AB7),
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                ),
+                              Positioned(
+                                bottom: 6,
+                                left: 6,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.6),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Tap map to set shelter location',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
                     Text(
                       'Outcome Note / Details',
                       style: GoogleFonts.nunito(fontSize: 13, fontWeight: FontWeight.w800, color: _navy),
@@ -5624,7 +7749,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           Expanded(
                             child: OutlinedButton.icon(
                               onPressed: () => pickPhoto(ImageSource.camera),
-                              icon: const Icon(Icons.camera_alt, size: 16, color: Color(0xFF2E7D32)),
+                              icon: Icon(Icons.camera_alt, size: 16, color: primaryCol),
                               label: Text('Camera', style: GoogleFonts.nunito(fontWeight: FontWeight.w800, color: _navy, fontSize: 12)),
                             ),
                           ),
@@ -5643,24 +7768,46 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       width: double.infinity,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: proofFile != null ? const Color(0xFF2E7D32) : Colors.grey.shade300,
+                          backgroundColor: canSubmit ? primaryCol : Colors.grey.shade300,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         ),
-                        onPressed: (isSubmitting || proofFile == null)
+                        onPressed: (isSubmitting || !canSubmit)
                             ? null
                             : () async {
+                                if (isSheltered && shelterNameCtrl.text.trim().isEmpty) {
+                                  _snack('Please enter the shelter or organization name.');
+                                  return;
+                                }
                                 setSheetState(() => isSubmitting = true);
                                 try {
+                                  String finalNote = noteCtrl.text.trim();
+                                  if (isSheltered && shelterNameCtrl.text.trim().isNotEmpty) {
+                                    final sAddr = shelterAddressCtrl.text.trim();
+                                    finalNote =
+                                        'Admitted to ${shelterNameCtrl.text.trim()}${sAddr.isNotEmpty ? " ($sAddr)" : ""}. $finalNote'
+                                            .trim();
+                                  }
+
                                   final earnedXp = await FirebaseService.instance
                                       .completeCareOutcome(
                                     sightingId: s.id,
                                     outcomeAction: outcomeAction,
-                                    note: noteCtrl.text.trim().isNotEmpty
-                                        ? noteCtrl.text.trim()
-                                        : (isRehome ? 'Rehomed with a loving family!' : (isSheltered ? 'Admitted to shelter' : 'Returned safely to spot')),
+                                    note: finalNote.isNotEmpty
+                                        ? finalNote
+                                        : (isRehome
+                                            ? 'Rehomed with a loving family!'
+                                            : (isSheltered ? 'Admitted to shelter' : 'Returned safely to spot')),
                                     proofPhotoFile: proofFile,
+                                    updatedLatitude: isSheltered ? shelterLat : null,
+                                    updatedLongitude: isSheltered ? shelterLng : null,
+                                    updatedLocationAddress: isSheltered && shelterAddressCtrl.text.trim().isNotEmpty
+                                        ? shelterAddressCtrl.text.trim()
+                                        : null,
+                                    shelterOrClinicName: isSheltered && shelterNameCtrl.text.trim().isNotEmpty
+                                        ? shelterNameCtrl.text.trim()
+                                        : null,
                                   );
                                   if (ctx.mounted) Navigator.pop(ctx);
                                   if (mounted) {
@@ -5671,7 +7818,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                         ? '🎉 Cat successfully marked as permanently rehomed! +$earnedXp XP'
                                         : (isSheltered
                                             ? '🏛️ Cat successfully transferred to shelter! +$earnedXp XP'
-                                            : '🌿 Cat successfully returned to spot! +$earnedXp XP'));
+                                            : '🌿 Cat returned to spot as a protected Community Cat! +$earnedXp XP'));
                                   }
                                 } catch (e) {
                                   setSheetState(() => isSubmitting = false);
@@ -5687,11 +7834,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             : Text(
                                 proofFile == null
                                     ? 'Photo Proof Required'
-                                    : (isRehome
-                                        ? 'Confirm & Mark Rehomed (+200 XP)'
-                                        : (isSheltered
-                                            ? 'Confirm & Mark Sheltered (+120 XP)'
-                                            : 'Confirm & Return to Spot (+100 XP)')),
+                                    : (isSheltered && shelterNameCtrl.text.trim().isEmpty
+                                        ? 'Shelter Name Required'
+                                        : (isRehome
+                                            ? 'Confirm & Mark Rehomed (+200 XP)'
+                                            : (isSheltered
+                                                ? 'Confirm & Mark Sheltered (+120 XP)'
+                                                : 'Return as Community Cat (+100 XP)'))),
                                 style: GoogleFonts.nunito(fontSize: 14, fontWeight: FontWeight.w800),
                               ),
                       ),
@@ -5942,6 +8091,31 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       style: GoogleFonts.nunito(fontSize: 13, color: _navy),
                       decoration: InputDecoration(
                         hintText: 'e.g. Pejaten Animal Shelter, Medivet Clinic',
+                        filled: true,
+                        fillColor: _lavLight,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'Adoption Contact Info (WhatsApp / Phone / IG)',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: _navy,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: contactCtrl,
+                      style: GoogleFonts.nunito(fontSize: 13, color: _navy),
+                      decoration: InputDecoration(
+                        hintText: 'e.g. WhatsApp: +62 812-3456-7890 or @instagram',
                         filled: true,
                         fillColor: _lavLight,
                         contentPadding: const EdgeInsets.symmetric(
@@ -6515,7 +8689,73 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               ],
             ),
             const SizedBox(height: 8),
-            if (s.isOpenForAdoption) ...[
+            if (s.isFeral) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00897B).withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: const Color(0xFF00897B).withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.nature_people_rounded,
+                        color: Color(0xFF00897B), size: 18),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Mandatory TNR Colony Return 🌿',
+                            style: GoogleFonts.nunito(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w900,
+                              color: const Color(0xFF00897B),
+                            ),
+                          ),
+                          Text(
+                            'This cat is an adult feral community cat. Feral cats thrive in their outdoor colony under community care. Domestic adoption and sheltering are prohibited.',
+                            style: GoogleFonts.nunito(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: _navy.withValues(alpha: 0.7),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF00897B),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      onPressed: () => _showOutcomeConfirmationRequestSheet(
+                          'returnedToSpot', s),
+                      icon: const Icon(Icons.nature_people_rounded, size: 16),
+                      label: Text(
+                        'Return to Colony / Spot (TNR)',
+                        style: GoogleFonts.nunito(
+                            fontWeight: FontWeight.w800, fontSize: 11.5),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ] else if (s.isOpenForAdoption) ...[
               Container(
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(10),
@@ -6601,28 +8841,6 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         'Sheltered (+120 XP)',
                         style: GoogleFonts.nunito(
                             fontWeight: FontWeight.w800, fontSize: 10.5),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(color: _navy.withValues(alpha: 0.25)),
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed: () =>
-                          _showOutcomeConfirmationRequestSheet('returnedToSpot', s),
-                      icon: Icon(Icons.pets, size: 14, color: _navy),
-                      label: Text(
-                        'TNR Return',
-                        style: GoogleFonts.nunito(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 10.5,
-                            color: _navy),
                       ),
                     ),
                   ),
@@ -6723,39 +8941,6 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       ),
                     ),
                   ),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        side: BorderSide(
-                            color: areOutcomesUnlocked
-                                ? _navy.withValues(alpha: 0.25)
-                                : Colors.grey.shade300),
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
-                      onPressed: areOutcomesUnlocked
-                          ? () => _showOutcomeConfirmationRequestSheet(
-                              'returnedToSpot', s)
-                          : () => _snack(
-                              'Complete all care checkpoints first to unlock return to spot! 🐾'),
-                      icon: Icon(
-                          areOutcomesUnlocked
-                              ? Icons.pets
-                              : Icons.lock_rounded,
-                          size: 14,
-                          color: areOutcomesUnlocked ? _navy : Colors.grey),
-                      label: Text(
-                        'TNR Return',
-                        style: GoogleFonts.nunito(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 10.5,
-                            color: areOutcomesUnlocked ? _navy : Colors.grey),
-                      ),
-                    ),
-                  ),
                 ],
               ),
             ],
@@ -6808,7 +8993,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     final cat = s.category;
     final isPriorityVet = s.isMedicalOrTriagePriority && !s.hasVetVisit;
 
-    if (isPriorityVet) {
+    if (s.isTnrCommunityCat) {
+      acts = allActs;
+    } else if (isPriorityVet) {
       acts = allActs
           .where((a) =>
               a['key'] == 'vet' ||
@@ -6820,6 +9007,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         cat == 'Urgent Rescue' ||
         cat == 'Kitten' ||
         cat == 'Needs Foster' ||
+        cat == 'Needs Home' ||
         cat == 'Rehomed') {
       acts = allActs
           .where((a) =>
@@ -6843,10 +9031,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     final isOutcomePending = s.pendingOutcomeAction != null &&
         s.pendingOutcomeAction!.isNotEmpty;
     final isVetPending = s.isVetVisitPending && !s.hasVetVisit;
-    final isVetRescuer = uid != null &&
-        (s.lastVetRescuerId == uid ||
-            s.pendingVetRescuerId == uid ||
-            (s.lastVetRescuerId == null && s.rescueClaimedBy == uid));
+    final isVetRescuer = _isVetRescuer(s);
     final isLockedForMe =
         (isClaimed && !isClaimedByMe && !_isOwner(s)) ||
             isHandoverPending ||
@@ -6868,28 +9053,32 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   style: GoogleFonts.nunito(
                       fontSize: 17, fontWeight: FontWeight.w900, color: _navy)),
               const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF673AB7).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(s.careIcon, size: 12, color: const Color(0xFF673AB7)),
-                    const SizedBox(width: 4),
-                    Text(
-                      s.careLabel,
-                      style: GoogleFonts.nunito(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w800,
-                        color: const Color(0xFF673AB7),
+              Builder(builder: (context) {
+                final isAdoption = s.isOpenForAdoption || s.category == 'Needs Home';
+                final badgeColor = isAdoption ? const Color(0xFF9C27B0) : const Color(0xFF673AB7);
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: badgeColor.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(s.careIcon, size: 12, color: badgeColor),
+                      const SizedBox(width: 4),
+                      Text(
+                        s.careLabel,
+                        style: GoogleFonts.nunito(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          color: badgeColor,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
-              ),
+                    ],
+                  ),
+                );
+              }),
             ],
           ),
           const SizedBox(height: 8),
@@ -6991,16 +9180,340 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               ],
             ),
           ),
-        ] else if (s.hasVetVisit) ...[
+        ] else if ((s.hasVetVisit || s.isAwaitingPostVetDecision) &&
+            s.urgency != 'resolved' &&
+            s.resolvedByAction != 'returnedToSpot') ...[
           const SizedBox(height: 10),
           Builder(builder: (ctx) {
-            final isVetRescuer = uid != null &&
-                (s.lastVetRescuerId == uid ||
-                    s.pendingVetRescuerId == uid ||
-                    (s.lastVetRescuerId == null && s.rescueClaimedBy == uid));
+            final isVetRescuer = _isVetRescuer(s);
 
             if (s.isAwaitingPostVetDecision) {
               if (isVetRescuer) {
+                if (s.isFeral) {
+                  return Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00897B).withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                          color: const Color(0xFF00897B).withValues(alpha: 0.3)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF00897B).withValues(alpha: 0.15),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.nature_people_rounded,
+                                  color: Color(0xFF00897B), size: 20),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '🌿 Feral Cat TNR Mandate • Custody with You',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w900,
+                                      color: const Color(0xFF00695C),
+                                    ),
+                                  ),
+                                  Text(
+                                    _isOwner(s)
+                                        ? 'You reported and provided veterinary care for this feral cat. Per humane TNR protocol, domestic adoption is restricted. Please safely return the cat to its original colony territory and submit photo proof.'
+                                        : 'This cat is an unsocialized feral adult. Foster and shelter adoptions are restricted under TNR protocol. Safe return to original colony is the mandated outcome. Coordinate with the reporter to finalize the release spot.',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11,
+                                      color: _navy.withValues(alpha: 0.7),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            InkWell(
+                              onTap: () => _confirmReturnToSpot(s),
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 7),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF00897B),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.nature_people_rounded,
+                                        size: 14, color: Colors.white),
+                                    const SizedBox(width: 5),
+                                    Text(
+                                      '🌿 Return to Spot / Colony (+100 XP)',
+                                      style: GoogleFonts.nunito(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: Colors.white),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            if (s.reporterId.isNotEmpty && s.reporterId != _uid)
+                              InkWell(
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => CoordinationChatScreen(
+                                        sighting: s,
+                                        otherUserId: s.reporterId,
+                                        otherUserName: s.reporterName.isNotEmpty
+                                            ? s.reporterName
+                                            : 'Reporter',
+                                        otherUserRole: 'Reporter',
+                                      ),
+                                    ),
+                                  );
+                                },
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10, vertical: 7),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1E88E5),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.chat_bubble_rounded,
+                                          size: 13, color: Colors.white),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '💬 Chat with Reporter to Coordinate Spot',
+                                        style: GoogleFonts.nunito(
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w800,
+                                            color: Colors.white),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                final isDelegatedOrOwner =
+                    _isOwner(s) || s.isRescuerCustodyDelegated;
+
+                if (!isDelegatedOrOwner) {
+                  final timeRemaining = s.postVetDecisionTimeRemaining;
+                  final timeRemainingText = timeRemaining != null &&
+                          timeRemaining > Duration.zero
+                      ? (timeRemaining.inHours > 0
+                          ? '${timeRemaining.inHours}h ${timeRemaining.inMinutes % 60}m left'
+                          : '${timeRemaining.inMinutes}m left')
+                      : '24h window expired';
+
+                  return Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF673AB7).withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                          color: const Color(0xFF673AB7).withValues(alpha: 0.3)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF673AB7)
+                                    .withValues(alpha: 0.15),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.hourglass_top_rounded,
+                                  color: Color(0xFF673AB7), size: 20),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          '⏳ Awaiting Reporter Decision',
+                                          style: GoogleFonts.nunito(
+                                            fontSize: 13.5,
+                                            fontWeight: FontWeight.w900,
+                                            color: const Color(0xFF673AB7),
+                                          ),
+                                        ),
+                                      ),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 7, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF673AB7)
+                                              .withValues(alpha: 0.12),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.timer_outlined,
+                                                size: 11,
+                                                color: Color(0xFF673AB7)),
+                                            const SizedBox(width: 3),
+                                            Text(
+                                              timeRemainingText,
+                                              style: GoogleFonts.nunito(
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.w800,
+                                                color:
+                                                    const Color(0xFF673AB7),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    '${s.reporterName.isNotEmpty ? s.reporterName : "The reporter"} has 24h to decide next steps ($timeRemainingText). If inactive, placement authority automatically transfers to you.',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11,
+                                      color: _navy.withValues(alpha: 0.7),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            if (s.reporterId.isNotEmpty && s.reporterId != _uid)
+                              InkWell(
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => CoordinationChatScreen(
+                                        sighting: s,
+                                        otherUserId: s.reporterId,
+                                        otherUserName: s.reporterName,
+                                        otherUserRole: 'Reporter',
+                                      ),
+                                    ),
+                                  );
+                                },
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 7),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                        color: const Color(0xFF673AB7)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.chat_bubble_rounded,
+                                          size: 13, color: Color(0xFF673AB7)),
+                                      const SizedBox(width: 6),
+                                      Text(
+                                        '💬 Chat with ${s.reporterName.isNotEmpty ? s.reporterName : "Reporter"}',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: const Color(0xFF673AB7),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            if (s.isPostVetDecisionWindowExpired)
+                              InkWell(
+                                onTap: () async {
+                                  try {
+                                    await FirebaseService.instance
+                                        .delegatePostVetCustodyToRescuer(s.id);
+                                    if (mounted) {
+                                      _snack(
+                                          '⚡ Custody claimed due to reporter inactivity! You now have full placement authority. 🐾');
+                                    }
+                                  } catch (e) {
+                                    if (mounted) {
+                                      _snack('Failed to claim custody: $e');
+                                    }
+                                  }
+                                },
+                                borderRadius: BorderRadius.circular(8),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 7),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFE65100),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.bolt_rounded,
+                                          size: 14, color: Colors.white),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '⚡ Claim Custody (Inactive)',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 11.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
                 return Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
@@ -7029,7 +9542,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  '🎉 Your Vet Visit Was Verified! (+100 XP)',
+                                  _isOwner(s)
+                                      ? '🎉 Your Vet Visit Was Verified! (+100 XP)'
+                                      : '🎉 Placement Delegated to You (+100 XP)',
                                   style: GoogleFonts.nunito(
                                     fontSize: 13.5,
                                     fontWeight: FontWeight.w900,
@@ -7037,7 +9552,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   ),
                                 ),
                                 Text(
-                                  'Since you have physical custody of the cat, select your next action:',
+                                  _isOwner(s)
+                                      ? 'Since you have physical custody of the cat, select your next action:'
+                                      : '${s.reporterName.isNotEmpty ? s.reporterName : "The reporter"} placed you in charge of placement. Select your next action:',
                                   style: GoogleFonts.nunito(
                                     fontSize: 11,
                                     color: _navy.withValues(alpha: 0.7),
@@ -7109,7 +9626,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             ),
                           ),
                           InkWell(
-                            onTap: () => _confirmReturnToSpot(s),
+                            onTap: () => _showOpenForAdoptionSheet(s),
                             borderRadius: BorderRadius.circular(8),
                             child: Container(
                               padding: const EdgeInsets.symmetric(
@@ -7121,11 +9638,11 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.nature_people_rounded,
+                                  const Icon(Icons.volunteer_activism_rounded,
                                       size: 13, color: Colors.white),
                                   const SizedBox(width: 4),
                                   Text(
-                                    '🌿 Return (TNR)',
+                                    '🐾 Open for Adoption (+100 XP)',
                                     style: GoogleFonts.nunito(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w800,
@@ -7172,6 +9689,104 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ? s.lastVetRescuerName!
                     : 'The rescuer';
                 final rescuerId = s.lastVetRescuerId ?? s.pendingVetRescuerId ?? '';
+
+                if (s.isFeral) {
+                  return Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00897B).withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                          color: const Color(0xFF00897B).withValues(alpha: 0.25)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF00897B).withValues(alpha: 0.15),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.nature_people_rounded,
+                                  color: Color(0xFF00897B), size: 20),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '🌿 Feral Cat • Awaiting TNR Colony Return',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 13.5,
+                                      fontWeight: FontWeight.w900,
+                                      color: const Color(0xFF00695C),
+                                    ),
+                                  ),
+                                  Text(
+                                    '$rescuerName has custody of this feral cat after vet care. Per TNR protocol, the cat will be safely released to its territory. You can coordinate with $rescuerName via chat.',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11,
+                                      color: _navy.withValues(alpha: 0.7),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        if (rescuerId.isNotEmpty && rescuerId != _uid) ...[
+                          const SizedBox(height: 10),
+                          InkWell(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => CoordinationChatScreen(
+                                    sighting: s,
+                                    otherUserId: rescuerId,
+                                    otherUserName: rescuerName,
+                                    otherUserRole: 'Vet Rescuer',
+                                  ),
+                                ),
+                              );
+                            },
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 12, vertical: 7),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF1E88E5),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.chat_bubble_rounded,
+                                      size: 13, color: Colors.white),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '💬 Chat with $rescuerName to Coordinate Spot',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w800,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  );
+                }
+
                 return Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
@@ -7199,16 +9814,73 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  '⏳ Vet Visit Verified • Rescuer in Charge',
-                                  style: GoogleFonts.nunito(
-                                    fontSize: 13.5,
-                                    fontWeight: FontWeight.w900,
-                                    color: const Color(0xFF673AB7),
-                                  ),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        s.isRescuerCustodyDelegated
+                                            ? (s.isPostVetDecisionWindowExpired &&
+                                                    s.postVetCustody !=
+                                                        'rescuerInCharge'
+                                                ? '⏳ Decision Window Expired'
+                                                : '⏳ Vet Visit Verified • Rescuer in Charge')
+                                            : '⏳ Awaiting Your Decision',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 13.5,
+                                          fontWeight: FontWeight.w900,
+                                          color: const Color(0xFF673AB7),
+                                        ),
+                                      ),
+                                    ),
+                                    if (!s.isRescuerCustodyDelegated) ...[
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(
+                                            horizontal: 7, vertical: 3),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF673AB7)
+                                              .withValues(alpha: 0.12),
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.timer_outlined,
+                                                size: 11,
+                                                color: Color(0xFF673AB7)),
+                                            const SizedBox(width: 3),
+                                            Text(
+                                              s.postVetDecisionTimeRemaining !=
+                                                          null &&
+                                                      s.postVetDecisionTimeRemaining! >
+                                                          Duration.zero
+                                                  ? (s.postVetDecisionTimeRemaining!
+                                                              .inHours >
+                                                          0
+                                                      ? '${s.postVetDecisionTimeRemaining!.inHours}h left'
+                                                      : '${s.postVetDecisionTimeRemaining!.inMinutes}m left')
+                                                  : 'Expiring',
+                                              style: GoogleFonts.nunito(
+                                                fontSize: 10.5,
+                                                fontWeight: FontWeight.w800,
+                                                color: const Color(0xFF673AB7),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
+                                const SizedBox(height: 2),
                                 Text(
-                                  '$rescuerName has physical custody of the cat after veterinary care. Next rescue step is on hold with the rescuer.',
+                                  s.isRescuerCustodyDelegated
+                                      ? (s.isPostVetDecisionWindowExpired &&
+                                              s.postVetCustody !=
+                                                  'rescuerInCharge'
+                                          ? 'The 24-hour decision window has passed. Placement authority was automatically transferred to $rescuerName so care is not delayed.'
+                                          : 'You delegated custody authority to $rescuerName to decide and log placement (foster, shelter, or adoption). Coordinate via chat.')
+                                      : '$rescuerName completed veterinary care. Please decide within 24 hours between foster care, shelter, or delegating placement to $rescuerName. If no decision is made, authority automatically transfers to $rescuerName.',
                                   style: GoogleFonts.nunito(
                                     fontSize: 11,
                                     color: _navy.withValues(alpha: 0.7),
@@ -7220,50 +9892,85 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           ),
                         ],
                       ),
-                      if (rescuerId.isNotEmpty) ...[
-                        const SizedBox(height: 10),
-                        InkWell(
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => CoordinationChatScreen(
-                                  sighting: s,
-                                  otherUserId: rescuerId,
-                                  otherUserName: rescuerName,
-                                  otherUserRole: 'Vet Rescuer',
+                      const SizedBox(height: 10),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          if (rescuerId.isNotEmpty && rescuerId != _uid)
+                            InkWell(
+                              onTap: () {
+                                Navigator.push(
+                                  context,
+                                  MaterialPageRoute(
+                                    builder: (_) => CoordinationChatScreen(
+                                      sighting: s,
+                                      otherUserId: rescuerId,
+                                      otherUserName: rescuerName,
+                                      otherUserRole: 'Vet Rescuer',
+                                    ),
+                                  ),
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 7),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border:
+                                      Border.all(color: const Color(0xFF673AB7)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.chat_bubble_rounded,
+                                        size: 13, color: Color(0xFF673AB7)),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Chat with $rescuerName',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: const Color(0xFF673AB7),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
-                            );
-                          },
-                          borderRadius: BorderRadius.circular(8),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 7),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
+                            ),
+                          if (_isOwner(s) && !s.isRescuerCustodyDelegated)
+                            InkWell(
+                              onTap: () => _showPostVetFollowUpDialog(s),
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: const Color(0xFF673AB7)),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.chat_bubble_rounded,
-                                    size: 13, color: Color(0xFF673AB7)),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'Chat with $rescuerName',
-                                  style: GoogleFonts.nunito(
-                                    fontSize: 11.5,
-                                    fontWeight: FontWeight.w800,
-                                    color: const Color(0xFF673AB7),
-                                  ),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 7),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF673AB7),
+                                  borderRadius: BorderRadius.circular(8),
                                 ),
-                              ],
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.checklist_rounded,
+                                        size: 14, color: Colors.white),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Decide Next Step',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: Colors.white,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
-                          ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ],
                   ),
                 );
@@ -7549,7 +10256,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ),
         ),
       ],
-      if (!s.isAwaitingPostVetDecision && !s.hasVetVisit) ...[
+      if (!s.isAwaitingPostVetDecision &&
+          (!s.hasVetVisit || s.isTnrCommunityCat) &&
+          !s.isCommunityFosterRequested) ...[
         const SizedBox(height: 12),
         GridView.count(
         crossAxisCount: cols,
@@ -7590,6 +10299,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               }
               if (key == 'roaming') {
                 _showRoamingUpdateSheet(s);
+              } else if (s.isFeral &&
+                  (key == 'tookIn' || key == 'sheltered')) {
+                _snack(
+                    '🌿 This is an unsocialized feral cat. Foster and shelter adoptions are not suitable for feral cats. Mandatory TNR Return to Colony is the only permitted outcome.');
               } else if ((key == 'tookIn' || key == 'sheltered') &&
                   s.isMedicalOrTriagePriority &&
                   !s.hasVetVisit) {
@@ -7743,7 +10456,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         s.completedMilestones.isNotEmpty ||
         s.careStatus == 'resolved' ||
         cat == 'Rehomed' ||
-        cat == 'Needs Foster';
+        cat == 'Needs Foster' ||
+        cat == 'Needs Home';
 
     if (s.resolvedByAction == 'sheltered' || s.careStatus == 'inCare_shelter') {
       resolutionTitle = 'Safely Transferred to Shelter 🏛️';
@@ -8298,25 +11012,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   ),
                   child: Stack(
                     children: [
-                      ClipRRect(
+                      PawImage(
+                        url: u['proofPhotoUrl'].toString(),
+                        width: 140,
+                        height: 100,
+                        fit: BoxFit.cover,
                         borderRadius: BorderRadius.circular(12),
-                        child: u['proofPhotoUrl'].toString().startsWith('http')
-                            ? Image.network(
-                                u['proofPhotoUrl'].toString(),
-                                width: 140,
-                                height: 100,
-                                fit: BoxFit.cover,
-                                errorBuilder: (c, e, s) =>
-                                    const SizedBox.shrink(),
-                              )
-                            : Image.file(
-                                File(u['proofPhotoUrl'].toString()),
-                                width: 140,
-                                height: 100,
-                                fit: BoxFit.cover,
-                                errorBuilder: (c, e, s) =>
-                                    const SizedBox.shrink(),
-                              ),
+                        placeholder: const SizedBox.shrink(),
                       ),
                       Positioned(
                         bottom: 6,
@@ -8352,7 +11054,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               ],
               if (isAct) ...[
                 const SizedBox(height: 6),
-                if (u['isReporterConfirmed'] == true)
+                if (u['isReporterConfirmed'] == true || u['action'] == 'returnedToSpot')
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -8369,7 +11071,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         const SizedBox(width: 4),
                         Flexible(
                           child: Text(
-                            'Verified by Reporter (+${u['pendingXp'] ?? 15} XP)',
+                            u['action'] == 'returnedToSpot'
+                                ? 'Verified Colony Return (+${u['pendingXp'] ?? 100} XP)'
+                                : 'Verified by Reporter (+${u['pendingXp'] ?? 15} XP)',
                             style: GoogleFonts.nunito(
                               fontSize: 10.5,
                               fontWeight: FontWeight.w800,
@@ -8819,15 +11523,30 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         ),
         const SizedBox(width: 8),
         GestureDetector(
-          onTap: () =>
-              isReply ? _postReply(sid) : _postComment(sid),
+          onTap: _isPostingComment
+              ? null
+              : () => isReply ? _postReply(sid) : _postComment(sid),
           child: Container(
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                  color: _lavender, shape: BoxShape.circle),
-              child: const Icon(Icons.send_rounded,
-                  color: Colors.white, size: 18)),
+                  color: _isPostingComment
+                      ? _lavender.withValues(alpha: 0.5)
+                      : _lavender,
+                  shape: BoxShape.circle),
+              child: _isPostingComment
+                  ? const Center(
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      ),
+                    )
+                  : const Icon(Icons.send_rounded,
+                      color: Colors.white, size: 18)),
         ),
       ]),
       const SizedBox(height: 6),
@@ -9449,20 +12168,18 @@ class _AllPhotosScreenState extends State<_AllPhotosScreen> {
           itemBuilder: (_, i) {
             final url = widget.photoUrls[i];
             return InteractiveViewer(
-                child: Center(
-                    child: url.startsWith('http')
-                        ? Image.network(url,
-                            fit: BoxFit.contain,
-                            errorBuilder: (ctx, err, st) => const Icon(
-                                Icons.broken_image,
-                                color: Colors.white,
-                                size: 60))
-                        : Image.file(File(url),
-                            fit: BoxFit.contain,
-                            errorBuilder: (ctx, err, st) => const Icon(
-                                Icons.broken_image,
-                                color: Colors.white,
-                                size: 60))));
+              child: Center(
+                child: PawImage(
+                  url: url,
+                  fit: BoxFit.contain,
+                  placeholder: const Icon(
+                    Icons.broken_image,
+                    color: Colors.white,
+                    size: 60,
+                  ),
+                ),
+              ),
+            );
           },
         ),
       );

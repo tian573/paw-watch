@@ -1,8 +1,10 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../models/sighting.dart';
 import '../../models/chat_message.dart';
 import '../../services/firebase_service.dart';
@@ -32,6 +34,11 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
 
   final TextEditingController _msgCtrl = TextEditingController();
   final ScrollController _scrollController = ScrollController();
+  final ImagePicker _picker = ImagePicker();
+  File? _selectedPhotoFile;
+  bool _isUploadingPhoto = false;
+  final Set<String> _locallyHiddenMessageIds = {};
+  final Set<String> _revealedReportedMessageIds = {};
   late final String _chatId;
   late final String _myUid;
 
@@ -53,14 +60,48 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
     super.dispose();
   }
 
-  void _sendMessage([String? textToSend]) {
+  Future<void> _sendMessage([String? textToSend]) async {
     final text = (textToSend ?? _msgCtrl.text).trim();
-    if (text.isEmpty) return;
+    if (text.isEmpty && _selectedPhotoFile == null) return;
 
-    FirebaseService.instance.sendChatMessage(
+    final photoToSend = _selectedPhotoFile;
+    setState(() {
+      _selectedPhotoFile = null;
+      if (photoToSend != null) _isUploadingPhoto = true;
+    });
+
+    String? uploadedPhotoUrl;
+    if (photoToSend != null) {
+      try {
+        final urls = await FirebaseService.instance.uploadPhotos(
+          [photoToSend],
+          'chat_${widget.sighting.id}',
+        );
+        if (urls.isNotEmpty) {
+          uploadedPhotoUrl = urls.first;
+        }
+      } catch (e) {
+        debugPrint('Failed to upload photo via storage: $e');
+        try {
+          final bytes = await photoToSend.readAsBytes();
+          uploadedPhotoUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+        } catch (_) {
+          uploadedPhotoUrl = photoToSend.path;
+        }
+      }
+    }
+
+    if (mounted) {
+      setState(() => _isUploadingPhoto = false);
+    }
+
+    if (text.isEmpty && uploadedPhotoUrl == null) return;
+
+    await FirebaseService.instance.sendChatMessage(
       chatId: _chatId,
       sightingId: widget.sighting.id,
-      text: text,
+      text: text.isNotEmpty ? text : '📷 Sent a photo',
+      photoUrl: uploadedPhotoUrl,
       otherUserId: widget.otherUserId,
       otherUserName: widget.otherUserName,
       sightingTitle: widget.sighting.displayTitle,
@@ -76,12 +117,448 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
     Future.delayed(const Duration(milliseconds: 150), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent + 80,
+          _scrollController.position.maxScrollExtent + 120,
           duration: const Duration(milliseconds: 300),
           curve: Curves.easeOut,
         );
       }
     });
+  }
+
+  Future<void> _pickPhoto(ImageSource source) async {
+    try {
+      final picked = await _picker.pickImage(
+        source: source,
+        maxWidth: 1200,
+        maxHeight: 1200,
+        imageQuality: 82,
+      );
+      if (picked != null) {
+        setState(() {
+          _selectedPhotoFile = File(picked.path);
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not pick image: $e')),
+        );
+      }
+    }
+  }
+
+  void _showAttachPhotoMenu() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Send a Photo',
+                style: GoogleFonts.nunito(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w900,
+                  color: _navy,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Share carrier setup, location landmarks, or cat recovery photos.',
+                style: GoogleFonts.nunito(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: _navy.withValues(alpha: 0.6),
+                ),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  Expanded(
+                    child: InkWell(
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _pickPhoto(ImageSource.camera);
+                      },
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          color: _lavLight,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: _lavender.withValues(alpha: 0.2)),
+                        ),
+                        child: Column(
+                          children: [
+                            const Icon(Icons.camera_alt_rounded,
+                                color: _lavender, size: 28),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Camera',
+                              style: GoogleFonts.nunito(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: _navy,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: InkWell(
+                      onTap: () {
+                        Navigator.pop(ctx);
+                        _pickPhoto(ImageSource.gallery);
+                      },
+                      borderRadius: BorderRadius.circular(16),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        decoration: BoxDecoration(
+                          color: _lavLight,
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: _lavender.withValues(alpha: 0.2)),
+                        ),
+                        child: Column(
+                          children: [
+                            const Icon(Icons.photo_library_rounded,
+                                color: Color(0xFF1E88E5), size: 28),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Gallery',
+                              style: GoogleFonts.nunito(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: _navy,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showReportPhotoDialog(ChatMessage msg) async {
+    String selectedReason = 'Inappropriate or unwanted content';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.red.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.flag_rounded,
+                    color: Colors.red, size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Report Unwanted Photo',
+                  style: GoogleFonts.nunito(
+                    fontWeight: FontWeight.w900,
+                    fontSize: 16.5,
+                    color: _navy,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Help keep PawWatch safe and helpful. Why are you reporting this photo?',
+                  style: GoogleFonts.nunito(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: _navy.withValues(alpha: 0.75),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                ...[
+                  'Inappropriate or graphic content',
+                  'Animal cruelty or harm',
+                  'Spam or unrelated image',
+                  'Harassment or offensive photo',
+                  'Other unwanted content',
+                ].map((reason) {
+                  final isSelected = selectedReason == reason;
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: InkWell(
+                      onTap: () => setDlgState(() => selectedReason = reason),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isSelected
+                              ? Colors.red.withValues(alpha: 0.08)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: isSelected
+                                ? Colors.red
+                                : _navy.withValues(alpha: 0.12),
+                            width: isSelected ? 1.5 : 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              isSelected
+                                  ? Icons.radio_button_checked_rounded
+                                  : Icons.radio_button_unchecked_rounded,
+                              size: 16,
+                              color: isSelected ? Colors.red : Colors.grey,
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                reason,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  fontWeight: isSelected
+                                      ? FontWeight.w800
+                                      : FontWeight.w600,
+                                  color:
+                                      isSelected ? Colors.red.shade800 : _navy,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dCtx, false),
+              child: Text('Cancel',
+                  style: GoogleFonts.nunito(
+                      fontWeight: FontWeight.w700, color: Colors.grey)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () => Navigator.pop(dCtx, true),
+              child: Text('Report & Hide',
+                  style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      setState(() {
+        _locallyHiddenMessageIds.add(msg.id);
+      });
+
+      try {
+        await FirebaseService.instance.reportChatMessage(
+          chatId: _chatId,
+          messageId: msg.id,
+          reason: selectedReason,
+          photoUrl: msg.photoUrl,
+        );
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  'Photo reported to moderation and hidden from your chat view. 🛡️'),
+              backgroundColor: Colors.black87,
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed to report: $e')),
+          );
+        }
+      }
+    }
+  }
+
+  Widget _buildChatPhoto(
+    String url, {
+    double? width,
+    double? height,
+    BoxFit fit = BoxFit.cover,
+    bool isFullScreen = false,
+  }) {
+    if (url.startsWith('data:image')) {
+      try {
+        final commaIdx = url.indexOf(',');
+        final b64 = commaIdx != -1 ? url.substring(commaIdx + 1) : url;
+        final bytes = base64Decode(b64);
+        return Image.memory(
+          bytes,
+          width: width,
+          height: height,
+          fit: fit,
+          errorBuilder: (ctx, err, stack) =>
+              _chatImagePlaceholder(height, isFullScreen: isFullScreen),
+        );
+      } catch (e) {
+        debugPrint('Base64 image decode notice: $e');
+      }
+    }
+
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      return Image.network(
+        url,
+        width: width,
+        height: height,
+        fit: fit,
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) return child;
+          return Container(
+            width: width,
+            height: height ?? 180,
+            color: isFullScreen ? Colors.black : _lavLight,
+            child: const Center(
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: _lavender,
+              ),
+            ),
+          );
+        },
+        errorBuilder: (ctx, err, stack) {
+          try {
+            if (File(url).existsSync()) {
+              return Image.file(File(url),
+                  width: width, height: height, fit: fit);
+            }
+          } catch (_) {}
+          return _chatImagePlaceholder(height, isFullScreen: isFullScreen);
+        },
+      );
+    }
+
+    if (url.startsWith('assets/')) {
+      return Image.asset(
+        url,
+        width: width,
+        height: height,
+        fit: fit,
+        errorBuilder: (ctx, err, stack) =>
+            _chatImagePlaceholder(height, isFullScreen: isFullScreen),
+      );
+    }
+
+    try {
+      final file = File(url);
+      if (file.existsSync()) {
+        return Image.file(
+          file,
+          width: width,
+          height: height,
+          fit: fit,
+          errorBuilder: (ctx, err, stack) =>
+              _chatImagePlaceholder(height, isFullScreen: isFullScreen),
+        );
+      }
+    } catch (_) {}
+
+    return _chatImagePlaceholder(height, isFullScreen: isFullScreen);
+  }
+
+  Widget _chatImagePlaceholder(double? height, {bool isFullScreen = false}) {
+    return Container(
+      height: height ?? 140,
+      color: isFullScreen ? Colors.black : _lavLight,
+      child: Center(
+        child: Icon(
+          Icons.broken_image_rounded,
+          color: isFullScreen ? Colors.white38 : Colors.grey,
+          size: 36,
+        ),
+      ),
+    );
+  }
+
+  void _showFullScreenPhoto(String url) {
+    showDialog(
+      context: context,
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            InteractiveViewer(
+              child: _buildChatPhoto(
+                url,
+                fit: BoxFit.contain,
+                isFullScreen: true,
+              ),
+            ),
+            Positioned(
+              top: MediaQuery.of(ctx).padding.top + 10,
+              right: 16,
+              child: IconButton(
+                icon: const Icon(Icons.close_rounded,
+                    color: Colors.white, size: 28),
+                onPressed: () => Navigator.pop(ctx),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _confirmBlockUser() async {
@@ -602,71 +1079,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                           );
                         }
 
-                        return Align(
-                          alignment: isMe
-                              ? Alignment.centerRight
-                              : Alignment.centerLeft,
-                          child: Container(
-                            margin: const EdgeInsets.only(bottom: 10),
-                            constraints: BoxConstraints(
-                              maxWidth:
-                                  MediaQuery.of(context).size.width * 0.76,
-                            ),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: isMe ? _lavender : Colors.white,
-                              borderRadius: BorderRadius.only(
-                                topLeft: const Radius.circular(16),
-                                topRight: const Radius.circular(16),
-                                bottomLeft: isMe
-                                    ? const Radius.circular(16)
-                                    : const Radius.circular(4),
-                                bottomRight: isMe
-                                    ? const Radius.circular(4)
-                                    : const Radius.circular(16),
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: _navy.withValues(alpha: 0.04),
-                                  blurRadius: 6,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                              border: isMe
-                                  ? null
-                                  : Border.all(
-                                      color: _navy.withValues(alpha: 0.08)),
-                            ),
-                            child: Column(
-                              crossAxisAlignment: isMe
-                                  ? CrossAxisAlignment.end
-                                  : CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  msg.text,
-                                  style: GoogleFonts.nunito(
-                                    fontSize: 13.5,
-                                    fontWeight: FontWeight.w600,
-                                    color: isMe ? Colors.white : _navy,
-                                    height: 1.35,
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  '${msg.createdAt.hour.toString().padLeft(2, '0')}:${msg.createdAt.minute.toString().padLeft(2, '0')}',
-                                  style: GoogleFonts.nunito(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600,
-                                    color: isMe
-                                        ? Colors.white.withValues(alpha: 0.7)
-                                        : _navy.withValues(alpha: 0.4),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        );
+                        return _buildMessageBubble(msg, isMe);
                       },
                     );
                   },
@@ -782,6 +1195,72 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                   ),
                 ),
 
+                if (_selectedPhotoFile != null)
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                    color: Colors.white,
+                    child: Row(
+                      children: [
+                        Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.file(
+                                _selectedPhotoFile!,
+                                width: 56,
+                                height: 56,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                            Positioned(
+                              top: -6,
+                              right: -6,
+                              child: GestureDetector(
+                                onTap: () =>
+                                    setState(() => _selectedPhotoFile = null),
+                                child: Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: const BoxDecoration(
+                                    color: Colors.black87,
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.close_rounded,
+                                      size: 14, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Photo attached',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: _navy,
+                                ),
+                              ),
+                              Text(
+                                'Add a caption below or tap send 🐾',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11,
+                                  color: _navy.withValues(alpha: 0.6),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
                 // Input Bar
                 Container(
                   padding: EdgeInsets.fromLTRB(
@@ -802,6 +1281,21 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                   ),
                   child: Row(
                     children: [
+                      GestureDetector(
+                        onTap: _isUploadingPhoto ? null : _showAttachPhotoMenu,
+                        child: Container(
+                          padding: const EdgeInsets.all(9),
+                          decoration: BoxDecoration(
+                            color: _lavLight,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                                color: _lavender.withValues(alpha: 0.25)),
+                          ),
+                          child: const Icon(Icons.camera_alt_rounded,
+                              color: _lavender, size: 19),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
                       Expanded(
                         child: Container(
                           decoration: BoxDecoration(
@@ -835,15 +1329,24 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                       ),
                       const SizedBox(width: 8),
                       GestureDetector(
-                        onTap: () => _sendMessage(),
+                        onTap: _isUploadingPhoto ? null : () => _sendMessage(),
                         child: Container(
                           padding: const EdgeInsets.all(10),
                           decoration: const BoxDecoration(
                             color: _lavender,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.send_rounded,
-                              color: Colors.white, size: 18),
+                          child: _isUploadingPhoto
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.white,
+                                  ),
+                                )
+                              : const Icon(Icons.send_rounded,
+                                  color: Colors.white, size: 18),
                         ),
                       ),
                     ],
@@ -926,6 +1429,266 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
       height: 38,
       color: _lavLight,
       child: const Icon(Icons.pets, color: _lavender, size: 20),
+    );
+  }
+
+  Widget _buildMessageBubble(ChatMessage msg, bool isMe) {
+    final hasPhoto = msg.photoUrl != null && msg.photoUrl!.isNotEmpty;
+    final isPhotoOnly = hasPhoto &&
+        (msg.text.trim().isEmpty || msg.text.trim() == '📷 Sent a photo');
+    final isReported =
+        msg.isReported || _locallyHiddenMessageIds.contains(msg.id);
+    final isRevealed = _revealedReportedMessageIds.contains(msg.id);
+    final shouldShield = isReported && !isRevealed;
+
+    final timeStr =
+        '${msg.createdAt.hour.toString().padLeft(2, '0')}:${msg.createdAt.minute.toString().padLeft(2, '0')}';
+
+    return Align(
+      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.76,
+        ),
+        child: Column(
+          crossAxisAlignment:
+              isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            // Sender name for other user
+            if (!isMe)
+              Padding(
+                padding: const EdgeInsets.only(left: 4, bottom: 3),
+                child: Text(
+                  msg.senderName,
+                  style: GoogleFonts.nunito(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: _navy.withValues(alpha: 0.55),
+                  ),
+                ),
+              ),
+
+            // Message Container
+            Container(
+              decoration: BoxDecoration(
+                color: isMe ? _lavender : Colors.white,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(18),
+                  topRight: const Radius.circular(18),
+                  bottomLeft: Radius.circular(isMe ? 18 : 4),
+                  bottomRight: Radius.circular(isMe ? 4 : 18),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: _navy.withValues(alpha: 0.05),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+                border: isMe
+                    ? null
+                    : Border.all(color: _navy.withValues(alpha: 0.08)),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // PHOTO SECTION
+                  if (hasPhoto) ...[
+                    if (shouldShield)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 16, vertical: 16),
+                        color: Colors.amber.shade50,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Icon(Icons.shield_rounded,
+                                color: Colors.amber.shade800, size: 28),
+                            const SizedBox(height: 6),
+                            Text(
+                              'Photo Flagged / Hidden',
+                              style: GoogleFonts.nunito(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.amber.shade900,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              msg.reportReason != null &&
+                                      msg.reportReason!.isNotEmpty
+                                  ? 'Reason: ${msg.reportReason}'
+                                  : 'Reported as unwanted or inappropriate content.',
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.nunito(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.amber.shade900
+                                    .withValues(alpha: 0.8),
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            InkWell(
+                              onTap: () {
+                                setState(() {
+                                  _revealedReportedMessageIds.add(msg.id);
+                                });
+                              },
+                              borderRadius: BorderRadius.circular(8),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 12, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border:
+                                      Border.all(color: Colors.amber.shade400),
+                                ),
+                                child: Text(
+                                  'View photo anyway',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: Colors.amber.shade900,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Stack(
+                        children: [
+                          GestureDetector(
+                            onTap: () => _showFullScreenPhoto(msg.photoUrl!),
+                            child: Hero(
+                              tag: 'chat_img_${msg.id}',
+                              child: _buildChatPhoto(
+                                msg.photoUrl!,
+                                width: double.infinity,
+                                height: 210,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                          // Tap to view hint overlay
+                          Positioned(
+                            bottom: 8,
+                            right: 8,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 7, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.55),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.fullscreen_rounded,
+                                      color: Colors.white, size: 14),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    'Expand',
+                                    style: GoogleFonts.nunito(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          // Report button on received photos
+                          if (!isMe)
+                            Positioned(
+                              top: 8,
+                              right: 8,
+                              child: GestureDetector(
+                                onTap: () => _showReportPhotoDialog(msg),
+                                child: Container(
+                                  padding: const EdgeInsets.all(5),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.55),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(
+                                    Icons.flag_outlined,
+                                    color: Colors.white,
+                                    size: 15,
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                  ],
+
+                  // TEXT SECTION (if not photo-only or if caption exists)
+                  if (!isPhotoOnly && msg.text.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
+                      child: Text(
+                        msg.text,
+                        style: GoogleFonts.nunito(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600,
+                          color: isMe ? Colors.white : _navy,
+                          height: 1.35,
+                        ),
+                      ),
+                    ),
+
+                  // FOOTER: Timestamp + Report option for non-photo or photo caption
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        Text(
+                          timeStr,
+                          style: GoogleFonts.nunito(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            color: isMe
+                                ? Colors.white.withValues(alpha: 0.75)
+                                : _navy.withValues(alpha: 0.45),
+                          ),
+                        ),
+                        if (isMe) ...[
+                          const SizedBox(width: 4),
+                          Icon(
+                            Icons.done_all_rounded,
+                            size: 13,
+                            color: Colors.white.withValues(alpha: 0.75),
+                          ),
+                        ],
+                        if (!isMe && !hasPhoto) ...[
+                          const SizedBox(width: 6),
+                          GestureDetector(
+                            onTap: () => _showReportPhotoDialog(msg),
+                            child: Icon(
+                              Icons.flag_outlined,
+                              size: 12,
+                              color: _navy.withValues(alpha: 0.35),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

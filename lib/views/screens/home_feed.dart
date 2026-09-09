@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -12,6 +11,7 @@ import 'report_form.dart';
 import 'sighting_detail.dart';
 import 'profile_screen.dart';
 import 'conversations_screen.dart';
+import '../widgets/paw_image.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -36,7 +36,6 @@ class _HomeScreenState extends State<HomeScreen>
   String _activeFilter = 'All';
   bool _showNewUserTip = false;
   final Set<String> _dismissedDispatchIds = {};
-  final Set<String> _promptedVetDecisionSightingIds = {};
   double? _userLat;
   double? _userLng;
   late AnimationController _arrowAnimController;
@@ -46,6 +45,7 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _checkFirstTimeUser();
+    _loadDismissedDispatchIds();
     _fetchUserLocation();
     _arrowAnimController = AnimationController(
       vsync: this,
@@ -54,6 +54,36 @@ class _HomeScreenState extends State<HomeScreen>
     _arrowBounce = Tween<double>(begin: 0, end: 10).animate(
       CurvedAnimation(parent: _arrowAnimController, curve: Curves.easeInOut),
     );
+  }
+
+  Future<void> _loadDismissedDispatchIds() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+      final list = prefs.getStringList('dismissed_dispatch_ids_$uid') ?? [];
+      if (mounted && list.isNotEmpty) {
+        setState(() {
+          _dismissedDispatchIds.addAll(list);
+        });
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _dismissDispatch(String sightingId) async {
+    setState(() => _dismissedDispatchIds.add(sightingId));
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+      final list = prefs.getStringList('dismissed_dispatch_ids_$uid') ?? [];
+      if (!list.contains(sightingId)) {
+        list.add(sightingId);
+        await prefs.setStringList('dismissed_dispatch_ids_$uid', list);
+      }
+      final currentUid = FirebaseAuth.instance.currentUser?.uid;
+      if (currentUid != null) {
+        await FirebaseService.instance.dismissDispatchForUser(sightingId);
+      }
+    } catch (_) {}
   }
 
   Future<void> _fetchUserLocation() async {
@@ -127,11 +157,14 @@ class _HomeScreenState extends State<HomeScreen>
       case 'Needs Vet':
         return 3 + baseOffset; // Priority 3: Injured / Sick (Unclaimed = 3, Claimed = 8)
       case 'Needs Foster':
+      case 'Needs Home':
       case 'Rehomed':
         return 4 + baseOffset; // Priority 4: Needs Foster (Unclaimed = 4, Claimed = 9)
       case 'Stray':
       case 'Feeding Spot':
       case 'Spotted':
+      case 'Community Cat':
+      case 'Community Care':
       default:
         return 5 + baseOffset; // Priority 5: Stray / Feeding (Unclaimed = 5, Claimed = 10)
     }
@@ -140,35 +173,45 @@ class _HomeScreenState extends State<HomeScreen>
   List<Sighting> _filterAndSortSightings(List<Sighting> list) {
     List<Sighting> filtered;
     if (_activeFilter == 'All') {
-      filtered = List<Sighting>.from(list);
+      filtered = list.where((s) => !s.isAutoArchived).toList();
     } else if (_activeFilter == 'Adoption Showcase') {
-      filtered = list.where((s) => s.isAdoptionShowcase).toList();
+      filtered = list.where((s) => s.isAdoptionShowcase && !s.isAutoArchived).toList();
     } else if (_activeFilter == 'Waiting') {
       filtered = list
           .where((s) =>
-              s.isPendingVerification ||
-              s.isAwaitingPostVetDecision ||
-              s.status == 'waiting')
+              (s.isPendingVerification ||
+                  s.isAwaitingPostVetDecision ||
+                  s.status == 'waiting') &&
+              !s.isAutoArchived)
           .toList();
     } else if (_activeFilter == 'Trapped') {
-      filtered = list.where((s) => s.category == 'Urgent Rescue').toList();
+      filtered = list.where((s) => s.category == 'Urgent Rescue' && !s.isAutoArchived).toList();
     } else if (_activeFilter == 'Vulnerable') {
-      filtered = list.where((s) => s.category == 'Kitten').toList();
+      filtered = list.where((s) => s.category == 'Kitten' && !s.isAutoArchived).toList();
     } else if (_activeFilter == 'Injured') {
       filtered = list
-          .where((s) => s.category == 'Injured' || s.category == 'Needs Vet')
+          .where((s) =>
+              (s.category == 'Injured' || s.category == 'Needs Vet') &&
+              !s.isAutoArchived)
           .toList();
     } else if (_activeFilter == 'Needs Foster') {
       filtered = list
           .where((s) =>
-              s.category == 'Needs Foster' || s.category == 'Rehomed')
+              (s.category == 'Needs Foster' ||
+                  s.category == 'Needs Home' ||
+                  s.category == 'Rehomed') &&
+              !s.isAutoArchived)
           .toList();
     } else if (_activeFilter == 'Stray') {
       filtered = list
           .where((s) =>
-              s.category == 'Stray' ||
-              s.category == 'Feeding Spot' ||
-              s.category == 'Spotted')
+              (s.category == 'Stray' ||
+                  s.category == 'Feeding Spot' ||
+                  s.category == 'Spotted' ||
+                  s.category == 'Community Cat' ||
+                  s.category == 'Community Care' ||
+                  s.isTnrCommunityCat) &&
+              !s.isAutoArchived)
           .toList();
     } else if (_activeFilter == 'Resolved') {
       filtered = list
@@ -179,7 +222,7 @@ class _HomeScreenState extends State<HomeScreen>
               s.status == 'notUrgent')
           .toList();
     } else {
-      filtered = List<Sighting>.from(list);
+      filtered = list.where((s) => !s.isAutoArchived).toList();
     }
 
     filtered.sort((a, b) {
@@ -248,6 +291,25 @@ class _HomeScreenState extends State<HomeScreen>
               final allSightings = snapshot.data ?? [];
               final filtered = _filterAndSortSightings(allSightings);
               final currentUid = FirebaseAuth.instance.currentUser?.uid;
+              final myActiveRescueTrip = currentUid == null
+                  ? null
+                  : allSightings
+                      .where((s) =>
+                          s.rescueClaimed &&
+                          s.rescueClaimedBy == currentUid &&
+                          s.isRescueClaimActive &&
+                          s.urgency != 'resolved')
+                      .firstOrNull;
+
+              final myPendingVetSighting = currentUid == null
+                  ? null
+                  : allSightings
+                      .where((s) =>
+                          s.pendingVetRescuerId == currentUid &&
+                          s.isVetVisitPending &&
+                          s.urgency != 'resolved')
+                      .firstOrNull;
+
               final postVetDecisionSightings = allSightings
                   .where((s) =>
                       s.isAwaitingPostVetDecision &&
@@ -257,30 +319,38 @@ class _HomeScreenState extends State<HomeScreen>
                           (s.lastVetRescuerId == null && s.rescueClaimedBy == currentUid)))
                   .toList();
 
-              if (postVetDecisionSightings.isNotEmpty) {
-                for (final s in postVetDecisionSightings) {
-                  if (!_promptedVetDecisionSightingIds.contains(s.id)) {
-                    _promptedVetDecisionSightingIds.add(s.id);
-                    WidgetsBinding.instance.addPostFrameCallback((_) {
-                      if (mounted) {
-                        _showPostVetRescuerHomeDialog(s);
-                      }
-                    });
-                    break;
-                  }
-                }
-              }
+              final isLockedWithCat = myActiveRescueTrip != null ||
+                  myPendingVetSighting != null ||
+                  postVetDecisionSightings.isNotEmpty;
 
-              final urgentDispatches = allSightings
-                  .where((s) =>
-                      s.isEligibleForRadialDispatch &&
-                      (currentUid == null || s.reporterId != currentUid) &&
-                      !_dismissedDispatchIds.contains(s.id))
-                  .toList();
+              final urgentDispatches = isLockedWithCat
+                  ? <Sighting>[]
+                  : allSightings
+                      .where((s) =>
+                          s.isEligibleForRadialDispatch &&
+                          (currentUid == null || s.reporterId != currentUid) &&
+                          !_dismissedDispatchIds.contains(s.id) &&
+                          !s.isDispatchDismissedFor(currentUid))
+                      .toList();
 
               return CustomScrollView(
                 physics: const BouncingScrollPhysics(),
                 slivers: [
+                  if (myActiveRescueTrip != null)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                        child: _buildActiveRescueTripBanner(myActiveRescueTrip),
+                      ),
+                    ),
+                  if (myPendingVetSighting != null)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                        child: _buildPendingVetVerificationBanner(
+                            myPendingVetSighting),
+                      ),
+                    ),
                   if (postVetDecisionSightings.isNotEmpty)
                     SliverToBoxAdapter(
                       child: Padding(
@@ -897,6 +967,7 @@ class _HomeScreenState extends State<HomeScreen>
         chipIcon = Icons.healing_outlined;
         break;
       case 'Needs Foster':
+      case 'Needs Home':
         chipColor = const Color(0xFF9C27B0);
         chipIcon = Icons.home_outlined;
         break;
@@ -1124,37 +1195,43 @@ class _HomeScreenState extends State<HomeScreen>
                           const SizedBox(height: 6),
                         ],
                       ] else if (data.isInCare) ...[
-                        Container(
-                          margin: const EdgeInsets.only(bottom: 6),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 8, vertical: 3.5),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF673AB7).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                                color: const Color(0xFF673AB7).withValues(alpha: 0.3)),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Icon(data.careIcon,
-                                  size: 12, color: const Color(0xFF673AB7)),
-                              const SizedBox(width: 4),
-                              Flexible(
-                                child: Text(
-                                  '${data.careLabel} • with ${data.careTakerName?.isNotEmpty == true ? data.careTakerName : "Rescuer"}',
-                                  style: GoogleFonts.nunito(
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w800,
-                                    color: const Color(0xFF673AB7),
+                        Builder(builder: (context) {
+                          final isAdoptionState = data.isOpenForAdoption || data.category == 'Needs Home';
+                          final badgeColor = isAdoptionState ? const Color(0xFF9C27B0) : const Color(0xFF673AB7);
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 6),
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 3.5),
+                            decoration: BoxDecoration(
+                              color: badgeColor.withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                  color: badgeColor.withValues(alpha: 0.3)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(data.careIcon,
+                                    size: 12, color: badgeColor),
+                                const SizedBox(width: 4),
+                                Flexible(
+                                  child: Text(
+                                    isAdoptionState
+                                        ? 'Needs Home • with ${data.careTakerName?.isNotEmpty == true ? data.careTakerName : "Foster"}'
+                                        : '${data.careLabel} • with ${data.careTakerName?.isNotEmpty == true ? data.careTakerName : "Rescuer"}',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: badgeColor,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
                                 ),
-                              ),
-                            ],
-                          ),
-                        ),
+                              ],
+                            ),
+                          );
+                        }),
                       ] else if (data.isPendingVerification || data.isAwaitingPostVetDecision) ...[
                         Container(
                           margin: const EdgeInsets.only(bottom: 6),
@@ -1260,10 +1337,20 @@ class _HomeScreenState extends State<HomeScreen>
     final String statusLabel;
     final IconData statusIcon;
 
-    if (data.status == 'resolved' || data.urgency == 'resolved') {
+    if (data.status == 'resolved' ||
+        data.urgency == 'resolved' ||
+        data.category == 'Resolved') {
       statusColor = _resolved;
       statusLabel = 'Resolved';
       statusIcon = Icons.check_circle;
+    } else if (data.isTnrCommunityCat) {
+      statusColor = const Color(0xFF00897B);
+      statusLabel = 'Community Cat';
+      statusIcon = Icons.pets;
+    } else if (data.isOpenForAdoption || data.category == 'Needs Home') {
+      statusColor = const Color(0xFF9C27B0);
+      statusLabel = 'Needs Home';
+      statusIcon = Icons.home_outlined;
     } else if (data.isInCare) {
       statusColor = const Color(0xFF673AB7);
       statusLabel = data.careLabel;
@@ -1311,40 +1398,27 @@ class _HomeScreenState extends State<HomeScreen>
         height: 140,
         child: Stack(
           children: [
-            if (data.photoUrls.isNotEmpty)
-              Positioned.fill(
-                child: data.photoUrls.first.startsWith('http')
-                    ? Image.network(
-                        data.photoUrls.first,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => Container(
-                          color: _lavender.withValues(alpha: 0.15),
-                          child: Center(
-                            child: Icon(Icons.pets,
-                                size: 40, color: _lavender.withValues(alpha: 0.4)),
-                          ),
-                        ),
-                      )
-                    : Image.file(
-                        File(data.photoUrls.first),
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) => Container(
-                          color: _lavender.withValues(alpha: 0.15),
-                          child: Center(
-                            child: Icon(Icons.pets,
-                                size: 40, color: _lavender.withValues(alpha: 0.4)),
-                          ),
+            Positioned.fill(
+              child: data.photoUrls.isNotEmpty
+                  ? PawImage(
+                      url: data.photoUrls.first,
+                      fit: BoxFit.cover,
+                      placeholder: Container(
+                        color: _lavender.withValues(alpha: 0.15),
+                        child: Center(
+                          child: Icon(Icons.pets,
+                              size: 40, color: _lavender.withValues(alpha: 0.4)),
                         ),
                       ),
-              )
-            else
-              Container(
-                color: _lavender.withValues(alpha: 0.15),
-                child: Center(
-                  child: Icon(Icons.pets,
-                      size: 40, color: _lavender.withValues(alpha: 0.4)),
-                ),
-              ),
+                    )
+                  : Container(
+                      color: _lavender.withValues(alpha: 0.15),
+                      child: Center(
+                        child: Icon(Icons.pets,
+                            size: 40, color: _lavender.withValues(alpha: 0.4)),
+                      ),
+                    ),
+            ),
             Positioned(
               top: 8,
               left: 8,
@@ -1471,6 +1545,7 @@ class _HomeScreenState extends State<HomeScreen>
         icon = Icons.healing_outlined;
         break;
       case 'Needs Foster':
+      case 'Needs Home':
       case 'Rehomed':
         icon = Icons.home_outlined;
         break;
@@ -1483,6 +1558,10 @@ class _HomeScreenState extends State<HomeScreen>
         break;
       case 'Urgent Rescue':
         icon = Icons.emergency_outlined;
+        break;
+      case 'Community Cat':
+      case 'Community Care':
+        icon = Icons.pets;
         break;
       case 'Resolved':
         icon = Icons.check_circle_outline;
@@ -1752,7 +1831,142 @@ class _HomeScreenState extends State<HomeScreen>
           ),
         ],
       ),
-      padding: const EdgeInsets.all(14),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: () => _showPostVetRescuerHomeDialog(s),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE65100),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.celebration_rounded,
+                              color: Colors.white, size: 13),
+                          const SizedBox(width: 4),
+                          Text(
+                            'VET VISIT VERIFIED',
+                            style: GoogleFonts.nunito(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFA000).withValues(alpha: 0.18),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '+100 XP',
+                        style: GoogleFonts.nunito(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w900,
+                          color: const Color(0xFFE65100),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  '${s.title.isNotEmpty ? s.title : "Cat Rescue"} • Next Step On Hold',
+                  style: GoogleFonts.nunito(
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w900,
+                    color: _navy,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Reporter verified the vet visit! You have physical custody of this cat. Tap to open details and decide next action.',
+                  style: GoogleFonts.nunito(
+                    fontSize: 11.5,
+                    color: _navy.withValues(alpha: 0.75),
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFE65100),
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        onPressed: () => _showPostVetRescuerHomeDialog(s),
+                        icon: const Icon(Icons.touch_app_rounded, size: 16),
+                        label: Text(
+                          'Decide Next Step 🐾',
+                          style: GoogleFonts.nunito(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showPostVetRescuerHomeDialog(Sighting s) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => SightingDetailScreen(sighting: s),
+      ),
+    );
+  }
+
+  Widget _buildActiveRescueTripBanner(Sighting s) {
+    final remMins = s.rescueClaimRemainingMinutes;
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F5E9),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFF4CAF50).withValues(alpha: 0.4),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF4CAF50).withValues(alpha: 0.12),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -1761,17 +1975,17 @@ class _HomeScreenState extends State<HomeScreen>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFE65100),
-                  borderRadius: BorderRadius.circular(8),
+                  color: const Color(0xFF2E7D32),
+                  borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.celebration_rounded,
+                    const Icon(Icons.directions_run_rounded,
                         color: Colors.white, size: 13),
                     const SizedBox(width: 4),
                     Text(
-                      'VET VISIT VERIFIED',
+                      'ON MY WAY',
                       style: GoogleFonts.nunito(
                         fontSize: 10,
                         fontWeight: FontWeight.w900,
@@ -1783,255 +1997,124 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ),
               const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFFFA000).withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '+100 XP',
-                  style: GoogleFonts.nunito(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w900,
-                    color: const Color(0xFFE65100),
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF81C784).withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                ),
-              ),
-              const Spacer(),
-              InkWell(
-                onTap: () => _showPostVetRescuerHomeDialog(s),
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Icon(Icons.open_in_new_rounded,
-                      size: 18, color: const Color(0xFFE65100).withValues(alpha: 0.7)),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.timer_outlined,
+                          size: 12, color: Color(0xFF1B5E20)),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          '$remMins min left',
+                          style: GoogleFonts.nunito(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFF1B5E20),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 10),
-          Text(
-            '${s.title.isNotEmpty ? s.title : "Cat Rescue"} • Next Step On Hold',
-            style: GoogleFonts.nunito(
-              fontSize: 14.5,
-              fontWeight: FontWeight.w900,
-              color: _navy,
-            ),
-          ),
-          const SizedBox(height: 2),
-          Text(
-            'Reporter verified the vet visit! You have physical custody of this cat. Please decide whether to foster, transfer to a shelter, or safe release.',
-            style: GoogleFonts.nunito(
-              fontSize: 11.5,
-              color: _navy.withValues(alpha: 0.75),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 12),
           Row(
             children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFE65100),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
+              if (s.photoUrls.isNotEmpty)
+                PawImage(
+                  url: s.photoUrls.first,
+                  width: 50,
+                  height: 50,
+                  fit: BoxFit.cover,
+                  borderRadius: BorderRadius.circular(12),
+                  placeholder: Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF81C784).withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    child: const Icon(Icons.pets, size: 22, color: Color(0xFF2E7D32)),
                   ),
-                  onPressed: () => _showPostVetRescuerHomeDialog(s),
-                  icon: const Icon(Icons.touch_app_rounded, size: 16),
-                  label: Text(
-                    'Decide Next Step 🐾',
-                    style: GoogleFonts.nunito(
-                      fontWeight: FontWeight.w800,
-                      fontSize: 12,
-                    ),
+                )
+              else
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF81C784).withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
                   ),
+                  child: const Icon(Icons.pets, size: 22, color: Color(0xFF2E7D32)),
                 ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showPostVetRescuerHomeDialog(Sighting s) {
-    showDialog(
-      context: context,
-      builder: (dCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        contentPadding: const EdgeInsets.fromLTRB(20, 20, 20, 16),
-        titlePadding: EdgeInsets.zero,
-        title: Container(
-          padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF57C00).withValues(alpha: 0.15),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.celebration_rounded,
-                    color: Color(0xFFF57C00), size: 22),
-              ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Vet Visit Verified! 🎉',
+                      s.title.isNotEmpty ? s.title : "Active Cat Rescue",
                       style: GoogleFonts.nunito(
-                        fontSize: 16.5,
+                        fontSize: 14,
                         fontWeight: FontWeight.w900,
                         color: _navy,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
+                    const SizedBox(height: 2),
                     Text(
-                      '+100 XP awarded to you',
+                      s.locationAddress.isNotEmpty ? s.locationAddress : "En route to spot",
                       style: GoogleFonts.nunito(
                         fontSize: 11.5,
-                        fontWeight: FontWeight.w800,
-                        color: const Color(0xFFE65100),
+                        color: _navy.withValues(alpha: 0.75),
+                        fontWeight: FontWeight.w600,
                       ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ],
                 ),
               ),
             ],
           ),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const SizedBox(height: 8),
-            Text(
-              'Reporter verified your vet care report. Since you currently have custody of ${s.title.isNotEmpty ? s.title : "this cat"}, please choose what to do next:',
-              style: GoogleFonts.nunito(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w600,
-                color: _navy.withValues(alpha: 0.75),
-              ),
-            ),
-            const SizedBox(height: 14),
-            _buildPostVetHomeOptionTile(
-              icon: Icons.volunteer_activism_rounded,
-              color: const Color(0xFF673AB7),
-              title: '🏡 Foster at My Place',
-              subtitle: 'Quarantine & start daily recovery milestone (+150 XP)',
-              onTap: () {
-                Navigator.pop(dCtx);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => SightingDetailScreen(
-                      sighting: s,
-                      initialAction: 'tookIn',
-                    ),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 8),
-            _buildPostVetHomeOptionTile(
-              icon: Icons.house_rounded,
-              color: const Color(0xFFE65100),
-              title: '🏛️ Transfer to Shelter',
-              subtitle: 'Admit to verified shelter center (+120 XP)',
-              onTap: () {
-                Navigator.pop(dCtx);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => SightingDetailScreen(
-                      sighting: s,
-                      initialAction: 'sheltered',
-                    ),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 8),
-            _buildPostVetHomeOptionTile(
-              icon: Icons.nature_people_rounded,
-              color: const Color(0xFF2E7D32),
-              title: '🌿 Return to Spot (TNR)',
-              subtitle: 'Cat was safely released back to territory',
-              onTap: () {
-                Navigator.pop(dCtx);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => SightingDetailScreen(
-                      sighting: s,
-                      initialAction: 'returnedToSpot',
-                    ),
-                  ),
-                );
-              },
-            ),
-            const SizedBox(height: 8),
-            _buildPostVetHomeOptionTile(
-              icon: Icons.group_rounded,
-              color: const Color(0xFF1E88E5),
-              title: '💬 Can\'t Foster — Ask Community',
-              subtitle: 'Request volunteer foster parents from PawWatch',
-              onTap: () {
-                Navigator.pop(dCtx);
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => SightingDetailScreen(
-                      sighting: s,
-                      initialAction: 'askCommunity',
-                    ),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dCtx),
-            child: Text(
-              'Decide Later',
-              style: GoogleFonts.nunito(
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-                color: Colors.grey.shade600,
-              ),
-            ),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: _navy,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-            ),
-            onPressed: () {
-              Navigator.pop(dCtx);
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => SightingDetailScreen(sighting: s),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
                 ),
-              );
-            },
-            child: Text(
-              'View Details 🐾',
-              style: GoogleFonts.nunito(
-                fontSize: 12,
-                fontWeight: FontWeight.w800,
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SightingDetailScreen(sighting: s),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.directions_walk_rounded, size: 16),
+              label: Text(
+                'Open Active Rescue Mission 🐾',
+                style: GoogleFonts.nunito(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12.5,
+                ),
               ),
             ),
           ),
@@ -2040,62 +2123,193 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Widget _buildPostVetHomeOptionTile({
-    required IconData icon,
-    required Color color,
-    required String title,
-    required String subtitle,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(14),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: color.withValues(alpha: 0.25)),
+  Widget _buildPendingVetVerificationBanner(Sighting s) {
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF3E5F5),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFF9C27B0).withValues(alpha: 0.35),
+          width: 1.5,
         ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(7),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.15),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, size: 16, color: color),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: GoogleFonts.nunito(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w900,
-                      color: _navy,
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF9C27B0).withValues(alpha: 0.1),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF7B1FA2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.local_hospital_rounded,
+                        color: Colors.white, size: 13),
+                    const SizedBox(width: 4),
+                    Text(
+                      'VET CHECK SUBMITTED',
+                      style: GoogleFonts.nunito(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        letterSpacing: 0.5,
+                      ),
                     ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Flexible(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFBA68C8).withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  Text(
-                    subtitle,
-                    style: GoogleFonts.nunito(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w600,
-                      color: _navy.withValues(alpha: 0.65),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.hourglass_top_rounded,
+                          size: 12, color: Color(0xFF4A148C)),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          'Awaiting Reporter Verification',
+                          style: GoogleFonts.nunito(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w800,
+                            color: const Color(0xFF4A148C),
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              InkWell(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => SightingDetailScreen(sighting: s),
                     ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+                  );
+                },
+                borderRadius: BorderRadius.circular(12),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(Icons.open_in_new_rounded,
+                      size: 18, color: const Color(0xFF7B1FA2).withValues(alpha: 0.8)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              if (s.photoUrls.isNotEmpty)
+                PawImage(
+                  url: s.photoUrls.first,
+                  width: 50,
+                  height: 50,
+                  fit: BoxFit.cover,
+                  borderRadius: BorderRadius.circular(12),
+                  placeholder: Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFCE93D8).withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.pets, size: 22, color: Color(0xFF7B1FA2)),
                   ),
-                ],
+                )
+              else
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFCE93D8).withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.pets, size: 22, color: Color(0xFF7B1FA2)),
+                ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      s.title.isNotEmpty ? s.title : "Vet Care Cat",
+                      style: GoogleFonts.nunito(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        color: _navy,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Proof submitted! Waiting for ${s.reporterName.isNotEmpty ? s.reporterName : "reporter"} to verify clinic receipt.',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        color: _navy.withValues(alpha: 0.75),
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF7B1FA2),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SightingDetailScreen(sighting: s),
+                  ),
+                );
+              },
+              icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
+              label: Text(
+                'View Report & Coordinate Chat 💬',
+                style: GoogleFonts.nunito(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12.5,
+                ),
               ),
             ),
-            Icon(Icons.chevron_right_rounded, size: 18, color: color),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -2170,35 +2384,18 @@ class _HomeScreenState extends State<HomeScreen>
           Row(
             children: [
               if (s.photoUrls.isNotEmpty)
-                ClipRRect(
+                PawImage(
+                  url: s.photoUrls.first,
+                  width: 54,
+                  height: 54,
+                  fit: BoxFit.cover,
                   borderRadius: BorderRadius.circular(12),
-                  child: s.photoUrls.first.startsWith('http')
-                      ? Image.network(
-                          s.photoUrls.first,
-                          width: 54,
-                          height: 54,
-                          fit: BoxFit.cover,
-                          errorBuilder: (c, e, st) => Container(
-                            width: 54,
-                            height: 54,
-                            color: _lavender.withValues(alpha: 0.2),
-                            child: const Icon(Icons.pets,
-                                size: 24, color: _lavender),
-                          ),
-                        )
-                      : Image.file(
-                          File(s.photoUrls.first),
-                          width: 54,
-                          height: 54,
-                          fit: BoxFit.cover,
-                          errorBuilder: (c, e, st) => Container(
-                            width: 54,
-                            height: 54,
-                            color: _lavender.withValues(alpha: 0.2),
-                            child: const Icon(Icons.pets,
-                                size: 24, color: _lavender),
-                          ),
-                        ),
+                  placeholder: Container(
+                    width: 54,
+                    height: 54,
+                    color: _lavender.withValues(alpha: 0.2),
+                    child: const Icon(Icons.pets, size: 24, color: _lavender),
+                  ),
                 )
               else
                 Container(
@@ -2253,9 +2450,7 @@ class _HomeScreenState extends State<HomeScreen>
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12)),
                   ),
-                  onPressed: () {
-                    setState(() => _dismissedDispatchIds.add(s.id));
-                  },
+                  onPressed: () => _dismissDispatch(s.id),
                   child: Text('Can\'t Help',
                       style: GoogleFonts.nunito(
                           fontSize: 12, fontWeight: FontWeight.w700)),
@@ -2274,7 +2469,70 @@ class _HomeScreenState extends State<HomeScreen>
                     elevation: 2,
                   ),
                   onPressed: () async {
-                    await FirebaseService.instance.claimRescue(s.id);
+                    final uid = FirebaseAuth.instance.currentUser?.uid;
+                    if (uid != null) {
+                      final activeTrip = await FirebaseService.instance
+                          .getActiveRescueTrip(uid);
+                      if (activeTrip != null && activeTrip.id != s.id) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'You already have an active rescue mission in progress! Please finish that trip first. 🏃🐾',
+                                style: GoogleFonts.nunito(
+                                    fontWeight: FontWeight.w700),
+                              ),
+                              backgroundColor: const Color(0xFFE65100),
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                          );
+                        }
+                        return;
+                      }
+
+                      final activeVet = await FirebaseService.instance
+                          .getActiveVetCareSighting(uid);
+                      if (activeVet != null && activeVet.id != s.id) {
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'You have a cat in vet custody awaiting verification or decision! Please finish that first. 🩺🐾',
+                                style: GoogleFonts.nunito(
+                                    fontWeight: FontWeight.w700),
+                              ),
+                              backgroundColor: const Color(0xFF7B1FA2),
+                              behavior: SnackBarBehavior.floating,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                          );
+                        }
+                        return;
+                      }
+                    }
+                    try {
+                      await FirebaseService.instance.claimRescue(s.id);
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Could not claim rescue: $e',
+                              style: GoogleFonts.nunito(
+                                  fontWeight: FontWeight.w700),
+                            ),
+                            backgroundColor: Colors.red.shade700,
+                            behavior: SnackBarBehavior.floating,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12)),
+                          ),
+                        );
+                      }
+                      return;
+                    }
                     if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
@@ -2352,7 +2610,8 @@ class _HomeScreenState extends State<HomeScreen>
                   .where((s) =>
                       s.isEligibleForRadialDispatch &&
                       (currentUid == null || s.reporterId != currentUid) &&
-                      !_dismissedDispatchIds.contains(s.id))
+                      !_dismissedDispatchIds.contains(s.id) &&
+                      !s.isDispatchDismissedFor(currentUid))
                   .toList();
               final inCareList =
                   sightings.where((s) => s.isInCare).toList();
@@ -2455,18 +2714,12 @@ class _HomeScreenState extends State<HomeScreen>
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(10),
                                     child: s.photoUrls.isNotEmpty
-                                        ? (s.photoUrls.first
-                                                .startsWith('http')
-                                            ? Image.network(
-                                                s.photoUrls.first,
-                                                width: 44,
-                                                height: 44,
-                                                fit: BoxFit.cover)
-                                            : Image.file(
-                                                File(s.photoUrls.first),
-                                                width: 44,
-                                                height: 44,
-                                                fit: BoxFit.cover))
+                                        ? PawImage(
+                                            url: s.photoUrls.first,
+                                            width: 44,
+                                            height: 44,
+                                            fit: BoxFit.cover,
+                                          )
                                         : Container(
                                             width: 44,
                                             height: 44,

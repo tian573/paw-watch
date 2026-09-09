@@ -32,6 +32,7 @@ class Sighting {
   final String? careTakerId;
   final String? careTakerName;
   final DateTime? careStartedAt;
+  final DateTime? resolvedAt;
   final String? resolvedByAction; // 'sheltered', 'rehomed', 'returnedToSpot', etc.
   final String? pendingHandoverRescuerId;
   final String? pendingHandoverRescuerName;
@@ -48,6 +49,7 @@ class Sighting {
   final String? pendingOutcomeProofUrl;
   final String? pendingOutcomeUpdateId;
   final List<String> declinedFosterUserIds;
+  final List<String> declinedDispatchUserIds;
   final bool hasVetVisitFlag;
   final DateTime? lastVetVisitAt;
   final List<String> healthTags;
@@ -63,6 +65,11 @@ class Sighting {
   final String? lastVetRescuerName;
   final bool isCommunityFosterRequested;
   final bool isOpenForAdoption;
+  final String? adoptionNote;
+  final String? temperament; // 'friendly', 'shy', 'feral'
+  final bool hasEarTip;
+  final String? postVetCustody; // 'rescuerInCharge', 'reporterFoster', etc.
+  final DateTime? vetVerifiedAt;
 
   const Sighting({
     required this.id,
@@ -94,6 +101,7 @@ class Sighting {
     this.careTakerId,
     this.careTakerName,
     this.careStartedAt,
+    this.resolvedAt,
     this.resolvedByAction,
     this.pendingHandoverRescuerId,
     this.pendingHandoverRescuerName,
@@ -110,6 +118,7 @@ class Sighting {
     this.pendingOutcomeProofUrl,
     this.pendingOutcomeUpdateId,
     this.declinedFosterUserIds = const [],
+    this.declinedDispatchUserIds = const [],
     this.hasVetVisitFlag = false,
     this.lastVetVisitAt,
     this.healthTags = const [],
@@ -125,7 +134,34 @@ class Sighting {
     this.lastVetRescuerName,
     this.isCommunityFosterRequested = false,
     this.isOpenForAdoption = false,
+    this.adoptionNote,
+    this.temperament,
+    this.hasEarTip = false,
+    this.postVetCustody,
+    this.vetVerifiedAt,
   });
+
+  /// Whether the 24-hour reporter decision window has expired after vet visit verification
+  bool get isPostVetDecisionWindowExpired {
+    final verifiedDate = vetVerifiedAt ?? lastVetVisitAt;
+    if (verifiedDate == null) return false;
+    final expiry = verifiedDate.add(const Duration(hours: 24));
+    return DateTime.now().isAfter(expiry);
+  }
+
+  /// Remaining duration in the 24-hour reporter decision window (null if not set or expired)
+  Duration? get postVetDecisionTimeRemaining {
+    final verifiedDate = vetVerifiedAt ?? lastVetVisitAt;
+    if (verifiedDate == null) return null;
+    final expiry = verifiedDate.add(const Duration(hours: 24));
+    final remaining = expiry.difference(DateTime.now());
+    return remaining.isNegative ? Duration.zero : remaining;
+  }
+
+  /// True if custody is explicitly delegated OR the 24h reporter decision window expired
+  bool get isRescuerCustodyDelegated =>
+      postVetCustody == 'rescuerInCharge' ||
+      (isAwaitingPostVetDecision && isPostVetDecisionWindowExpired);
 
   bool get isVetVisitPending =>
       pendingVetRescuerId != null &&
@@ -133,15 +169,24 @@ class Sighting {
 
   bool get isResolved => urgency == 'resolved';
 
+  /// Auto-archived from active public feed if resolved for 30+ days
+  bool get isAutoArchived {
+    if (!isResolved) return false;
+    final date = resolvedAt ?? lastVetVisitAt ?? createdAt;
+    return DateTime.now().difference(date).inDays >= 30;
+  }
+
   bool get isAdoptionShowcase =>
-      !isResolved &&
-      (isOpenForAdoption ||
-          category == 'Needs Foster' ||
-          careStatus == 'inCare_shelter' ||
-          (healthTags.isNotEmpty && isInCare));
+      category == 'Needs Foster' ||
+      category == 'Needs Home' ||
+      category == 'Rehomed' ||
+      isOpenForAdoption;
 
   bool isFosterDeclinedFor(String? uid) =>
       uid != null && uid.isNotEmpty && declinedFosterUserIds.contains(uid);
+
+  bool isDispatchDismissedFor(String? uid) =>
+      uid != null && uid.isNotEmpty && declinedDispatchUserIds.contains(uid);
 
   bool get isInCare =>
       careStatus != null &&
@@ -210,12 +255,16 @@ class Sighting {
   }
 
   bool get isMedicalOrTriagePriority {
+    if (isTnrCommunityCat) return false;
     final cat = category.toLowerCase();
     if (cat == 'needs foster' ||
+        cat == 'needs home' ||
         cat == 'rehomed' ||
         cat == 'spotted' ||
         cat == 'stray' ||
-        cat == 'feeding spot') {
+        cat == 'feeding spot' ||
+        cat == 'community cat' ||
+        cat == 'community care') {
       return false;
     }
     return cat == 'injured' ||
@@ -232,7 +281,25 @@ class Sighting {
           careStatus == 'inCare_vet' ||
           resolvedByAction == 'vet');
 
+  bool get isVetVisitVerified =>
+      !isVetVisitPending &&
+      (hasVetVisit || hasVetVisitFlag || vetVerifiedAt != null);
+
+  bool get isTnrCommunityCat =>
+      urgency != 'resolved' &&
+      (resolvedByAction == 'returnedToSpot' ||
+          urgency == 'communityCare' ||
+          ((category == 'Community Cat' ||
+                  category == 'Community Care' ||
+                  category == 'Feral / Colony Cat') &&
+              urgency != 'urgent' &&
+              urgency != 'needsHelp' &&
+              !hasVetVisit &&
+              !isInCare));
+
   String get careLabel {
+    if (isOpenForAdoption || category == 'Needs Home') return 'Needs Home';
+    if (isTnrCommunityCat) return 'Community Cat';
     if (careStatus == 'inCare_vet') return 'At Vet Clinic';
     if (careStatus == 'inCare_foster') return 'In Foster Care';
     if (careStatus == 'inCare_shelter') return 'In Shelter';
@@ -240,6 +307,8 @@ class Sighting {
   }
 
   IconData get careIcon {
+    if (isOpenForAdoption || category == 'Needs Home') return Icons.home_outlined;
+    if (isTnrCommunityCat) return Icons.pets;
     if (careStatus == 'inCare_vet') return Icons.local_hospital_rounded;
     if (careStatus == 'inCare_foster') return Icons.home_rounded;
     if (careStatus == 'inCare_shelter') return Icons.domain_rounded;
@@ -262,10 +331,13 @@ class Sighting {
   }
 
   bool get isPendingVerification =>
-      isVetVisitPending ||
-      (pendingVetRescuerId != null && pendingVetRescuerId!.isNotEmpty) ||
-      (pendingHandoverRescuerId != null && pendingHandoverRescuerId!.isNotEmpty) ||
-      (pendingOutcomeAction != null && pendingOutcomeAction!.isNotEmpty);
+      urgency != 'resolved' &&
+      resolvedByAction != 'returnedToSpot' &&
+      (isVetVisitPending ||
+          (pendingVetRescuerId != null && pendingVetRescuerId!.isNotEmpty) ||
+          (pendingHandoverRescuerId != null &&
+              pendingHandoverRescuerId!.isNotEmpty) ||
+          (pendingOutcomeAction != null && pendingOutcomeAction!.isNotEmpty));
 
   bool get isAwaitingPostVetDecision =>
       hasVetVisit &&
@@ -279,46 +351,34 @@ class Sighting {
       careStatus != 'inCare_foster' &&
       careStatus != 'inCare_shelter' &&
       !isCommunityFosterRequested &&
+      !isOpenForAdoption &&
       (pendingHandoverRescuerId == null || pendingHandoverRescuerId!.isEmpty);
 
   String get pendingVerificationDescription {
     if (isVetVisitPending ||
         (pendingVetRescuerId != null && pendingVetRescuerId!.isNotEmpty)) {
-      final name = pendingVetRescuerName?.isNotEmpty == true
-          ? pendingVetRescuerName!
-          : 'Rescuer';
-      return '$name submitted vet visit • Awaiting verification';
-    }
-    if (pendingHandoverRescuerId != null &&
-        pendingHandoverRescuerId!.isNotEmpty) {
-      final name = pendingHandoverRescuerName?.isNotEmpty == true
-          ? pendingHandoverRescuerName!
-          : 'Rescuer';
-      return '$name requested foster • Awaiting approval';
+      return 'Vet Clinic Visit submitted — awaiting reporter verification.';
     }
     if (pendingOutcomeAction != null && pendingOutcomeAction!.isNotEmpty) {
-      return 'Outcome proof submitted • Awaiting review';
+      return 'Outcome confirmation requested — awaiting reporter verification.';
     }
-    if (isAwaitingPostVetDecision) {
-      final name = lastVetRescuerName?.isNotEmpty == true
-          ? lastVetRescuerName!
-          : 'Rescuer';
-      return '$name verified vet visit • Next step on hold';
-    }
-    return 'Verification submitted • Awaiting review';
+    return 'Action logged — awaiting reporter verification.';
   }
 
   bool get isEligibleForRadialDispatch {
-    if (urgency == 'resolved' || isInCare) return false;
+    if (urgency == 'resolved' || urgency == 'communityCare' || isInCare || isTnrCommunityCat) return false;
     if (hasVetVisit || isVetVisitPending || isPendingVerification || isAwaitingPostVetDecision) return false;
     if (rescueClaimed || isRescueClaimActive) return false;
     if (rescueClaimedBy.isNotEmpty) return false;
 
     final cat = category.toLowerCase();
     if (cat == 'needs foster' ||
+        cat == 'needs home' ||
         cat == 'rehomed' ||
         cat == 'stray' ||
         cat == 'stray cat' ||
+        cat == 'community cat' ||
+        cat == 'community care' ||
         cat == 'feeding spot' ||
         cat == 'spotted') {
       return false;
@@ -335,7 +395,13 @@ class Sighting {
   }
 
   String get status {
-    if (urgency == 'resolved') return 'resolved';
+    if (urgency == 'resolved' ||
+        careStatus == 'resolved' ||
+        category == 'Resolved') {
+      return 'resolved';
+    }
+    if (isTnrCommunityCat) return 'communityCat';
+    if (isOpenForAdoption || category == 'Needs Home') return 'needsHome';
     if (isInCare && careStatus != null) return careStatus!;
     if (isPendingVerification || isAwaitingPostVetDecision) return 'waiting';
     if (rescueClaimed || isRescueClaimActive || rescueClaimedBy.isNotEmpty) {
@@ -346,13 +412,30 @@ class Sighting {
   }
 
   bool get isOneTimeTask =>
-      category == 'Injured' ||
-      category == 'Needs Vet' ||
-      category == 'Kitten' ||
-      category == 'Urgent Rescue' ||
-      category == 'Needs Foster';
+      !isTnrCommunityCat &&
+      (category == 'Injured' ||
+          category == 'Needs Vet' ||
+          category == 'Kitten' ||
+          category == 'Urgent Rescue' ||
+          category == 'Needs Foster' ||
+          category == 'Needs Home');
 
   bool get isOngoingCare => !isOneTimeTask;
+
+  /// TNR Return is strictly for adult feral colony cats. Domestic fosters and friendly pets cannot be returned to colony.
+  bool get canTnrReturn =>
+      isFeral &&
+      temperament != 'friendly' &&
+      temperament != 'kitten';
+
+  bool get isFeral =>
+      temperament == 'feral' ||
+      category == 'Feral / Colony Cat' ||
+      category == 'Community Cat' ||
+      isTnrCommunityCat;
+
+  bool get isFriendly => temperament == 'friendly';
+  bool get isKitten => category == 'Kitten' || temperament == 'kitten';
 
   String get displayTitle {
     if (title.trim().isNotEmpty) return title.trim();
@@ -362,7 +445,7 @@ class Sighting {
         return 'Kitten spotted in the area';
       }
       if (category == 'Injured') return 'Injured cat needs vet attention';
-      if (category == 'Needs Foster') return 'Looking for a foster or adopter';
+      if (category == 'Needs Foster' || category == 'Needs Home') return 'Looking for a foster or adopter';
       if (category == 'Needs Vet') return 'Sick cat needs medical care';
       if (category == 'Feeding Spot') return 'Cat feeding spot reported';
       if (category == 'Urgent Rescue') return 'Immediate rescue assistance needed';
@@ -432,7 +515,8 @@ class Sighting {
   bool get isSheltered =>
       resolvedByAction == 'sheltered' ||
       lastSeenStatus == 'sheltered' ||
-      careStatus == 'inCare_shelter';
+      careStatus == 'inCare_shelter' ||
+      category == 'Sheltered';
 
   String get displayLocation {
     if (urgency == 'resolved' && !isSheltered) {
@@ -578,6 +662,7 @@ class Sighting {
       'reporterId': reporterId,
       'reporterName': reporterName,
       'photoUrls': photoUrls,
+      'photos': photoUrls,
       'latitude': latitude,
       'longitude': longitude,
       'locationAddress': locationAddress,
@@ -602,6 +687,7 @@ class Sighting {
       'careTakerId': careTakerId,
       'careTakerName': careTakerName,
       'careStartedAt': careStartedAt != null ? Timestamp.fromDate(careStartedAt!) : null,
+      'resolvedAt': resolvedAt != null ? Timestamp.fromDate(resolvedAt!) : null,
       'resolvedByAction': resolvedByAction,
       'pendingHandoverRescuerId': pendingHandoverRescuerId,
       'pendingHandoverRescuerName': pendingHandoverRescuerName,
@@ -627,6 +713,12 @@ class Sighting {
       'lastVetRescuerId': lastVetRescuerId,
       'lastVetRescuerName': lastVetRescuerName,
       'isCommunityFosterRequested': isCommunityFosterRequested,
+      'isOpenForAdoption': isOpenForAdoption,
+      'adoptionNote': adoptionNote,
+      'temperament': temperament,
+      'hasEarTip': hasEarTip,
+      'postVetCustody': postVetCustody,
+      'vetVerifiedAt': vetVerifiedAt?.toIso8601String(),
     };
   }
 
@@ -678,7 +770,23 @@ class Sighting {
       parsedLastVetVisitAt = DateTime.tryParse(data['lastVetVisitAt']);
     }
 
-    final rawPhotos = data['photoUrls'];
+    DateTime? parsedVetVerifiedAt;
+    if (data['vetVerifiedAt'] is Timestamp) {
+      parsedVetVerifiedAt = (data['vetVerifiedAt'] as Timestamp).toDate();
+    } else if (data['vetVerifiedAt'] is String) {
+      parsedVetVerifiedAt = DateTime.tryParse(data['vetVerifiedAt']);
+    } else {
+      parsedVetVerifiedAt = parsedLastVetVisitAt;
+    }
+
+    DateTime? parsedResolvedAt;
+    if (data['resolvedAt'] is Timestamp) {
+      parsedResolvedAt = (data['resolvedAt'] as Timestamp).toDate();
+    } else if (data['resolvedAt'] is String) {
+      parsedResolvedAt = DateTime.tryParse(data['resolvedAt']);
+    }
+
+    final rawPhotos = data['photoUrls'] ?? data['photos'];
     List<String> photos = [];
     if (rawPhotos is List) {
       photos = rawPhotos.map((e) => e.toString()).toList();
@@ -755,6 +863,7 @@ class Sighting {
       careTakerId: data['careTakerId']?.toString(),
       careTakerName: data['careTakerName']?.toString(),
       careStartedAt: parsedCareStartedAt,
+      resolvedAt: parsedResolvedAt,
       resolvedByAction: data['resolvedByAction']?.toString(),
       pendingHandoverRescuerId: data['pendingHandoverRescuerId']?.toString(),
       pendingHandoverRescuerName:
@@ -787,6 +896,11 @@ class Sighting {
               .map((e) => e.toString())
               .toList()
           : [],
+      declinedDispatchUserIds: (data['declinedDispatchUserIds'] is List)
+          ? (data['declinedDispatchUserIds'] as List)
+              .map((e) => e.toString())
+              .toList()
+          : [],
       hasVetVisitFlag: hasVet,
       lastVetVisitAt: parsedLastVetVisitAt,
       healthTags: healthTagsList,
@@ -806,6 +920,11 @@ class Sighting {
           data['pendingVetRescuerName']?.toString(),
       isCommunityFosterRequested: data['isCommunityFosterRequested'] == true,
       isOpenForAdoption: data['isOpenForAdoption'] == true,
+      adoptionNote: data['adoptionNote']?.toString(),
+      temperament: data['temperament']?.toString(),
+      hasEarTip: data['hasEarTip'] == true,
+      postVetCustody: data['postVetCustody']?.toString(),
+      vetVerifiedAt: parsedVetVerifiedAt,
     );
   }
 }

@@ -8,6 +8,9 @@ class ChatMessage {
   final DateTime createdAt;
   final String? photoUrl;
   final bool isSystemMessage;
+  final bool isReported;
+  final String? reportedBy;
+  final String? reportReason;
 
   const ChatMessage({
     required this.id,
@@ -17,6 +20,9 @@ class ChatMessage {
     required this.createdAt,
     this.photoUrl,
     this.isSystemMessage = false,
+    this.isReported = false,
+    this.reportedBy,
+    this.reportReason,
   });
 
   factory ChatMessage.fromFirestore(DocumentSnapshot doc) {
@@ -36,6 +42,9 @@ class ChatMessage {
       createdAt: parsedDate,
       photoUrl: data['photoUrl']?.toString(),
       isSystemMessage: data['isSystemMessage'] == true,
+      isReported: data['isReported'] == true,
+      reportedBy: data['reportedBy']?.toString(),
+      reportReason: data['reportReason']?.toString(),
     );
   }
 
@@ -47,6 +56,9 @@ class ChatMessage {
       'createdAt': Timestamp.fromDate(createdAt),
       'photoUrl': photoUrl,
       'isSystemMessage': isSystemMessage,
+      'isReported': isReported,
+      'reportedBy': reportedBy,
+      'reportReason': reportReason,
     };
   }
 }
