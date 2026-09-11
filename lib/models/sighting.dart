@@ -70,6 +70,12 @@ class Sighting {
   final bool hasEarTip;
   final String? postVetCustody; // 'rescuerInCharge', 'reporterFoster', etc.
   final DateTime? vetVerifiedAt;
+  final String? pendingAdoptionApplicantId;
+  final String? pendingAdoptionApplicantName;
+  final String? pendingAdoptionMessage;
+  final String? pendingAdoptionContact;
+  final String? pendingAdoptionUpdateId;
+  final List<String> rescuerUserIds;
 
   const Sighting({
     required this.id,
@@ -139,6 +145,12 @@ class Sighting {
     this.hasEarTip = false,
     this.postVetCustody,
     this.vetVerifiedAt,
+    this.pendingAdoptionApplicantId,
+    this.pendingAdoptionApplicantName,
+    this.pendingAdoptionMessage,
+    this.pendingAdoptionContact,
+    this.pendingAdoptionUpdateId,
+    this.rescuerUserIds = const [],
   });
 
   /// Whether the 24-hour reporter decision window has expired after vet visit verification
@@ -187,6 +199,20 @@ class Sighting {
 
   bool isDispatchDismissedFor(String? uid) =>
       uid != null && uid.isNotEmpty && declinedDispatchUserIds.contains(uid);
+
+  /// Whether the specified user is involved in this sighting (as reporter, caretaker, vet rescuer, dispatch claimer, adopter, or action participant)
+  bool isUserInvolved(String? uid) {
+    if (uid == null || uid.isEmpty) return false;
+    return reporterId == uid ||
+        careTakerId == uid ||
+        lastVetRescuerId == uid ||
+        pendingVetRescuerId == uid ||
+        pendingHandoverRescuerId == uid ||
+        (rescueClaimed && rescueClaimedBy == uid) ||
+        (rescueClaimedBy == uid) ||
+        pendingAdoptionApplicantId == uid ||
+        rescuerUserIds.contains(uid);
+  }
 
   bool get isInCare =>
       careStatus != null &&
@@ -337,7 +363,9 @@ class Sighting {
           (pendingVetRescuerId != null && pendingVetRescuerId!.isNotEmpty) ||
           (pendingHandoverRescuerId != null &&
               pendingHandoverRescuerId!.isNotEmpty) ||
-          (pendingOutcomeAction != null && pendingOutcomeAction!.isNotEmpty));
+          (pendingOutcomeAction != null && pendingOutcomeAction!.isNotEmpty) ||
+          (pendingAdoptionApplicantId != null &&
+              pendingAdoptionApplicantId!.isNotEmpty));
 
   bool get isAwaitingPostVetDecision =>
       hasVetVisit &&
@@ -355,6 +383,10 @@ class Sighting {
       (pendingHandoverRescuerId == null || pendingHandoverRescuerId!.isEmpty);
 
   String get pendingVerificationDescription {
+    if (pendingAdoptionApplicantId != null &&
+        pendingAdoptionApplicantId!.isNotEmpty) {
+      return 'Adoption request received from ${pendingAdoptionApplicantName ?? "an applicant"} — awaiting confirmation.';
+    }
     if (isVetVisitPending ||
         (pendingVetRescuerId != null && pendingVetRescuerId!.isNotEmpty)) {
       return 'Vet Clinic Visit submitted — awaiting reporter verification.';
@@ -518,11 +550,22 @@ class Sighting {
       careStatus == 'inCare_shelter' ||
       category == 'Sheltered';
 
+  bool get isTnrReturned =>
+      resolvedByAction == 'returnedToSpot' ||
+      pendingOutcomeAction == 'returnedToSpot' ||
+      healthTags.contains('🌿 Returned to Colony') ||
+      healthTags.contains('Returned to Colony') ||
+      (isFeral &&
+          (isResolved ||
+              careStatus == 'onStreet' ||
+              careStatus == 'resolved' ||
+              urgency == 'communityCare'));
+
   String get displayLocation {
-    if (urgency == 'resolved' && !isSheltered) {
-      return extractCityOnly(locationAddress);
+    if (urgency == 'resolved' && !isSheltered && !isTnrReturned) {
+      return extractCityOnly(effectiveLocationAddress);
     }
-    return locationAddress;
+    return effectiveLocationAddress;
   }
 
   String formatDistance(double? userLat, double? userLng) {
@@ -597,7 +640,7 @@ class Sighting {
       updatedLocationAddress ?? locationAddress;
 
   String get effectiveDisplayLocation {
-    if (urgency == 'resolved' && !isSheltered) {
+    if (urgency == 'resolved' && !isSheltered && !isTnrReturned) {
       return Sighting.extractCityOnly(effectiveLocationAddress);
     }
     return effectiveLocationAddress;
@@ -719,6 +762,12 @@ class Sighting {
       'hasEarTip': hasEarTip,
       'postVetCustody': postVetCustody,
       'vetVerifiedAt': vetVerifiedAt?.toIso8601String(),
+      'pendingAdoptionApplicantId': pendingAdoptionApplicantId,
+      'pendingAdoptionApplicantName': pendingAdoptionApplicantName,
+      'pendingAdoptionMessage': pendingAdoptionMessage,
+      'pendingAdoptionContact': pendingAdoptionContact,
+      'pendingAdoptionUpdateId': pendingAdoptionUpdateId,
+      'rescuerUserIds': rescuerUserIds,
     };
   }
 
@@ -925,6 +974,15 @@ class Sighting {
       hasEarTip: data['hasEarTip'] == true,
       postVetCustody: data['postVetCustody']?.toString(),
       vetVerifiedAt: parsedVetVerifiedAt,
+      pendingAdoptionApplicantId: data['pendingAdoptionApplicantId']?.toString(),
+      pendingAdoptionApplicantName:
+          data['pendingAdoptionApplicantName']?.toString(),
+      pendingAdoptionMessage: data['pendingAdoptionMessage']?.toString(),
+      pendingAdoptionContact: data['pendingAdoptionContact']?.toString(),
+      pendingAdoptionUpdateId: data['pendingAdoptionUpdateId']?.toString(),
+      rescuerUserIds: (data['rescuerUserIds'] is List)
+          ? (data['rescuerUserIds'] as List).map((e) => e.toString()).toList()
+          : [],
     );
   }
 }

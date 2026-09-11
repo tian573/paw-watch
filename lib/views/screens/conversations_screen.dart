@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/firebase_service.dart';
 import '../../models/sighting.dart';
 import 'chat_screen.dart';
@@ -16,6 +17,37 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
   static const _navy = Color(0xFF2D3142);
   static const _lavender = Color(0xFF9B8EC4);
   static const _lavLight = Color(0xFFF3F0F9);
+
+  String _formatChatTime(dynamic timestamp) {
+    if (timestamp == null) return '';
+    DateTime dt;
+    if (timestamp is Timestamp) {
+      dt = timestamp.toDate();
+    } else if (timestamp is DateTime) {
+      dt = timestamp;
+    } else {
+      return '';
+    }
+    final now = DateTime.now();
+    final diff = now.difference(dt);
+    if (diff.inSeconds < 60) {
+      return 'Just now';
+    } else if (diff.inMinutes < 60) {
+      return '${diff.inMinutes}m';
+    } else if (diff.inHours < 24 && dt.day == now.day) {
+      final hour = dt.hour.toString().padLeft(2, '0');
+      final minute = dt.minute.toString().padLeft(2, '0');
+      return '$hour:$minute';
+    } else if (diff.inDays == 1 ||
+        (diff.inHours < 48 && dt.day == now.subtract(const Duration(days: 1)).day)) {
+      return 'Yesterday';
+    } else if (diff.inDays < 7) {
+      const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+      return days[dt.weekday - 1];
+    } else {
+      return '${dt.day}/${dt.month}';
+    }
+  }
 
   Future<void> _confirmDeleteChat(
       BuildContext context, String chatId, String otherName) async {
@@ -202,6 +234,9 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                   (chat['blockedBy'] as List<dynamic>?)?.cast<String>() ?? [];
               final isBlocked = blockedBy.isNotEmpty;
 
+              final isUnread = FirebaseService.isChatUnread(chat, currentUid);
+              final timeStr = _formatChatTime(chat['lastUpdatedAt']);
+
               return StreamBuilder<Sighting?>(
                 stream: FirebaseService.instance.streamSightingById(sightingId),
                 builder: (context, sSnap) {
@@ -220,16 +255,32 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                   return ListTile(
                     contentPadding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    tileColor: isUnread
+                        ? const Color(0xFF673AB7).withValues(alpha: 0.04)
+                        : Colors.transparent,
+                    shape: isUnread
+                        ? const Border(
+                            left: BorderSide(
+                                color: Color(0xFF673AB7), width: 3.5),
+                          )
+                        : null,
                     leading: Stack(
+                      clipBehavior: Clip.none,
                       children: [
                         Container(
                           width: 46,
                           height: 46,
                           decoration: BoxDecoration(
-                            color: _lavLight,
+                            color: isUnread
+                                ? const Color(0xFF673AB7).withValues(alpha: 0.14)
+                                : _lavLight,
                             shape: BoxShape.circle,
                             border: Border.all(
-                                color: _lavender.withValues(alpha: 0.3)),
+                              color: isUnread
+                                  ? const Color(0xFF673AB7)
+                                  : _lavender.withValues(alpha: 0.3),
+                              width: isUnread ? 2 : 1,
+                            ),
                           ),
                           child: Center(
                             child: Text(
@@ -259,6 +310,28 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                                   size: 11, color: _lavender),
                             ),
                           ),
+                        if (isUnread)
+                          Positioned(
+                            top: -1,
+                            right: -1,
+                            child: Container(
+                              width: 13,
+                              height: 13,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF673AB7),
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 2),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFF673AB7)
+                                        .withValues(alpha: 0.4),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
                       ],
                     ),
                     title: Row(
@@ -271,13 +344,26 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                                   otherName,
                                   style: GoogleFonts.nunito(
                                     fontSize: 14.5,
-                                    fontWeight: FontWeight.w800,
+                                    fontWeight: isUnread
+                                        ? FontWeight.w900
+                                        : FontWeight.w700,
                                     color: _navy,
                                   ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
+                              if (isUnread) ...[
+                                const SizedBox(width: 6),
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF673AB7),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ],
                               if (isBlocked) ...[
                                 const SizedBox(width: 6),
                                 Container(
@@ -304,8 +390,12 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                           'Re: $sightingTitle',
                           style: GoogleFonts.nunito(
                             fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: const Color(0xFF673AB7),
+                            fontWeight:
+                                isUnread ? FontWeight.w800 : FontWeight.w700,
+                            color: isUnread
+                                ? const Color(0xFF673AB7)
+                                : const Color(0xFF673AB7)
+                                    .withValues(alpha: 0.8),
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -318,45 +408,129 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                         '$lastSender: $lastMsg',
                         style: GoogleFonts.nunito(
                           fontSize: 12.5,
-                          color: _navy.withValues(alpha: 0.65),
-                          fontWeight: FontWeight.w600,
+                          color: isUnread
+                              ? _navy.withValues(alpha: 0.95)
+                              : _navy.withValues(alpha: 0.6),
+                          fontWeight:
+                              isUnread ? FontWeight.w800 : FontWeight.w500,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    trailing: PopupMenuButton<String>(
-                      icon: const Icon(Icons.more_vert,
-                          size: 20, color: Colors.grey),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      onSelected: (val) {
-                        if (val == 'delete') {
-                          _confirmDeleteChat(context, chatId, otherName);
-                        }
-                      },
-                      itemBuilder: (ctx) => [
-                        PopupMenuItem(
-                          value: 'delete',
-                          child: Row(
-                            children: [
-                              const Icon(Icons.delete_outline_rounded,
-                                  color: Colors.red, size: 18),
-                              const SizedBox(width: 8),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            if (timeStr.isNotEmpty)
                               Text(
-                                'Delete Conversation',
+                                timeStr,
                                 style: GoogleFonts.nunito(
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.red,
-                                  fontSize: 13,
+                                  fontSize: 11,
+                                  fontWeight: isUnread
+                                      ? FontWeight.w900
+                                      : FontWeight.w600,
+                                  color: isUnread
+                                      ? const Color(0xFF673AB7)
+                                      : _navy.withValues(alpha: 0.45),
                                 ),
                               ),
-                            ],
-                          ),
+                            const SizedBox(height: 4),
+                            if (isUnread)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF673AB7),
+                                  borderRadius: BorderRadius.circular(10),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: const Color(0xFF673AB7)
+                                          .withValues(alpha: 0.35),
+                                      blurRadius: 4,
+                                      offset: const Offset(0, 1),
+                                    ),
+                                  ],
+                                ),
+                                child: Text(
+                                  'NEW',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              )
+                            else
+                              const SizedBox(height: 14),
+                          ],
+                        ),
+                        PopupMenuButton<String>(
+                          icon: const Icon(Icons.more_vert,
+                              size: 20, color: Colors.grey),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                          onSelected: (val) {
+                            if (val == 'mark_read') {
+                              FirebaseService.instance.markChatAsRead(
+                                chatId: chatId,
+                                userId: currentUid,
+                              );
+                            } else if (val == 'delete') {
+                              _confirmDeleteChat(context, chatId, otherName);
+                            }
+                          },
+                          itemBuilder: (ctx) => [
+                            if (isUnread)
+                              PopupMenuItem(
+                                value: 'mark_read',
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.done_all_rounded,
+                                        color: Color(0xFF673AB7), size: 18),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      'Mark as Read',
+                                      style: GoogleFonts.nunito(
+                                        fontWeight: FontWeight.w700,
+                                        color: const Color(0xFF673AB7),
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            PopupMenuItem(
+                              value: 'delete',
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.delete_outline_rounded,
+                                      color: Colors.red, size: 18),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Delete Conversation',
+                                    style: GoogleFonts.nunito(
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.red,
+                                      fontSize: 13,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                     onTap: () {
+                      FirebaseService.instance.markChatAsRead(
+                        chatId: chatId,
+                        userId: currentUid,
+                      );
                       if (s != null) {
                         Navigator.push(
                           context,

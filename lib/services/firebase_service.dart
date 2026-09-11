@@ -383,6 +383,7 @@ class FirebaseService {
           'rescueClaimedBy': '',
           'rescueClaimedByName': '',
           'rescueClaimedAt': null,
+          'rescuerUserIds': FieldValue.arrayUnion([uid]),
         };
         if (customNote != null && customNote.trim().isNotEmpty) {
           updateFields['lastSeenNote'] = customNote.trim();
@@ -460,9 +461,12 @@ class FirebaseService {
           if (updatedLatitude != null && updatedLongitude != null) {
             updateFields['latitude'] = updatedLatitude;
             updateFields['longitude'] = updatedLongitude;
+            updateFields['updatedLatitude'] = updatedLatitude;
+            updateFields['updatedLongitude'] = updatedLongitude;
           }
           if (updatedLocationAddress != null && updatedLocationAddress.isNotEmpty) {
             updateFields['locationAddress'] = updatedLocationAddress;
+            updateFields['updatedLocationAddress'] = updatedLocationAddress;
           }
           updateFields['careTakerId'] = null;
           updateFields['careTakerName'] = null;
@@ -499,9 +503,12 @@ class FirebaseService {
           if (updatedLatitude != null && updatedLongitude != null) {
             updateFields['latitude'] = updatedLatitude;
             updateFields['longitude'] = updatedLongitude;
+            updateFields['updatedLatitude'] = updatedLatitude;
+            updateFields['updatedLongitude'] = updatedLongitude;
           }
           if (updatedLocationAddress != null && updatedLocationAddress.isNotEmpty) {
             updateFields['locationAddress'] = updatedLocationAddress;
+            updateFields['updatedLocationAddress'] = updatedLocationAddress;
           }
         } else if (action == 'rehomed') {
           updateFields['careStatus'] = 'resolved';
@@ -837,6 +844,7 @@ class FirebaseService {
       'rescueClaimedBy': FieldValue.delete(),
       'rescueClaimedByName': FieldValue.delete(),
       'rescueClaimedAt': FieldValue.delete(),
+      'rescuerUserIds': FieldValue.arrayUnion([rescuerUid]),
     };
 
     if (carePlanGoal != null && carePlanGoal.isNotEmpty) {
@@ -1063,6 +1071,7 @@ class FirebaseService {
       'rescueClaimedBy': user.uid,
       'rescueClaimedByName': name,
       'rescueClaimedAt': FieldValue.serverTimestamp(),
+      'rescuerUserIds': FieldValue.arrayUnion([user.uid]),
     });
 
     // Post auto-update
@@ -1593,17 +1602,28 @@ class FirebaseService {
             snap.docs.map((d) => ChatMessage.fromFirestore(d)).toList());
   }
 
-  /// Stream all conversations for a user
+  /// Stream all conversations for a user, sorted newest first
   Stream<List<Map<String, dynamic>>> streamUserChatThreads(String userId) {
     return _firestore
         .collection('coordinationChats')
         .where('participants', arrayContains: userId)
         .snapshots()
-        .map((snap) => snap.docs.map((d) {
-              final data = d.data();
-              data['chatId'] = d.id;
-              return data;
-            }).toList());
+        .map((snap) {
+          final list = snap.docs.map((d) {
+            final data = d.data();
+            data['chatId'] = d.id;
+            return data;
+          }).toList();
+          list.sort((a, b) {
+            final tsA = a['lastUpdatedAt'] as Timestamp?;
+            final tsB = b['lastUpdatedAt'] as Timestamp?;
+            if (tsA == null && tsB == null) return 0;
+            if (tsA == null) return 1;
+            if (tsB == null) return -1;
+            return tsB.compareTo(tsA);
+          });
+          return list;
+        });
   }
 
   /// Stream the coordination chat document itself (for participants and block status)
@@ -1717,6 +1737,8 @@ class FirebaseService {
       }
     }
 
+    final otherParticipants = parts.where((p) => p != senderId).toList();
+
     final metadata = <String, dynamic>{
       'chatId': chatId,
       'sightingId': sightingId,
@@ -1725,7 +1747,12 @@ class FirebaseService {
       'lastSenderId': senderId,
       'lastSenderName': senderName,
       'lastUpdatedAt': FieldValue.serverTimestamp(),
+      'lastRead_$senderId': FieldValue.serverTimestamp(),
     };
+
+    if (otherParticipants.isNotEmpty) {
+      metadata['unreadBy'] = FieldValue.arrayUnion(otherParticipants);
+    }
 
     if (sightingTitle != null) metadata['sightingTitle'] = sightingTitle;
     if (sightingPhoto != null) metadata['sightingPhoto'] = sightingPhoto;
@@ -1742,6 +1769,49 @@ class FirebaseService {
       'photoUrl': photoUrl,
       'isSystemMessage': isSystemMessage,
     });
+  }
+
+  /// Mark a chat thread as read for a given user
+  Future<void> markChatAsRead({
+    required String chatId,
+    required String userId,
+  }) async {
+    if (chatId.isEmpty || userId.isEmpty) return;
+    try {
+      final chatDocRef = _firestore.collection('coordinationChats').doc(chatId);
+      await chatDocRef.set({
+        'unreadBy': FieldValue.arrayRemove([userId]),
+        'lastRead_$userId': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Error marking chat as read: $e');
+    }
+  }
+
+  /// Check if a chat thread has unread messages for a given user
+  static bool isChatUnread(Map<String, dynamic> chat, String? currentUid) {
+    if (currentUid == null || currentUid.isEmpty) return false;
+    final lastSenderId = chat['lastSenderId']?.toString();
+    // If current user is the last sender, they wrote it -> read
+    if (lastSenderId == currentUid) return false;
+
+    // Check explicit unreadBy array
+    if (chat.containsKey('unreadBy') && chat['unreadBy'] is List) {
+      final unreadList = (chat['unreadBy'] as List).map((e) => e.toString()).toList();
+      return unreadList.contains(currentUid);
+    }
+
+    // Fallback for legacy chats: compare lastRead_$currentUid timestamp with lastUpdatedAt
+    final lastRead = chat['lastRead_$currentUid'];
+    final lastUpdatedAt = chat['lastUpdatedAt'];
+    if (lastRead != null && lastUpdatedAt != null) {
+      if (lastRead is Timestamp && lastUpdatedAt is Timestamp) {
+        return lastUpdatedAt.compareTo(lastRead) > 0;
+      }
+    }
+
+    // If last message exists and was sent by another user, and no read record exists
+    return lastSenderId != null && lastSenderId.isNotEmpty && lastSenderId != currentUid;
   }
 
   // =========================================================================
@@ -1852,6 +1922,7 @@ class FirebaseService {
       'pendingOutcomeNote': FieldValue.delete(),
       'pendingOutcomeProofUrl': FieldValue.delete(),
       'pendingOutcomeUpdateId': FieldValue.delete(),
+      'rescuerUserIds': FieldValue.arrayUnion([uid]),
     };
     if (isTnr) {
       updateFields['isSterilized'] = true;
@@ -1888,7 +1959,7 @@ class FirebaseService {
   Future<int> openCatForAdoption({
     required String sightingId,
     required String note,
-    File? showcasePhotoFile,
+    required File showcasePhotoFile,
     List<String>? healthTags,
     String? shelterOrClinicName,
     String? adoptionContact,
@@ -1901,10 +1972,8 @@ class FirebaseService {
         : (user.email?.split('@').first ?? 'Caretaker');
 
     String? photoUrl;
-    if (showcasePhotoFile != null) {
-      final urls = await uploadPhotos([showcasePhotoFile], sightingId);
-      if (urls.isNotEmpty) photoUrl = urls.first;
-    }
+    final urls = await uploadPhotos([showcasePhotoFile], sightingId);
+    if (urls.isNotEmpty) photoUrl = urls.first;
 
     const int earnedXp = 100;
 
@@ -1941,6 +2010,8 @@ class FirebaseService {
       'category': 'Needs Home',
       'isOpenForAdoption': true,
       'careStatus': 'inCare_foster',
+      'careTakerId': uid,
+      'careTakerName': name,
       'urgency': 'needsHelp',
     };
     if (note.trim().isNotEmpty) {
@@ -1966,6 +2037,132 @@ class FirebaseService {
         .update(updateFields);
 
     return earnedXp;
+  }
+
+  /// Prospective adopter submits adoption application / request to the caretaker
+  Future<void> submitAdoptionApplication({
+    required String sightingId,
+    required String message,
+    String? contactPhone,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final uid = user.uid;
+    final name = user.displayName?.isNotEmpty == true
+        ? user.displayName!
+        : (user.email?.split('@').first ?? 'Adopter');
+
+    final updateRef = await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .add({
+      'type': 'adoptionApplication',
+      'action': 'adoptionRequested',
+      'authorId': uid,
+      'authorName': name,
+      'text':
+          'submitted an Adoption Application to adopt this cat! 🏡🐾 "${message.trim()}"',
+      'customNote': message.trim(),
+      'contactPhone': contactPhone?.trim(),
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'pendingAdoptionApplicantId': uid,
+      'pendingAdoptionApplicantName': name,
+      'pendingAdoptionMessage': message.trim(),
+      'pendingAdoptionContact': contactPhone?.trim(),
+      'pendingAdoptionUpdateId': updateRef.id,
+    });
+  }
+
+  /// Caretaker / reporter approves adoption application and rehomes the cat
+  Future<void> approveAdoption({
+    required String sightingId,
+    String? updateId,
+    required String applicantId,
+    required String applicantName,
+  }) async {
+    final user = _auth.currentUser;
+    if (user == null) return;
+    final uid = user.uid;
+    final name = user.displayName?.isNotEmpty == true
+        ? user.displayName!
+        : (user.email?.split('@').first ?? 'Caretaker');
+
+    if (updateId != null && updateId.isNotEmpty) {
+      await _firestore
+          .collection('sightings')
+          .doc(sightingId)
+          .collection('updates')
+          .doc(updateId)
+          .update({'status': 'approved'});
+    }
+
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .add({
+      'type': 'adoptionApproved',
+      'action': 'rehomed',
+      'authorId': uid,
+      'authorName': name,
+      'text':
+          'approved adoption application! $applicantName is now the loving forever adopter! 🏡🎉',
+      'xpAwarded': 200,
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    await _firestore.collection('users').doc(uid).set({
+      'xp': FieldValue.increment(200),
+      'totalXp': FieldValue.increment(200),
+      'lastActive': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await _firestore.collection('users').doc(applicantId).set({
+      'xp': FieldValue.increment(200),
+      'totalXp': FieldValue.increment(200),
+      'lastActive': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'urgency': 'resolved',
+      'status': 'resolved',
+      'category': 'Resolved',
+      'resolvedAt': FieldValue.serverTimestamp(),
+      'resolvedByAction': 'rehomed',
+      'careStatus': 'resolved',
+      'pendingAdoptionApplicantId': FieldValue.delete(),
+      'pendingAdoptionApplicantName': FieldValue.delete(),
+      'pendingAdoptionMessage': FieldValue.delete(),
+      'pendingAdoptionContact': FieldValue.delete(),
+      'pendingAdoptionUpdateId': FieldValue.delete(),
+    });
+  }
+
+  /// Caretaker / reporter declines adoption application
+  Future<void> declineAdoption({
+    required String sightingId,
+    String? updateId,
+  }) async {
+    if (updateId != null && updateId.isNotEmpty) {
+      await _firestore
+          .collection('sightings')
+          .doc(sightingId)
+          .collection('updates')
+          .doc(updateId)
+          .update({'status': 'declined'});
+    }
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'pendingAdoptionApplicantId': FieldValue.delete(),
+      'pendingAdoptionApplicantName': FieldValue.delete(),
+      'pendingAdoptionMessage': FieldValue.delete(),
+      'pendingAdoptionContact': FieldValue.delete(),
+      'pendingAdoptionUpdateId': FieldValue.delete(),
+    });
   }
 
   /// Caretaker requests outcome confirmation from reporter

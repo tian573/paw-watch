@@ -51,6 +51,12 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
       _myUid,
       widget.otherUserId,
     );
+    if (_myUid.isNotEmpty) {
+      FirebaseService.instance.markChatAsRead(
+        chatId: _chatId,
+        userId: _myUid,
+      );
+    }
   }
 
   @override
@@ -799,6 +805,18 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
       stream: FirebaseService.instance.streamChatDoc(_chatId),
       builder: (context, chatDocSnap) {
         final chatData = chatDocSnap.data?.data();
+        if (chatData != null && _myUid.isNotEmpty) {
+          final unreadBy =
+              (chatData['unreadBy'] as List<dynamic>?)?.cast<String>() ?? [];
+          if (unreadBy.contains(_myUid)) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              FirebaseService.instance.markChatAsRead(
+                chatId: _chatId,
+                userId: _myUid,
+              );
+            });
+          }
+        }
         final blockedBy =
             (chatData?['blockedBy'] as List<dynamic>?)?.cast<String>() ?? [];
         final isBlockedByMe = blockedBy.contains(_myUid);
