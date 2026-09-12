@@ -11,6 +11,7 @@ import 'report_form.dart';
 import 'sighting_detail.dart';
 import 'profile_screen.dart';
 import 'conversations_screen.dart';
+import 'map_screen.dart';
 import '../widgets/paw_image.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -29,6 +30,7 @@ class _HomeScreenState extends State<HomeScreen>
   static const Color _bgWhite = Color(0xFFFAF9F7);
   static const Color _urgent = Color(0xFFE53935);
   static const Color _needsHelp = Color(0xFFFF7043);
+  static const Color _needsHome = Color(0xFF8E24AA);
   static const Color _resolved = Color(0xFF43A047);
   static const Color _cardBg = Color(0xFFFFFFFF);
 
@@ -297,7 +299,10 @@ class _HomeScreenState extends State<HomeScreen>
               index: _currentTab,
               children: [
                 _buildHomeTab(),
-                _buildPlaceholderTab('Map', Icons.map_outlined),
+                MapScreen(
+                  onNotificationTap: _showNotificationsModal,
+                  onProfileTap: () => setState(() => _currentTab = 4),
+                ),
                 const SizedBox.shrink(),
                 const ConversationsScreen(),
                 const ProfileScreen(),
@@ -1455,6 +1460,10 @@ class _HomeScreenState extends State<HomeScreen>
       statusColor = _urgent;
       statusLabel = 'Urgent';
       statusIcon = Icons.error;
+    } else if (data.isNeedsHome) {
+      statusColor = _needsHome;
+      statusLabel = 'Needs Home';
+      statusIcon = Icons.home_rounded;
     } else {
       statusColor = _needsHelp;
       statusLabel = 'Needs Help';
@@ -1690,7 +1699,7 @@ class _HomeScreenState extends State<HomeScreen>
                         ? const Color(0xFF2E7D32)
                         : ((data.status == 'urgent' || data.urgency == 'urgent')
                             ? _urgent
-                            : _needsHelp);
+                            : (data.isNeedsHome ? _needsHome : _needsHelp));
 
     return [
       GestureDetector(
@@ -1714,34 +1723,7 @@ class _HomeScreenState extends State<HomeScreen>
     ];
   }
 
-  Widget _buildPlaceholderTab(String label, IconData icon) {
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 48, color: _lavender.withValues(alpha: 0.5)),
-          const SizedBox(height: 12),
-          Text(
-            label,
-            style: GoogleFonts.nunito(
-              fontSize: 18,
-              fontWeight: FontWeight.w800,
-              color: _navy,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Coming soon 🐾',
-            style: GoogleFonts.nunito(
-              fontSize: 14,
-              color: _navy.withValues(alpha: 0.45),
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+
 
   Widget _buildReportFab() {
     return GestureDetector(

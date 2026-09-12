@@ -30,6 +30,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   static const Color _urgent = Color(0xFFE53935);
   static const Color _resolved = Color(0xFF2E7D32);
   static const Color _needsHelp = Color(0xFFFF7043);
+  static const Color _needsHome = Color(0xFF8E24AA);
   static const Color _cardBg = Color(0xFFFFFFFF);
 
   final _aiService = AiValidationService();
@@ -167,15 +168,31 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     return isReporter || isRescuer;
   }
 
-  Color _sColor(String u) => u == 'communityCare'
-      ? const Color(0xFF00897B)
-      : (u == 'urgent' ? _urgent : (u == 'resolved' ? _resolved : _needsHelp));
-  String _sLabel(String u) => u == 'communityCare'
-      ? 'Community Cat'
-      : (u == 'urgent' ? 'Urgent' : u == 'resolved' ? 'Resolved' : 'Needs Help');
-  IconData _sIcon(String u) => u == 'communityCare'
-      ? Icons.pets
-      : (u == 'resolved' ? Icons.check_circle : Icons.error);
+  Color _sColor(String u, [Sighting? s]) {
+    if (s != null && s.isNeedsHome) return _needsHome;
+    if (u == 'communityCare') return const Color(0xFF00897B);
+    if (u == 'urgent') return _urgent;
+    if (u == 'resolved') return _resolved;
+    if (u == 'needsHome') return _needsHome;
+    return _needsHelp;
+  }
+
+  String _sLabel(String u, [Sighting? s]) {
+    if (s != null && s.isNeedsHome) return 'Needs Home';
+    if (u == 'communityCare') return 'Community Cat';
+    if (u == 'urgent') return 'Urgent';
+    if (u == 'resolved') return 'Resolved';
+    if (u == 'needsHome') return 'Needs Home';
+    return 'Needs Help';
+  }
+
+  IconData _sIcon(String u, [Sighting? s]) {
+    if (s != null && s.isNeedsHome) return Icons.home_rounded;
+    if (u == 'communityCare') return Icons.pets;
+    if (u == 'resolved') return Icons.check_circle;
+    if (u == 'needsHome') return Icons.home_rounded;
+    return Icons.error;
+  }
 
   static const _aLabels = {
     'fed': 'Fed',
@@ -5048,7 +5065,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                         color: Colors.white)),
                               ]),
                             )
-                          : _badge(s.urgency)),
+                          : _badge(s.urgency, s)),
           if (has && photos.length > 1)
             Positioned(
               top: kToolbarHeight + MediaQuery.of(context).padding.top - 8,
@@ -5129,14 +5146,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           child: Icon(Icons.pets,
               size: 60, color: _lavender.withValues(alpha: 0.4))));
 
-  Widget _badge(String u) => Container(
+  Widget _badge(String u, [Sighting? s]) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
         decoration: BoxDecoration(
-            color: _sColor(u), borderRadius: BorderRadius.circular(10)),
+            color: _sColor(u, s), borderRadius: BorderRadius.circular(10)),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(_sIcon(u), size: 12, color: Colors.white),
+          Icon(_sIcon(u, s), size: 12, color: Colors.white),
           const SizedBox(width: 5),
-          Text(_sLabel(u),
+          Text(_sLabel(u, s),
               style: GoogleFonts.nunito(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
@@ -5431,12 +5448,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           decoration: BoxDecoration(
-              color: _sColor(s.urgency),
+              color: _sColor(s.urgency, s),
               borderRadius: BorderRadius.circular(20)),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(_sIcon(s.urgency), size: 12, color: Colors.white),
+            Icon(_sIcon(s.urgency, s), size: 12, color: Colors.white),
             const SizedBox(width: 4),
-            Text(_sLabel(s.urgency),
+            Text(_sLabel(s.urgency, s),
                 style: GoogleFonts.nunito(
                     fontSize: 12,
                     fontWeight: FontWeight.w800,

@@ -194,6 +194,31 @@ class Sighting {
       category == 'Rehomed' ||
       isOpenForAdoption;
 
+  /// Whether this sighting needs a foster, permanent home, or adopter
+  /// Distinct from urgent medical or stray feeding community care.
+  bool get isNeedsHome {
+    if (isResolved) return false;
+    if (urgency == 'urgent') return false;
+    final cat = category.toLowerCase().trim();
+    if (cat == 'feeding spot' ||
+        cat == 'community cat' ||
+        cat == 'community care' ||
+        cat == 'stray feeding' ||
+        cat == 'stray colony') {
+      return false; // strictly Needs Help
+    }
+    return cat == 'needs foster' ||
+        cat == 'needs home' ||
+        cat == 'rehomed' ||
+        cat.contains('foster') ||
+        cat.contains('adopt') ||
+        cat.contains('rehome') ||
+        isOpenForAdoption ||
+        postVetCustody == 'openForAdoption' ||
+        pendingOutcomeAction == 'rehomed' ||
+        urgency == 'needsHome';
+  }
+
   bool isFosterDeclinedFor(String? uid) =>
       uid != null && uid.isNotEmpty && declinedFosterUserIds.contains(uid);
 
