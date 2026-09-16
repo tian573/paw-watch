@@ -59,6 +59,32 @@ class FirebaseService {
     return urls;
   }
 
+  /// Uploads a local video file (MP4) to Firebase Storage
+  Future<String?> uploadVideo(File videoFile, String sightingId) async {
+    try {
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final ref = _storage
+          .ref()
+          .child('sightings')
+          .child(sightingId)
+          .child('videos')
+          .child('${timestamp}_proof.mp4');
+
+      final uploadTask = ref.putFile(
+        videoFile,
+        SettableMetadata(contentType: 'video/mp4'),
+      );
+
+      final snapshot = await uploadTask;
+      final downloadUrl = await snapshot.ref.getDownloadURL();
+      return downloadUrl;
+    } catch (e) {
+      debugPrint('Firebase Storage video upload notice: $e');
+      // Fallback to local path so video attachment is not lost if upload fails or is in offline test
+      return videoFile.path;
+    }
+  }
+
   /// Automatically categorizes the sighting based on description and urgency
   String _determineCategory(String description, String urgency) {
     final desc = description.toLowerCase();
@@ -348,10 +374,15 @@ class FirebaseService {
 
     final xp = xpMap[action] ?? 10;
     String message = autoMessages[action] ?? 'took action.';
-    if (customNote != null && customNote.trim().isNotEmpty) {
-      message = '$message "${customNote.trim()}"';
+    if ((action == 'tookIn' || action == 'holding') &&
+        carePlanDurationDays != null &&
+        carePlanDurationDays >= 3) {
+      final effectiveGoal = carePlanGoal?.trim().isNotEmpty == true
+          ? carePlanGoal!.trim()
+          : 'Foster & Welfare Care';
+      message =
+          'took this cat into Foster Care for $carePlanDurationDays days ($effectiveGoal). Care plan activated! 🏡🐾';
     }
-
     final docData = <String, dynamic>{
       'type': 'action',
       'action': action,
@@ -362,6 +393,21 @@ class FirebaseService {
       'parentId': '',
       'createdAt': FieldValue.serverTimestamp(),
     };
+    if (customNote != null && customNote.trim().isNotEmpty) {
+      docData['customNote'] = customNote.trim();
+    }
+    if (carePlanGoal != null && carePlanGoal.isNotEmpty) {
+      docData['carePlanGoal'] = carePlanGoal;
+    }
+    if (carePlanDurationDays != null && carePlanDurationDays >= 3) {
+      docData['carePlanDurationDays'] = carePlanDurationDays;
+    }
+    if (careMilestoneDays != null && careMilestoneDays.isNotEmpty) {
+      docData['careMilestoneDays'] = careMilestoneDays;
+    }
+    if (customMilestoneTitles != null && customMilestoneTitles.isNotEmpty) {
+      docData['customMilestoneTitles'] = customMilestoneTitles;
+    }
     if (finalProofUrl != null && finalProofUrl.isNotEmpty) {
       docData['proofPhotoUrl'] = finalProofUrl;
     }
@@ -595,6 +641,10 @@ class FirebaseService {
         };
         if (effectiveXp > 0) {
           updates['xp'] = FieldValue.increment(effectiveXp);
+        }
+        if (action == 'tookIn' || action == 'holding') {
+          updates['activeFosters'] = FieldValue.increment(1);
+          updates['successfulRescues'] = FieldValue.increment(1);
         }
         if (isOngoingAction) {
           existingCooldowns[sightingId] = FieldValue.serverTimestamp();
@@ -934,6 +984,7 @@ class FirebaseService {
     required String conditionStatus,
     required String careNote,
     File? proofPhotoFile,
+    File? proofVideoFile,
   }) async {
     final user = _auth.currentUser;
     if (user == null) return 0;
@@ -946,6 +997,11 @@ class FirebaseService {
     if (proofPhotoFile != null) {
       final urls = await uploadPhotos([proofPhotoFile], sightingId);
       if (urls.isNotEmpty) proofUrl = urls.first;
+    }
+
+    String? proofVideoUrl;
+    if (proofVideoFile != null) {
+      proofVideoUrl = await uploadVideo(proofVideoFile, sightingId);
     }
 
     final int xp = milestoneDay == 1 ? 30 : (milestoneDay == 3 ? 40 : 60);
@@ -962,8 +1018,11 @@ class FirebaseService {
       'milestoneDay': milestoneDay,
       'conditionStatus': conditionStatus,
       'proofPhotoUrl': proofUrl,
+      if (proofVideoUrl != null && proofVideoUrl.isNotEmpty)
+        'proofVideoUrl': proofVideoUrl,
       'text':
-          'completed Day $milestoneDay Care Check-In: "$conditionStatus" • $careNote 🐾',
+          'completed Day $milestoneDay Care Check-In: "$conditionStatus" 🐾',
+      'customNote': careNote.trim(),
       'xpAwarded': xp,
       'createdAt': FieldValue.serverTimestamp(),
     });
@@ -1228,8 +1287,8 @@ class FirebaseService {
     });
   }
 
-  /// Delete a sighting (owner only, disallowed if active community care, vet visit, or foster custody exists)
-  Future<void> deleteSighting(String sightingId) async {
+  /// Delete a sighting (owner only, disallowed if active community care, vet visit, or foster custody exists unless force is true)
+  Future<void> deleteSighting(String sightingId, {bool force = false}) async {
     final docSnap =
         await _firestore.collection('sightings').doc(sightingId).get();
     if (!docSnap.exists) return;
@@ -1244,13 +1303,56 @@ class FirebaseService {
     final isClaimed = data['rescueClaimed'] == true;
     final isResolved = data['urgency'] == 'resolved';
 
-    if (hasVet || isPendingVet || isInCare || isClaimed || isResolved) {
+    if (!force && (hasVet || isPendingVet || isInCare || isClaimed || isResolved)) {
       throw Exception(
         'Cannot delete report: active rescue progress, medical records, or community care already exist for this cat.',
       );
     }
 
     await _firestore.collection('sightings').doc(sightingId).delete();
+  }
+
+  /// Revokes foster/rescue custody from a rescuer (e.g. if reported by reporter/admin for uploading another cat or fake update)
+  Future<void> revokeRescueCustody({
+    required String sightingId,
+    required String rescuerUid,
+    String? reason,
+  }) async {
+    final user = _auth.currentUser;
+    final actorName = user?.displayName?.isNotEmpty == true
+        ? user!.displayName!
+        : 'Report Author';
+
+    // 1. Reset custody fields on sighting
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'careTakerId': FieldValue.delete(),
+      'careTakerName': FieldValue.delete(),
+      'isInCare': false,
+      'isFosterCareActive': false,
+      'rescueClaimed': false,
+      'rescueClaimedBy': FieldValue.delete(),
+      'rescueClaimedByName': FieldValue.delete(),
+      'rescueClaimedAt': FieldValue.delete(),
+      'pendingVetRescuerId': FieldValue.delete(),
+      'pendingVetRescuerName': FieldValue.delete(),
+      'urgency': 'urgent',
+    });
+
+    // 2. Post notice in updates feed
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .add({
+      'type': 'custodyRevoked',
+      'authorId': user?.uid ?? 'system',
+      'authorName': actorName,
+      'revokedUid': rescuerUid,
+      'reason': reason ?? 'Rescue claim was revoked due to verification/content report.',
+      'text':
+          'rescuer custody was revoked ($actorName). This rescue spot is reopened for the community! 🐾',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
   }
 
   /// Update sighting title and/or description (owner only)
@@ -1369,18 +1471,53 @@ class FirebaseService {
     });
   }
 
+  /// Edit custom note of a community update post or comment (author only)
+  Future<void> editCommunityUpdateNote({
+    required String sightingId,
+    required String updateId,
+    required String newCustomNote,
+  }) async {
+    final updateRef = _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .doc(updateId);
+
+    final snap = await updateRef.get();
+    final data = snap.data() ?? {};
+    final type = data['type'] ?? 'comment';
+
+    final updateFields = <String, dynamic>{
+      'customNote': newCustomNote.trim(),
+      'isEdited': true,
+      'editedAt': FieldValue.serverTimestamp(),
+    };
+
+    // If it's a plain comment, also update text
+    if (type == 'comment') {
+      updateFields['text'] = newCustomNote.trim();
+    }
+
+    await updateRef.update(updateFields);
+  }
+
   /// Soft-delete a comment or reply (author only)
   Future<void> deleteComment({
     required String sightingId,
     required String commentId,
   }) async {
-    final batch = _firestore.batch();
     final commentRef = _firestore
         .collection('sightings')
         .doc(sightingId)
         .collection('updates')
         .doc(commentId);
 
+    final snap = await commentRef.get();
+    if (snap.exists && snap.data()?['type'] != null && snap.data()?['type'] != 'comment') {
+      throw Exception('Community update posts cannot be deleted.');
+    }
+
+    final batch = _firestore.batch();
     batch.update(commentRef, {
       'text': '[Comment deleted]',
       'isDeleted': true,
@@ -1409,6 +1546,42 @@ class FirebaseService {
       'reason': reason,
       'createdAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  /// Block a user from viewing a specific sighting report details
+  Future<void> blockUserFromSighting({
+    required String sightingId,
+    required String blockedUid,
+  }) async {
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'blockedUserIds': FieldValue.arrayUnion([blockedUid]),
+    });
+  }
+
+  /// Delete all comments from both the reporter and blocked user on this sighting
+  Future<void> deleteCommentsBetweenUsers({
+    required String sightingId,
+    required String userA,
+    required String userB,
+  }) async {
+    final querySnap = await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('comments')
+        .get();
+
+    final batch = _firestore.batch();
+    for (final doc in querySnap.docs) {
+      final authorId = doc.data()['authorId']?.toString() ?? '';
+      if (authorId.isNotEmpty && (authorId == userA || authorId == userB)) {
+        batch.update(doc.reference, {
+          'isDeleted': true,
+          'text': '(comment deleted)',
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    }
+    await batch.commit();
   }
 
   /// Stream UserProfile with real-time trust score, trust tier, and XP progress
@@ -1825,6 +1998,7 @@ class FirebaseService {
     required String outcomeAction, // 'rehomed', 'sheltered', 'returnedToSpot'
     required String note,
     File? proofPhotoFile,
+    File? proofVideoFile,
     double? updatedLatitude,
     double? updatedLongitude,
     String? updatedLocationAddress,
@@ -1841,6 +2015,11 @@ class FirebaseService {
     if (proofPhotoFile != null) {
       final urls = await uploadPhotos([proofPhotoFile], sightingId);
       if (urls.isNotEmpty) proofUrl = urls.first;
+    }
+
+    String? proofVideoUrl;
+    if (proofVideoFile != null) {
+      proofVideoUrl = await uploadVideo(proofVideoFile, sightingId);
     }
 
     final int earnedXp = outcomeAction == 'rehomed'
@@ -1864,6 +2043,8 @@ class FirebaseService {
       'authorId': uid,
       'authorName': name,
       'proofPhotoUrl': proofUrl,
+      if (proofVideoUrl != null && proofVideoUrl.isNotEmpty)
+        'proofVideoUrl': proofVideoUrl,
       'text': fullText,
       'customNote': note.trim(),
       'xpAwarded': earnedXp,
@@ -1945,6 +2126,9 @@ class FirebaseService {
     }
     if (shelterOrClinicName != null && shelterOrClinicName.isNotEmpty) {
       updateFields['shelterOrClinicName'] = shelterOrClinicName;
+    }
+    if (proofVideoUrl != null && proofVideoUrl.isNotEmpty) {
+      updateFields['outcomeVideoUrl'] = proofVideoUrl;
     }
 
     await _firestore

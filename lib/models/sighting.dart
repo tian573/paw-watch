@@ -76,6 +76,8 @@ class Sighting {
   final String? pendingAdoptionContact;
   final String? pendingAdoptionUpdateId;
   final List<String> rescuerUserIds;
+  final List<String> blockedUserIds;
+  final String? outcomeVideoUrl;
 
   const Sighting({
     required this.id,
@@ -151,6 +153,8 @@ class Sighting {
     this.pendingAdoptionContact,
     this.pendingAdoptionUpdateId,
     this.rescuerUserIds = const [],
+    this.blockedUserIds = const [],
+    this.outcomeVideoUrl,
   });
 
   /// Whether the 24-hour reporter decision window has expired after vet visit verification
@@ -793,6 +797,7 @@ class Sighting {
       'pendingAdoptionContact': pendingAdoptionContact,
       'pendingAdoptionUpdateId': pendingAdoptionUpdateId,
       'rescuerUserIds': rescuerUserIds,
+      'blockedUserIds': blockedUserIds,
     };
   }
 
@@ -1008,6 +1013,11 @@ class Sighting {
       rescuerUserIds: (data['rescuerUserIds'] is List)
           ? (data['rescuerUserIds'] as List).map((e) => e.toString()).toList()
           : [],
+      blockedUserIds: (data['blockedUserIds'] is List)
+          ? (data['blockedUserIds'] as List).map((e) => e.toString()).toList()
+          : [],
+      outcomeVideoUrl: data['outcomeVideoUrl']?.toString() ??
+          data['proofVideoUrl']?.toString(),
     );
   }
 }

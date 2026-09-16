@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import '../../services/text_moderation_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -339,14 +340,10 @@ class _RegisterScreenState extends State<RegisterScreen>
     return _buildInputField(
       controller: _displayNameCtrl,
       label: 'Display name',
-      hint: 'e.g. CatLover99',
+      hint: 'e.g. Sarah Jones',
       icon: Icons.person_outline,
-      helperText: 'This is how others will see you.',
-      validator: (v) {
-        if (v == null || v.trim().isEmpty) return 'Display name is required';
-        if (v.trim().length < 2) return 'Must be at least 2 characters';
-        return null;
-      },
+      helperText: 'Letters only (at least 3 characters). No numbers or symbols.',
+      validator: TextModerationService.validateDisplayName,
     );
   }
 

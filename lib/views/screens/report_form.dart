@@ -8,6 +8,8 @@ import 'package:latlong2/latlong.dart' as ll;
 import '../../services/ai_service.dart';
 import '../../services/location_service.dart';
 import '../../services/firebase_service.dart';
+import '../../services/text_moderation_service.dart';
+import '../../utils/double_tap_guard.dart';
 import '../../models/sighting.dart';
 
 class ReportFormScreen extends StatefulWidget {
@@ -80,12 +82,16 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
   }
 
   bool get _canSubmit {
+    final titleValid = TextModerationService.validateReportTitle(_titleController.text) == null;
+    final descValid = TextModerationService.validateDescription(_descController.text) == null;
     if (_reportType == 'resolved') {
-      return _photos.isNotEmpty;
+      return _photos.isNotEmpty && titleValid && descValid;
     }
     return _photos.isNotEmpty &&
         _selectedCategory != null &&
-        _selectedCategory!.isNotEmpty;
+        _selectedCategory!.isNotEmpty &&
+        titleValid &&
+        descValid;
   }
 
   Future<void> _fetchCurrentLocation() async {
@@ -451,21 +457,42 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
   }
 
   Widget _buildTitleSection() {
-    return _buildCard(
+    final titleError = _titleController.text.isNotEmpty
+        ? TextModerationService.validateReportTitle(_titleController.text)
+        : null;
+
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: _cardBg,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: _navy.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _buildSectionHeader(
             icon: Icons.title_rounded,
-            title: '1. Title',
-            subtitle: 'Give your report a clear headline.',
+            title: '1. Title (Required)',
+            subtitle: 'Only letters, min 4 characters. No numbers or emojis.',
           ),
           const SizedBox(height: 12),
           Container(
             decoration: BoxDecoration(
               color: _bgWhite,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _navy.withValues(alpha: 0.1)),
+              border: Border.all(
+                color: titleError != null
+                    ? _urgent.withValues(alpha: 0.6)
+                    : _navy.withValues(alpha: 0.1),
+                width: titleError != null ? 1.5 : 1,
+              ),
             ),
             child: TextField(
               controller: _titleController,
@@ -493,6 +520,25 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               ),
             ),
           ),
+          if (titleError != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(Icons.error_outline, size: 13, color: _urgent),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    titleError,
+                    style: GoogleFonts.nunito(
+                      fontSize: 11.5,
+                      color: _urgent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -1790,6 +1836,12 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
 
   Widget _buildDescriptionSection() {
     final isResolved = _reportType == 'resolved';
+    final descError = _descController.text.isNotEmpty
+        ? TextModerationService.validateDescription(
+            _descController.text,
+            fieldName: isResolved ? 'Story' : 'Description',
+          )
+        : null;
 
     return _buildCard(
       child: Column(
@@ -1797,17 +1849,20 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
         children: [
           _buildSectionHeader(
             icon: Icons.edit_outlined,
-            title: isResolved ? '4. Description & Story' : '5. Description',
-            subtitle: isResolved
-                ? 'Share how the cat was rescued or any adoption story details.'
-                : 'Provide any details that might help rescuers.',
+            title: isResolved ? '4. Description & Story (Required)' : '5. Description (Required)',
+            subtitle: 'Mandatory, min 8 characters. Must be meaningful words.',
           ),
           const SizedBox(height: 12),
           Container(
             decoration: BoxDecoration(
               color: _bgWhite,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: _navy.withValues(alpha: 0.1)),
+              border: Border.all(
+                color: descError != null
+                    ? _urgent.withValues(alpha: 0.6)
+                    : _navy.withValues(alpha: 0.1),
+                width: descError != null ? 1.5 : 1,
+              ),
             ),
             child: TextField(
               controller: _descController,
@@ -1838,6 +1893,25 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               ),
             ),
           ),
+          if (descError != null) ...[
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                const Icon(Icons.error_outline, size: 13, color: _urgent),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    descError,
+                    style: GoogleFonts.nunito(
+                      fontSize: 11.5,
+                      color: _urgent,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
           if (!isResolved &&
               (_selectedCategory == 'Stray' ||
                   _selectedCategory == 'Feeding Spot' ||
@@ -1913,6 +1987,20 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               } else if (_reportType == 'needsHelp' &&
                   (_selectedCategory == null || _selectedCategory!.isEmpty)) {
                 _showSnackBar('⚠️ Please select a cat situation & rescue goal.');
+              } else {
+                final titleErr = TextModerationService.validateReportTitle(_titleController.text);
+                if (titleErr != null) {
+                  _showSnackBar('⚠️ $titleErr');
+                  return;
+                }
+                final descErr = TextModerationService.validateDescription(
+                  _descController.text,
+                  fieldName: _reportType == 'resolved' ? 'Story' : 'Description',
+                );
+                if (descErr != null) {
+                  _showSnackBar('⚠️ $descErr');
+                  return;
+                }
               }
             },
       child: AnimatedContainer(
@@ -2028,15 +2116,32 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
 
   bool _isSubmitting = false;
   Future<void> _handleSubmit() async {
-    if (_isSubmitting) return;
+    if (_isSubmitting || !DoubleTapGuard.allow('submit_report')) return;
 
     if (_photos.isEmpty) {
+      DoubleTapGuard.reset('submit_report');
       _showSnackBar('⚠️ Please add at least 1 verified cat photo.');
       return;
     }
     if (_reportType == 'needsHelp' &&
         (_selectedCategory == null || _selectedCategory!.isEmpty)) {
+      DoubleTapGuard.reset('submit_report');
       _showSnackBar('⚠️ Please select a cat situation & rescue goal.');
+      return;
+    }
+    final titleErr = TextModerationService.validateReportTitle(_titleController.text);
+    if (titleErr != null) {
+      DoubleTapGuard.reset('submit_report');
+      _showSnackBar('⚠️ $titleErr');
+      return;
+    }
+    final descErr = TextModerationService.validateDescription(
+      _descController.text,
+      fieldName: _reportType == 'resolved' ? 'Story' : 'Description',
+    );
+    if (descErr != null) {
+      DoubleTapGuard.reset('submit_report');
+      _showSnackBar('⚠️ $descErr');
       return;
     }
 
@@ -2141,6 +2246,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
         Navigator.pop(context, true); // Return to home feed
       }
     } catch (e) {
+      DoubleTapGuard.reset('submit_report');
       if (mounted) {
         Navigator.pop(context); // Dismiss loading dialog
         setState(() => _isSubmitting = false);

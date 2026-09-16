@@ -8,6 +8,8 @@ import 'package:image_picker/image_picker.dart';
 import '../../models/sighting.dart';
 import '../../models/chat_message.dart';
 import '../../services/firebase_service.dart';
+import '../../services/text_moderation_service.dart';
+import '../../utils/double_tap_guard.dart';
 
 class CoordinationChatScreen extends StatefulWidget {
   final Sighting sighting;
@@ -37,6 +39,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
   final ImagePicker _picker = ImagePicker();
   File? _selectedPhotoFile;
   bool _isUploadingPhoto = false;
+  bool _isSending = false;
   final Set<String> _locallyHiddenMessageIds = {};
   final Set<String> _revealedReportedMessageIds = {};
   late final String _chatId;
@@ -67,68 +70,110 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
   }
 
   Future<void> _sendMessage([String? textToSend]) async {
+    if (_isSending || !DoubleTapGuard.allow('chat_send_$_chatId')) return;
+    _isSending = true;
+
     final text = (textToSend ?? _msgCtrl.text).trim();
-    if (text.isEmpty && _selectedPhotoFile == null) return;
-
     final photoToSend = _selectedPhotoFile;
-    setState(() {
-      _selectedPhotoFile = null;
-      if (photoToSend != null) _isUploadingPhoto = true;
-    });
 
-    String? uploadedPhotoUrl;
-    if (photoToSend != null) {
-      try {
-        final urls = await FirebaseService.instance.uploadPhotos(
-          [photoToSend],
-          'chat_${widget.sighting.id}',
-        );
-        if (urls.isNotEmpty) {
-          uploadedPhotoUrl = urls.first;
+    if (text.isEmpty && photoToSend == null) {
+      _isSending = false;
+      DoubleTapGuard.reset('chat_send_$_chatId');
+      return;
+    }
+
+    if (text.isNotEmpty) {
+      final moderationError = TextModerationService.validateChatMessage(text);
+      if (moderationError != null) {
+        _isSending = false;
+        DoubleTapGuard.reset('chat_send_$_chatId');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                moderationError,
+                style: GoogleFonts.nunito(fontWeight: FontWeight.w700),
+              ),
+              backgroundColor: const Color(0xFFE53935),
+            ),
+          );
         }
-      } catch (e) {
-        debugPrint('Failed to upload photo via storage: $e');
-        try {
-          final bytes = await photoToSend.readAsBytes();
-          uploadedPhotoUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
-        } catch (_) {
-          uploadedPhotoUrl = photoToSend.path;
-        }
+        return;
       }
     }
 
-    if (mounted) {
-      setState(() => _isUploadingPhoto = false);
-    }
-
-    if (text.isEmpty && uploadedPhotoUrl == null) return;
-
-    await FirebaseService.instance.sendChatMessage(
-      chatId: _chatId,
-      sightingId: widget.sighting.id,
-      text: text.isNotEmpty ? text : '📷 Sent a photo',
-      photoUrl: uploadedPhotoUrl,
-      otherUserId: widget.otherUserId,
-      otherUserName: widget.otherUserName,
-      sightingTitle: widget.sighting.displayTitle,
-      sightingPhoto: widget.sighting.photoUrls.isNotEmpty
-          ? widget.sighting.photoUrls.first
-          : null,
-    );
-
+    // Synchronously clear immediately to prevent double submission
     if (textToSend == null) {
       _msgCtrl.clear();
     }
+    _selectedPhotoFile = null;
+    if (mounted) {
+      setState(() {
+        if (photoToSend != null) _isUploadingPhoto = true;
+      });
+    }
 
-    Future.delayed(const Duration(milliseconds: 150), () {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent + 120,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
+    try {
+      String? uploadedPhotoUrl;
+      if (photoToSend != null) {
+        try {
+          final urls = await FirebaseService.instance.uploadPhotos(
+            [photoToSend],
+            'chat_${widget.sighting.id}',
+          );
+          if (urls.isNotEmpty) {
+            uploadedPhotoUrl = urls.first;
+          }
+        } catch (e) {
+          debugPrint('Failed to upload photo via storage: $e');
+          try {
+            final bytes = await photoToSend.readAsBytes();
+            uploadedPhotoUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+          } catch (_) {
+            uploadedPhotoUrl = photoToSend.path;
+          }
+        }
       }
-    });
+
+      if (mounted) {
+        setState(() => _isUploadingPhoto = false);
+      }
+
+      if (text.isEmpty && uploadedPhotoUrl == null) return;
+
+      await FirebaseService.instance.sendChatMessage(
+        chatId: _chatId,
+        sightingId: widget.sighting.id,
+        text: text.isNotEmpty ? text : '📷 Sent a photo',
+        photoUrl: uploadedPhotoUrl,
+        otherUserId: widget.otherUserId,
+        otherUserName: widget.otherUserName,
+        sightingTitle: widget.sighting.displayTitle,
+        sightingPhoto: widget.sighting.photoUrls.isNotEmpty
+            ? widget.sighting.photoUrls.first
+            : null,
+      );
+
+      Future.delayed(const Duration(milliseconds: 150), () {
+        if (_scrollController.hasClients) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent + 120,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSending = false;
+          _isUploadingPhoto = false;
+        });
+      } else {
+        _isSending = false;
+        _isUploadingPhoto = false;
+      }
+    }
   }
 
   Future<void> _pickPhoto(ImageSource source) async {
@@ -1347,14 +1392,18 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                       ),
                       const SizedBox(width: 8),
                       GestureDetector(
-                        onTap: _isUploadingPhoto ? null : () => _sendMessage(),
+                        onTap: (_isSending || _isUploadingPhoto)
+                            ? null
+                            : () => _sendMessage(),
                         child: Container(
                           padding: const EdgeInsets.all(10),
-                          decoration: const BoxDecoration(
-                            color: _lavender,
+                          decoration: BoxDecoration(
+                            color: (_isSending || _isUploadingPhoto)
+                                ? _lavender.withValues(alpha: 0.6)
+                                : _lavender,
                             shape: BoxShape.circle,
                           ),
-                          child: _isUploadingPhoto
+                          child: (_isSending || _isUploadingPhoto)
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
@@ -1380,7 +1429,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
 
   Widget _buildQuickChip(String label) {
     return GestureDetector(
-      onTap: () => _sendMessage(label),
+      onTap: _isSending ? null : () => _sendMessage(label),
       child: Container(
         margin: const EdgeInsets.only(right: 8),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),

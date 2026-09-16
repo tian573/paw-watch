@@ -11,8 +11,11 @@ import '../../models/user_profile.dart';
 import '../../services/firebase_service.dart';
 import '../../services/ai_service.dart';
 import '../../services/location_service.dart';
+import '../../services/text_moderation_service.dart';
 import 'chat_screen.dart';
 import '../widgets/paw_image.dart';
+import '../widgets/reel_video_player.dart';
+import '../../utils/double_tap_guard.dart';
 
 class SightingDetailScreen extends StatefulWidget {
   final Sighting sighting;
@@ -47,11 +50,16 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   static DateTime? _lastGlobalCommentAt;
   static String? _lastGlobalCommentText;
   static const Duration _commentCooldownDuration = Duration(seconds: 15);
+  bool _isActionSheetOpen = false;
 
   String? _validateCommentSpam(String text) {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return 'Please enter a comment.';
     if (trimmed.length < 2) return 'Comment is too short.';
+
+    // Content moderation: check profanity, emoji-only, and gibberish spam
+    final modError = TextModerationService.validateComment(trimmed);
+    if (modError != null) return modError;
 
     // 1. Anti-spam: Rate-limit cooldown
     if (_lastGlobalCommentAt != null) {
@@ -72,8 +80,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       }
     }
 
-    // 3. Anti-spam: Excessive repeated characters (e.g. 8+ identical consecutive chars)
-    final repeatedCharRegex = RegExp(r'(.)\1{7,}');
+    // 3. Anti-spam: Excessive repeated characters (e.g. 5+ identical consecutive chars)
+    final repeatedCharRegex = RegExp(r'(.)\1{5,}');
     if (repeatedCharRegex.hasMatch(trimmed)) {
       return '⚠️ Your comment contains repetitive characters. Please write a meaningful message.';
     }
@@ -267,6 +275,110 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     return '${(d.inDays / 7).floor()}w ago';
   }
 
+  String _fmtFullDateTime(dynamic ts) {
+    if (ts == null) return 'Date & time not available';
+    DateTime dt;
+    try {
+      if (ts is DateTime) {
+        dt = ts;
+      } else {
+        dt = (ts as dynamic).toDate();
+      }
+    } catch (_) {
+      return 'Recent';
+    }
+    const months = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
+    ];
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    final weekday = days[dt.weekday - 1];
+    final month = months[dt.month - 1];
+    final hour = dt.hour == 0 ? 12 : (dt.hour > 12 ? dt.hour - 12 : dt.hour);
+    final period = dt.hour >= 12 ? 'PM' : 'AM';
+    final min = dt.minute.toString().padLeft(2, '0');
+    return '$weekday, ${dt.day} $month ${dt.year} • $hour:$min $period';
+  }
+
+  String? _getCustomNote(Map<String, dynamic> u) {
+    final note = u['customNote']?.toString().trim();
+    if (note != null && note.isNotEmpty) return note;
+
+    final text = (u['text'] ?? '').toString();
+    if (u['type'] == 'milestoneCheckIn' && text.contains(' • ')) {
+      final parts = text.split(' • ');
+      if (parts.length > 1) {
+        return parts.sublist(1).join(' • ').replaceAll('🐾', '').trim();
+      }
+    }
+    final quoteMatch = RegExp(r'"([^"]+)"$').firstMatch(text.trim());
+    if (quoteMatch != null && u['type'] != 'milestoneCheckIn') {
+      return quoteMatch.group(1);
+    }
+    return null;
+  }
+
+  String _getCleanSummaryText(Map<String, dynamic> u) {
+    final type = u['type'] ?? 'comment';
+    final action = u['action'] as String?;
+    final isMilestone = type == 'milestoneCheckIn';
+    final isAdoptionOpened = type == 'adoptionOpened';
+    final isOutcomeResolved = type == 'outcomeResolved';
+    final isOutcomeRequest = type == 'outcomeRequest';
+    final isCustodyRequest = type == 'custodyRequest';
+    final isHandoverApproved = type == 'handoverApproved';
+    final isAct = type == 'action';
+    final isWay = type == 'onMyWay';
+    final isWayCancelled = type == 'onMyWayCancelled';
+    final isTripCancelled = u['isCancelled'] == true;
+
+    if (isTripCancelled) return 'cancelled their rescue trip.';
+    if (isWayCancelled) return 'cancelled the rescue.';
+    if (isAdoptionOpened) {
+      return 'completed foster rehabilitation and officially opened this cat for permanent adoption! 🏡🐾';
+    }
+    if (isOutcomeResolved || isOutcomeRequest) {
+      if (action == 'rehomed') {
+        return 'successfully rehomed this cat with a loving forever family! 🏡🎉';
+      } else if (action == 'sheltered') {
+        return 'safely transferred this cat to an animal shelter partner! 🏛️🐾';
+      } else {
+        return 'completed recovery care and safely returned this cat to its territory! 🌿🐾';
+      }
+    }
+    if (isCustodyRequest) {
+      final days = u['carePlanDurationDays'] ?? 3;
+      final goal = u['carePlanGoal'] ?? 'Foster & Welfare Care';
+      return 'offered to take this cat into Foster Care for $days days ($goal). 🐾';
+    }
+    if (isHandoverApproved) {
+      return 'approved custody handover! Foster care plan is now active. 🏡🐾';
+    }
+    if (isMilestone) {
+      final day = u['milestoneDay'] ?? 1;
+      final cond = (u['conditionStatus'] ?? '').toString().trim();
+      if (cond.isNotEmpty) {
+        return 'completed Day $day Care Check-In ("$cond") 🐾';
+      }
+      return 'completed Day $day Care Check-In 🐾';
+    }
+    if (isAct) {
+      final rawText = (u['text'] ?? '').toString();
+      final cNote = (u['customNote'] ?? '').toString().trim();
+      if (cNote.isNotEmpty && rawText.contains('"$cNote"')) {
+        return rawText.replaceAll('"$cNote"', '').trim();
+      }
+      if (rawText.contains(' • ')) {
+        return rawText.split(' • ').first.trim();
+      }
+      return rawText;
+    }
+    if (isWay) {
+      return 'is on the way to rescue!';
+    }
+    return (u['text'] ?? '').toString();
+  }
+
   Color _avColor(String n) {
     final c = [
       const Color(0xFF7986CB), const Color(0xFF26A69A), const Color(0xFFEC407A),
@@ -301,10 +413,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     if (await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
   }
 
-  void _showMore(Sighting s) => showModalBottomSheet(
-      context: context, backgroundColor: Colors.transparent, builder: (_) => _moreMenu(s));
+  void _showMore(Sighting s) {
+    if (!DoubleTapGuard.allow('show_more_${s.id}', thresholdMs: 800)) return;
+    showModalBottomSheet(
+        context: context, backgroundColor: Colors.transparent, builder: (_) => _moreMenu(s));
+  }
 
   void _showEdit(Sighting s) {
+    if (!DoubleTapGuard.allow('show_edit_${s.id}', thresholdMs: 800)) return;
     final tc = TextEditingController(text: s.title);
     final dc = TextEditingController(text: s.description);
     showModalBottomSheet(
@@ -319,6 +435,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   void _confirmDelete(Sighting s) {
+    if (!DoubleTapGuard.allow('confirm_delete_${s.id}', thresholdMs: 800)) return;
     Navigator.pop(context);
     final hasActiveInvestment = s.hasVetVisit ||
         s.isVetVisitPending ||
@@ -403,6 +520,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   void _showFlag(Sighting s) {
+    if (!DoubleTapGuard.allow('show_flag_${s.id}', thresholdMs: 800)) return;
     Navigator.pop(context);
     final reasons = [
       'Fake cat / re-photographed screen',
@@ -455,8 +573,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     );
   }
 
-  void _showCommentMenu(Map<String, dynamic> c, String sightingId) {
+  void _showCommentMenu(Map<String, dynamic> c, Sighting s) {
+    if (!DoubleTapGuard.allow('show_comment_menu', thresholdMs: 800)) return;
     final isOwn = _uid != null && c['authorId'] == _uid;
+    final isPostReporter = _isOwner(s);
+    final isNormalComment = c['type'] == null || c['type'] == 'comment';
+    final canBlock = isPostReporter && isNormalComment;
+
     showModalBottomSheet(
       context: context,
       backgroundColor: Colors.transparent,
@@ -483,43 +606,48 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 ),
                 if (isOwn) ...[
                   ListTile(
-                    leading: const Icon(Icons.edit_outlined, color: _lavender),
-                    title: Text('Edit',
+                    leading: const Icon(Icons.edit_note_rounded, color: _lavender),
+                    title: Text(
+                        c['type'] != null && c['type'] != 'comment'
+                            ? 'Edit Custom Note'
+                            : 'Edit Message',
                         style: GoogleFonts.nunito(
                             fontWeight: FontWeight.w700, color: _navy)),
-                    subtitle: Text('Edit your message',
+                    subtitle: Text(
+                        c['type'] != null && c['type'] != 'comment'
+                            ? 'Update your custom note details'
+                            : 'Edit your comment message',
                         style: GoogleFonts.nunito(
                             fontSize: 12, color: _navy.withValues(alpha: 0.5))),
                     onTap: () {
                       Navigator.pop(context);
-                      _showEditCommentSheet(c, sightingId);
-                    },
-                  ),
-                  ListTile(
-                    leading: const Icon(Icons.delete_outline, color: _urgent),
-                    title: Text('Delete',
-                        style: GoogleFonts.nunito(
-                            fontWeight: FontWeight.w700, color: _urgent)),
-                    subtitle: Text('Mark comment as deleted',
-                        style: GoogleFonts.nunito(
-                            fontSize: 12, color: _navy.withValues(alpha: 0.5))),
-                    onTap: () {
-                      Navigator.pop(context);
-                      _confirmDeleteComment(c, sightingId);
+                      _showEditCommentSheet(c, s.id);
                     },
                   ),
                 ] else ...[
                   ListTile(
-                    leading: const Icon(Icons.flag_outlined, color: _urgent),
-                    title: Text('Report',
+                    leading: Icon(
+                        canBlock ? Icons.block_rounded : Icons.flag_outlined,
+                        color: _urgent),
+                    title: Text(
+                        canBlock
+                            ? 'Report & Block'
+                            : (isNormalComment
+                                ? 'Report Comment'
+                                : 'Report Update'),
                         style: GoogleFonts.nunito(
                             fontWeight: FontWeight.w700, color: _urgent)),
-                    subtitle: Text('Report inappropriate content or spam',
+                    subtitle: Text(
+                        canBlock
+                            ? 'Report inappropriate comment and block user from this report'
+                            : (isNormalComment
+                                ? 'Report inappropriate comment to admin'
+                                : 'Report community post update to admin for review'),
                         style: GoogleFonts.nunito(
                             fontSize: 12, color: _navy.withValues(alpha: 0.5))),
                     onTap: () {
                       Navigator.pop(context);
-                      _showReportCommentDialog(c, sightingId);
+                      _showReportCommentDialog(c, s);
                     },
                   ),
                 ],
@@ -541,135 +669,740 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   void _showEditCommentSheet(Map<String, dynamic> c, String sightingId) {
-    final editCtrl = TextEditingController(text: c['text'] ?? '');
+    if (!DoubleTapGuard.allow('show_edit_comment', thresholdMs: 800)) return;
+    final isActionOrUpdate = c['type'] != null && c['type'] != 'comment';
+    final currentNote = _getCustomNote(c) ?? (c['text'] ?? '');
+    final editCtrl = TextEditingController(text: currentNote);
+    String? validationError;
+    bool isSaving = false;
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        final bottomPadding = MediaQuery.of(ctx).padding.bottom;
-        return Padding(
-          padding:
-              EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
-          child: Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-            ),
-            padding: EdgeInsets.fromLTRB(
-                16, 16, 16, bottomPadding > 0 ? bottomPadding + 16 : 24),
+        return StatefulBuilder(
+          builder: (sheetContext, setModalState) {
+            final bottomPadding = MediaQuery.of(ctx).padding.bottom;
+            return Padding(
+              padding:
+                  EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                padding: EdgeInsets.fromLTRB(
+                    16, 16, 16, bottomPadding > 0 ? bottomPadding + 16 : 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: _navy.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Text(
+                      isActionOrUpdate ? 'Edit Custom Note' : 'Edit Message',
+                      style: GoogleFonts.nunito(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: _navy),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      isActionOrUpdate
+                          ? 'Update the custom note or details for your community update post.'
+                          : 'Update your message for this sighting.',
+                      style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          color: _navy.withValues(alpha: 0.5)),
+                    ),
+                    const SizedBox(height: 14),
+                    TextField(
+                      controller: editCtrl,
+                      maxLines: 4,
+                      maxLength: 400,
+                      onChanged: (val) {
+                        setModalState(() {
+                          validationError = TextModerationService.validateDescription(
+                            val,
+                            fieldName: isActionOrUpdate ? 'Custom note' : 'Message',
+                          );
+                        });
+                      },
+                      style: GoogleFonts.nunito(
+                          fontSize: 14,
+                          color: _navy,
+                          fontWeight: FontWeight.w600),
+                      decoration: InputDecoration(
+                        hintText: isActionOrUpdate
+                            ? 'Enter updated custom note...'
+                            : 'Edit your comment...',
+                        errorText: validationError,
+                        errorMaxLines: 2,
+                        filled: true,
+                        fillColor: _lavLight,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 12),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: BorderSide.none),
+                        counterStyle: GoogleFonts.nunito(
+                            fontSize: 11,
+                            color: _navy.withValues(alpha: 0.4)),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _lavender,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14)),
+                        ),
+                        onPressed: isSaving
+                            ? null
+                            : () async {
+                                if (!DoubleTapGuard.allow('edit_comment_${c['id']}')) return;
+                                setModalState(() => isSaving = true);
+                                final err = TextModerationService.validateDescription(
+                                  editCtrl.text,
+                                  fieldName: isActionOrUpdate ? 'Custom note' : 'Message',
+                                );
+                                if (err != null) {
+                                  setModalState(() {
+                                    isSaving = false;
+                                    validationError = err;
+                                  });
+                                  DoubleTapGuard.reset('edit_comment_${c['id']}');
+                                  _snack('⚠️ $err');
+                                  return;
+                                }
+                                try {
+                                  await FirebaseService.instance.editCommunityUpdateNote(
+                                    sightingId: sightingId,
+                                    updateId: c['id'] ?? '',
+                                    newCustomNote: editCtrl.text,
+                                  );
+                                  if (sheetContext.mounted) {
+                                    Navigator.pop(sheetContext);
+                                  }
+                                  if (mounted) {
+                                    _snack(isActionOrUpdate
+                                        ? 'Custom note updated! ✨'
+                                        : 'Comment updated! ✨');
+                                  }
+                                } catch (e) {
+                                  setModalState(() => isSaving = false);
+                                  _snack('Failed to update: $e');
+                                }
+                              },
+                        child: isSaving
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text('Save Changes',
+                                style: GoogleFonts.nunito(
+                                    fontWeight: FontWeight.w800, fontSize: 15)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showUpdateDetailsModal(Map<String, dynamic> u, Sighting s) {
+    final action = u['action'] as String?;
+    final type = u['type'] ?? 'comment';
+    final name = u['authorName'] ?? 'Anonymous';
+    final isAnon = u['isAnonymous'] == true;
+    final dName = isAnon ? 'Anonymous' : name;
+    final isOwn = _uid != null && u['authorId'] == _uid;
+    final cleanSummary = _getCleanSummaryText(u);
+    final customNote = _getCustomNote(u);
+    final fullDateTime = _fmtFullDateTime(u['createdAt']);
+    final relativeTime = _fmtTime(u['createdAt']);
+    final proofPhotoUrl = (u['proofPhotoUrl'] ?? u['photoUrl'])?.toString();
+    final proofVideoUrl = (u['proofVideoUrl'] ??
+            u['videoUrl'] ??
+            u['outcomeVideoUrl'] ??
+            (u['type'] == 'outcomeResolved' ? s.outcomeVideoUrl : null))
+        ?.toString();
+    final hasPhoto = proofPhotoUrl != null && proofPhotoUrl.isNotEmpty;
+    final hasVideo = proofVideoUrl != null && proofVideoUrl.isNotEmpty;
+    final shelterName = u['shelterOrClinicName']?.toString();
+    final locationAddr = (u['updatedLocationAddress'] ??
+            u['shelterAddress'] ??
+            u['locationAddress'])
+        ?.toString();
+    final condStatus = u['conditionStatus']?.toString();
+    final careGoal = u['carePlanGoal']?.toString();
+    final xp = u['xpAwarded'] ?? u['pendingXp'];
+    final dayNum = u['milestoneDay'];
+
+    String categoryLabel;
+    Color categoryColor;
+    IconData categoryIcon;
+
+    if (type == 'milestoneCheckIn') {
+      categoryLabel = 'Day ${dayNum ?? 1} Care Check-In';
+      categoryColor = const Color(0xFFFFA000);
+      categoryIcon = Icons.assignment_turned_in_rounded;
+    } else if (type == 'adoptionOpened') {
+      categoryLabel = 'Adoption Opened 🏡';
+      categoryColor = const Color(0xFFE65100);
+      categoryIcon = Icons.volunteer_activism_rounded;
+    } else if (type == 'outcomeResolved' || type == 'outcomeRequest') {
+      categoryLabel = action == 'rehomed'
+          ? 'Permanently Rehomed 🏡'
+          : (action == 'sheltered'
+              ? 'Shelter Transfer 🏛️'
+              : 'Returned (TNR) 🌿');
+      categoryColor = const Color(0xFF2E7D32);
+      categoryIcon = action == 'rehomed'
+          ? Icons.celebration_rounded
+          : (action == 'sheltered' ? Icons.house_rounded : Icons.pets_rounded);
+    } else if (type == 'custodyRequest') {
+      categoryLabel = 'Foster Custody Request';
+      categoryColor = const Color(0xFF673AB7);
+      categoryIcon = Icons.handshake_rounded;
+    } else if (type == 'handoverApproved') {
+      categoryLabel = 'Custody Transferred';
+      categoryColor = const Color(0xFF2E7D32);
+      categoryIcon = Icons.verified_rounded;
+    } else if (type == 'onMyWay') {
+      categoryLabel = u['isCancelled'] == true ? 'Trip Cancelled' : 'On My Way';
+      categoryColor =
+          u['isCancelled'] == true ? const Color(0xFF78909C) : _lavender;
+      categoryIcon = Icons.directions_run_rounded;
+    } else if (type == 'onMyWayCancelled') {
+      categoryLabel = 'Rescue Cancelled';
+      categoryColor = const Color(0xFF78909C);
+      categoryIcon = Icons.person_off_rounded;
+    } else if (type == 'action') {
+      categoryLabel = _aLabels[action] ?? (action ?? 'Rescue Action');
+      categoryColor = _aColor(action ?? '');
+      categoryIcon = _aIcon(action ?? '');
+    } else {
+      categoryLabel = 'Community Comment';
+      categoryColor = _lavender;
+      categoryIcon = Icons.chat_bubble_outline_rounded;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        final maxHeight = MediaQuery.of(ctx).size.height * 0.88;
+        final bottomInset = MediaQuery.of(ctx).padding.bottom;
+        return Container(
+          constraints: BoxConstraints(maxHeight: maxHeight),
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: SafeArea(
+            top: false,
+            bottom: true,
             child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
+              mainAxisSize: MainAxisSize.min,
+              children: [
               Center(
                 child: Container(
                   width: 36,
                   height: 4,
-                  margin: const EdgeInsets.only(bottom: 16),
+                  margin: const EdgeInsets.only(top: 12, bottom: 8),
                   decoration: BoxDecoration(
                     color: _navy.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
               ),
-              Text('Edit Message',
-                  style: GoogleFonts.nunito(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: _navy)),
-              const SizedBox(height: 14),
-              TextField(
-                controller: editCtrl,
-                maxLines: 4,
-                maxLength: 400,
-                style: GoogleFonts.nunito(
-                    fontSize: 14,
-                    color: _navy,
-                    fontWeight: FontWeight.w600),
-                decoration: InputDecoration(
-                  hintText: 'Edit your comment...',
-                  filled: true,
-                  fillColor: _lavLight,
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                  border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide.none),
-                  counterStyle: GoogleFonts.nunito(
-                      fontSize: 11, color: _navy.withValues(alpha: 0.4)),
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: categoryColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(categoryIcon, size: 14, color: categoryColor),
+                          const SizedBox(width: 5),
+                          Text(
+                            categoryLabel,
+                            style: GoogleFonts.nunito(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: categoryColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(Icons.close, size: 20),
+                      color: _navy.withValues(alpha: 0.6),
+                      onPressed: () => Navigator.pop(ctx),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _lavender,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14)),
+              const Divider(height: 1),
+              Flexible(
+                child: SingleChildScrollView(
+                  padding: EdgeInsets.fromLTRB(
+                      16, 12, 16, 32 + (bottomInset > 0 ? bottomInset : 16)),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: categoryColor,
+                              shape: BoxShape.circle,
+                            ),
+                            child: Center(
+                              child: Text(
+                                _ini(isAnon ? 'AN' : name),
+                                style: GoogleFonts.nunito(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      dName,
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w800,
+                                        color: _navy,
+                                      ),
+                                    ),
+                                    if (!isAnon) ...[
+                                      const SizedBox(width: 4),
+                                      Icon(Icons.shield_outlined,
+                                          size: 13, color: _lavender),
+                                    ],
+                                  ],
+                                ),
+                                Text(
+                                  relativeTime,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    color: _navy.withValues(alpha: 0.45),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (xp != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2E7D32)
+                                    .withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '+$xp XP',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: const Color(0xFF2E7D32),
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: _bgWhite,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _navy.withValues(alpha: 0.08),
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.calendar_today_rounded,
+                                size: 16, color: _lavender),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                fullDateTime,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: _navy,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Status Summary',
+                        style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: _navy.withValues(alpha: 0.6),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: categoryColor.withValues(alpha: 0.06),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: categoryColor.withValues(alpha: 0.2),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              cleanSummary,
+                              style: GoogleFonts.nunito(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                                color: _navy,
+                                height: 1.4,
+                              ),
+                            ),
+                            if (condStatus != null &&
+                                condStatus.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Icon(Icons.favorite_rounded,
+                                      size: 13, color: categoryColor),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Condition: $condStatus',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: categoryColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                            if (careGoal != null &&
+                                careGoal.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Icon(Icons.flag_rounded,
+                                      size: 13, color: categoryColor),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'Foster Goal: $careGoal',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: categoryColor,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                            if (shelterName != null &&
+                                shelterName.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Icon(Icons.house_rounded,
+                                      size: 13, color: categoryColor),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      'Shelter: $shelterName',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: categoryColor,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                            if (locationAddr != null &&
+                                locationAddr.isNotEmpty) ...[
+                              const SizedBox(height: 6),
+                              Row(
+                                children: [
+                                  Icon(Icons.location_on_rounded,
+                                      size: 13, color: categoryColor),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      'Location: $locationAddr',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w700,
+                                        color: categoryColor,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Icon(Icons.edit_note_rounded,
+                              size: 16, color: _lavender),
+                          const SizedBox(width: 4),
+                          Text(
+                            'Custom Note / Details',
+                            style: GoogleFonts.nunito(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: _navy.withValues(alpha: 0.6),
+                            ),
+                          ),
+                          const Spacer(),
+                          if (isOwn)
+                            InkWell(
+                              onTap: () {
+                                Navigator.pop(ctx);
+                                _showEditCommentSheet(u, s.id);
+                              },
+                              borderRadius: BorderRadius.circular(6),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.edit_outlined,
+                                        size: 13, color: _lavender),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      'Edit Note',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w800,
+                                        color: _lavender,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: _lavLight.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _lavender.withValues(alpha: 0.3),
+                          ),
+                        ),
+                        child: Text(
+                          (customNote != null && customNote.isNotEmpty)
+                              ? customNote
+                              : 'No custom note provided for this update.',
+                          style: GoogleFonts.nunito(
+                            fontSize: 13,
+                            color: (customNote != null && customNote.isNotEmpty)
+                                ? _navy
+                                : _navy.withValues(alpha: 0.4),
+                            fontStyle:
+                                (customNote != null && customNote.isNotEmpty)
+                                    ? FontStyle.normal
+                                    : FontStyle.italic,
+                            fontWeight: FontWeight.w600,
+                            height: 1.45,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      if (hasPhoto) ...[
+                        Text(
+                          'Proof Photo',
+                          style: GoogleFonts.nunito(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: _navy.withValues(alpha: 0.6),
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        GestureDetector(
+                          onTap: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  _AllPhotosScreen(photoUrls: [proofPhotoUrl]),
+                            ),
+                          ),
+                          child: Stack(
+                            children: [
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(14),
+                                child: PawImage(
+                                  url: proofPhotoUrl,
+                                  width: double.infinity,
+                                  height: 200,
+                                  fit: BoxFit.cover,
+                                  placeholder: const SizedBox(height: 200),
+                                ),
+                              ),
+                              Positioned(
+                                bottom: 8,
+                                left: 8,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.75),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.verified,
+                                          size: 13, color: Color(0xFF7BBF5E)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Tap to view full screen',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                      ],
+                      if (hasVideo) ...[
+                        Text(
+                          'Rescue Reel Clip 🎬',
+                          style: GoogleFonts.nunito(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: _navy.withValues(alpha: 0.6),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ReelVideoPlayer(
+                          videoUrl: proofVideoUrl,
+                          maxHeight: 400,
+                          autoPlay: true,
+                          isLooping: true,
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      if (isOwn) ...[
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton.icon(
+                            icon:
+                                const Icon(Icons.edit_note_rounded, size: 18),
+                            label: const Text('Edit Custom Note'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: _lavender,
+                              foregroundColor: Colors.white,
+                              padding:
+                                  const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _showEditCommentSheet(u, s.id);
+                            },
+                          ),
+                        ),
+                      ],
+                      SizedBox(height: bottomInset > 0 ? bottomInset + 8 : 16),
+                    ],
                   ),
-                  onPressed: () async {
-                    if (editCtrl.text.trim().isEmpty) return;
-                    await FirebaseService.instance.editComment(
-                      sightingId: sightingId,
-                      commentId: c['id'] ?? '',
-                      newText: editCtrl.text,
-                    );
-                    if (mounted) {
-                      Navigator.pop(context);
-                      _snack('Comment updated!');
-                    }
-                  },
-                  child: Text('Save Changes',
-                      style: GoogleFonts.nunito(
-                          fontWeight: FontWeight.w800, fontSize: 15)),
                 ),
               ),
             ],
           ),
         ),
       );
-    },
-  );
-}
-
-  void _confirmDeleteComment(Map<String, dynamic> c, String sightingId) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: Text('Delete Comment?',
-            style: GoogleFonts.nunito(
-                fontWeight: FontWeight.w800, color: _navy)),
-        content: Text(
-            'Your comment will be marked as "(comment deleted)".',
-            style: GoogleFonts.nunito(color: _navy.withValues(alpha: 0.65))),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Cancel', style: GoogleFonts.nunito(color: _navy))),
-          TextButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await FirebaseService.instance.deleteComment(
-                sightingId: sightingId,
-                commentId: c['id'] ?? '',
-              );
-              if (mounted) _snack('Comment deleted.');
-            },
-            child: Text('Delete',
-                style: GoogleFonts.nunito(
-                    color: _urgent, fontWeight: FontWeight.w800)),
-          ),
-        ],
-      ),
+      },
     );
   }
 
-  void _showReportCommentDialog(Map<String, dynamic> c, String sightingId) {
+  void _showReportCommentDialog(Map<String, dynamic> c, Sighting s) {
+    if (!DoubleTapGuard.allow('report_comment_${c['id'] ?? c['createdAt']}', thresholdMs: 800)) return;
+    final sightingId = s.id;
+    final isPostReporter = _isOwner(s);
+    final isNormalComment = c['type'] == null || c['type'] == 'comment';
+    final canBlock = isPostReporter && isNormalComment;
+
     final reasons = [
       'Inappropriate or offensive',
       'Spam or advertising',
@@ -684,25 +1417,43 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         builder: (ctx, ss) => AlertDialog(
           shape:
               RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-          title: Text('Report Comment',
+          title: Text(
+              canBlock
+                  ? 'Report & Block User'
+                  : (isNormalComment
+                      ? 'Report Comment'
+                      : 'Report Community Update'),
               style: GoogleFonts.nunito(
                   fontWeight: FontWeight.w800, color: _navy)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
-            children: reasons
-                .map((r) => RadioListTile<String>(
-                      dense: true,
-                      title: Text(r,
-                          style: GoogleFonts.nunito(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: _navy)),
-                      value: r,
-                      groupValue: selected,
-                      activeColor: _lavender,
-                      onChanged: (v) => ss(() => selected = v),
-                    ))
-                .toList(),
+            children: [
+              if (!canBlock && !isNormalComment) ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    'Our moderation team will review this community post update.',
+                    style: GoogleFonts.nunito(
+                      fontSize: 12,
+                      color: _navy.withValues(alpha: 0.6),
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ),
+              ],
+              ...reasons.map((r) => RadioListTile<String>(
+                    dense: true,
+                    title: Text(r,
+                        style: GoogleFonts.nunito(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: _navy)),
+                    value: r,
+                    groupValue: selected,
+                    activeColor: _lavender,
+                    onChanged: (v) => ss(() => selected = v),
+                  )),
+            ],
           ),
           actions: [
             TextButton(
@@ -711,14 +1462,99 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             TextButton(
               onPressed: () async {
                 Navigator.pop(context);
+                final commentId = c['id']?.toString() ?? '';
+                final authorUid = c['authorId']?.toString() ?? '';
+                final authorName = c['authorName']?.toString() ?? 'User';
+
                 await FirebaseService.instance.flagComment(
                   sightingId: sightingId,
-                  commentId: c['id'] ?? '',
+                  commentId: commentId,
                   reason: selected ?? '',
                 );
-                if (mounted) _snack('Report submitted. Thank you!');
+
+                if (!canBlock) {
+                  if (mounted) {
+                    _snack(isNormalComment
+                        ? 'Comment reported to admin for review. Thank you!'
+                        : 'Community update reported to admin for review. Thank you!');
+                  }
+                  return;
+                }
+
+                if (authorUid.isNotEmpty && authorUid != _uid) {
+                  await FirebaseService.instance.blockUserFromSighting(
+                    sightingId: sightingId,
+                    blockedUid: authorUid,
+                  );
+                }
+
+                if (!mounted) return;
+
+                // Follow-up question: auto delete comments between reporter and blocked user
+                final shouldDeleteComments = await showDialog<bool>(
+                  context: context,
+                  builder: (fCtx) => AlertDialog(
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                    title: Row(
+                      children: [
+                        const Icon(Icons.block, color: _urgent, size: 22),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            '$authorName Blocked',
+                            style: GoogleFonts.nunito(
+                              fontWeight: FontWeight.w800,
+                              color: _navy,
+                              fontSize: 16,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    content: Text(
+                      'This user is now blocked and cannot view this sighting report anymore.\n\nDo you also want to automatically delete all comments from both you and this user on this report?',
+                      style: GoogleFonts.nunito(
+                        fontSize: 13,
+                        color: _navy.withValues(alpha: 0.75),
+                        height: 1.4,
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(fCtx, false),
+                        child: Text('Keep Comments',
+                            style: GoogleFonts.nunito(color: _navy, fontWeight: FontWeight.w600)),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _urgent,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () => Navigator.pop(fCtx, true),
+                        child: Text('Delete Comments',
+                            style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
+                      ),
+                    ],
+                  ),
+                );
+
+                if (shouldDeleteComments == true && authorUid.isNotEmpty) {
+                  await FirebaseService.instance.deleteCommentsBetweenUsers(
+                    sightingId: sightingId,
+                    userA: _uid ?? '',
+                    userB: authorUid,
+                  );
+                  if (mounted) {
+                    _snack('🚫 $authorName blocked and comments deleted.');
+                  }
+                } else {
+                  if (mounted) {
+                    _snack('🚫 $authorName blocked from this sighting report.');
+                  }
+                }
               },
-              child: Text('Submit',
+              child: Text(canBlock ? 'Submit & Block' : 'Submit Report',
                   style: GoogleFonts.nunito(
                       color: _urgent, fontWeight: FontWeight.w800)),
             ),
@@ -1027,6 +1863,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     bool isLocating = false;
     File? proofFile;
     bool isSubmitting = false;
+    bool isScanningProof = false;
+    CatValidationResult? proofScanResult;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -1035,7 +1873,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       backgroundColor: Colors.transparent,
       builder: (bCtx) => StatefulBuilder(
         builder: (context, setSheetState) {
-          final canSubmit = proofFile != null && !isSubmitting;
+          final canSubmit = proofFile != null &&
+              proofScanResult?.isCat == true &&
+              !isScanningProof &&
+              !isSubmitting;
           final bottomPadding = MediaQuery.of(context).viewInsets.bottom +
               MediaQuery.of(context).padding.bottom +
               32;
@@ -1047,12 +1888,23 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 source: src,
                 maxWidth: 1200,
                 maxHeight: 1200,
-                imageQuality: 80,
+                imageQuality: 85,
               );
-              if (picked != null) {
-                setSheetState(() => proofFile = File(picked.path));
-              }
+              if (picked == null) return;
+              final file = File(picked.path);
+              setSheetState(() {
+                proofFile = file;
+                isScanningProof = true;
+                proofScanResult = null;
+              });
+
+              final result = await _aiService.validateCatImage(file);
+              setSheetState(() {
+                isScanningProof = false;
+                proofScanResult = result;
+              });
             } catch (e) {
+              setSheetState(() => isScanningProof = false);
               _snack('Could not pick photo: $e');
             }
           }
@@ -1508,7 +2360,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  if (proofFile != null)
+                  if (proofFile != null) ...[
                     Stack(
                       children: [
                         ClipRRect(
@@ -1524,8 +2376,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           top: 4,
                           right: 4,
                           child: GestureDetector(
-                            onTap: () =>
-                                setSheetState(() => proofFile = null),
+                            onTap: () => setSheetState(() {
+                              proofFile = null;
+                              proofScanResult = null;
+                            }),
                             child: Container(
                               padding: const EdgeInsets.all(4),
                               decoration: const BoxDecoration(
@@ -1538,7 +2392,76 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           ),
                         ),
                       ],
-                    )
+                    ),
+                    const SizedBox(height: 8),
+                    if (isScanningProof)
+                      Row(
+                        children: [
+                          const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Color(0xFF00897B),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'AI verifying cat photo...',
+                            style: GoogleFonts.nunito(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: const Color(0xFF00897B),
+                            ),
+                          ),
+                        ],
+                      )
+                    else if (proofScanResult != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: proofScanResult!.isCat
+                              ? const Color(0xFF00897B).withValues(alpha: 0.1)
+                              : Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: proofScanResult!.isCat
+                                ? const Color(0xFF00897B).withValues(alpha: 0.3)
+                                : Colors.red.shade300,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              proofScanResult!.isCat
+                                  ? Icons.verified_rounded
+                                  : Icons.error_outline_rounded,
+                              size: 14,
+                              color: proofScanResult!.isCat
+                                  ? const Color(0xFF00897B)
+                                  : Colors.red.shade700,
+                            ),
+                            const SizedBox(width: 6),
+                            Flexible(
+                              child: Text(
+                                proofScanResult!.isCat
+                                    ? 'Cat Verified (${(proofScanResult!.confidence * 100).toStringAsFixed(0)}%) 🐾'
+                                    : proofScanResult!.message,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: proofScanResult!.isCat
+                                      ? const Color(0xFF00695C)
+                                      : Colors.red.shade800,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                  ]
                   else
                     Row(
                       children: [
@@ -1641,20 +2564,64 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF00897B),
+                        backgroundColor: canSubmit
+                            ? const Color(0xFF00897B)
+                            : const Color(0xFF00897B).withValues(alpha: 0.7),
                         foregroundColor: Colors.white,
-                        disabledBackgroundColor: Colors.grey.shade300,
-                        disabledForegroundColor: Colors.grey.shade500,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
-                        elevation: 0,
+                        elevation: canSubmit ? 2 : 0,
                       ),
-                      onPressed: !canSubmit
+                      onPressed: isSubmitting
                           ? null
                           : () async {
+                              if (isSubmitting || !DoubleTapGuard.allow('action_proof_${s.id}')) return;
                               setSheetState(() => isSubmitting = true);
+                              if (proofFile == null) {
+                                setSheetState(() => isSubmitting = false);
+                                DoubleTapGuard.reset('action_proof_${s.id}');
+                                _snack(
+                                    '⚠️ Please upload or take a release proof photo showing the cat.');
+                                return;
+                              }
+                              if (isScanningProof) {
+                                setSheetState(() => isSubmitting = false);
+                                DoubleTapGuard.reset('action_proof_${s.id}');
+                                _snack(
+                                    '⏳ AI is verifying the photo, please wait a moment...');
+                                return;
+                              }
+                              if (proofScanResult?.isCat != true) {
+                                setSheetState(() => isSubmitting = false);
+                                DoubleTapGuard.reset('action_proof_${s.id}');
+                                _snack(
+                                    '⚠️ Photo verification failed: ${proofScanResult?.message ?? "Please upload a clear photo of the cat."}');
+                                return;
+                              }
+                              if (isCustomLocationMarked) {
+                                final addrErr =
+                                    TextModerationService.validateAddress(
+                                        addressCtrl.text,
+                                        label: 'Release address');
+                                if (addrErr != null) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('action_proof_${s.id}');
+                                  _snack('⚠️ $addrErr');
+                                  return;
+                                }
+                              }
+                              final noteErr =
+                                  TextModerationService.validateDescription(
+                                      noteCtrl.text,
+                                      fieldName: 'Release note');
+                              if (noteErr != null) {
+                                setSheetState(() => isSubmitting = false);
+                                DoubleTapGuard.reset('action_proof_${s.id}');
+                                _snack('⚠️ $noteErr');
+                                return;
+                              }
                               try {
                                 await FirebaseService.instance.logRescueAction(
                                   sightingId: s.id,
@@ -2325,13 +3292,16 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   Future<void> _showActionProofSheet(String action, Sighting s) async {
-    if (!await _ensureNoConflictingRescueTrip(s)) return;
-    if (!await _ensureNoConflictingVetCare(s)) return;
-    if (s.isVetVisitPending) {
-      _snack(
-          '⏳ A vet visit report has been submitted by ${s.pendingVetRescuerName?.isNotEmpty == true ? s.pendingVetRescuerName : "a rescuer"}. Actions are locked pending verification.');
-      return;
-    }
+    if (_isActionSheetOpen) return;
+    _isActionSheetOpen = true;
+    try {
+      if (!await _ensureNoConflictingRescueTrip(s)) return;
+      if (!await _ensureNoConflictingVetCare(s)) return;
+      if (s.isVetVisitPending) {
+        _snack(
+            '⏳ A vet visit report has been submitted by ${s.pendingVetRescuerName?.isNotEmpty == true ? s.pendingVetRescuerName : "a rescuer"}. Actions are locked pending verification.');
+        return;
+      }
     if (s.isAwaitingPostVetDecision) {
       if (!_isVetRescuer(s) && !_isOwner(s) && !s.isRescuerCustodyDelegated) {
         _snack(
@@ -2358,7 +3328,6 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     RescueActionValidationResult? scanResult;
     bool isScanning = false;
     bool isSubmitting = false;
-    bool isAnonymous = _isAnon;
     final isShelteredAction = action == 'sheltered';
     final isTookInAction = action == 'tookIn' || action == 'holding';
     final isOwner = _isOwner(s);
@@ -2387,7 +3356,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     final noteCtrl = TextEditingController();
 
     if (!mounted) return;
-    showModalBottomSheet(
+    await showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -2426,25 +3395,72 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           }
 
           bool areAllMilestonesFilled = true;
-          if (isTookInAction && !isOwner) {
+          String? firstMilestoneError;
+          if (isTookInAction) {
             for (int d = 1; d <= planDurationDays; d++) {
-              if (getDayCtrl(d, planDurationDays).text.trim().isEmpty) {
+              final text = getDayCtrl(d, planDurationDays).text.trim();
+              if (text.isEmpty) {
                 areAllMilestonesFilled = false;
+                firstMilestoneError ??= 'Day $d theme is required.';
+                break;
+              }
+              final err = TextModerationService.validateTitle(text,
+                  label: 'Day $d theme', minLength: 4);
+              if (err != null) {
+                areAllMilestonesFilled = false;
+                firstMilestoneError ??= err;
                 break;
               }
             }
           }
+
+          final String? customGoalError = isCustomGoal
+              ? TextModerationService.validateTitle(customGoalCtrl.text,
+                  label: 'Custom goal', minLength: 4)
+              : null;
+          final bool isCustomGoalValid =
+              !isCustomGoal || customGoalError == null;
+
+          final isNoteMandatory = action == 'vet' ||
+              isShelteredAction ||
+              isTookInAction ||
+              action == 'stillHere';
+          final String? noteError = isNoteMandatory
+              ? TextModerationService.validateDescription(noteCtrl.text,
+                  fieldName: isTookInAction
+                      ? 'Foster care note'
+                      : (isShelteredAction
+                          ? 'Shelter transfer note'
+                          : (action == 'vet'
+                              ? 'Veterinary note'
+                              : 'Details note')))
+              : null;
+          final bool isNoteValid = !isNoteMandatory || noteError == null;
+
+          final String? shelterNameError = isShelteredAction
+              ? TextModerationService.validateFacilityName(shelterNameCtrl.text,
+                  label: 'Shelter name')
+              : null;
+          final bool isShelterNameValid =
+              !isShelteredAction || shelterNameError == null;
+
+          final String? shelterAddressError = isShelteredAction
+              ? TextModerationService.validateAddress(shelterAddressCtrl.text,
+                  label: 'Shelter address')
+              : null;
+          final bool isShelterAddressValid =
+              !isShelteredAction || shelterAddressError == null;
 
           final canSubmit = proofFile != null &&
               scanResult != null &&
               scanResult!.isValid &&
               !isScanning &&
               !isSubmitting &&
-              (!isShelteredAction || shelterNameCtrl.text.trim().isNotEmpty) &&
+              isNoteValid &&
+              isShelterNameValid &&
+              isShelterAddressValid &&
               (!isTookInAction ||
-                  isOwner ||
-                  ((!isCustomGoal || customGoalCtrl.text.trim().isNotEmpty) &&
-                      areAllMilestonesFilled));
+                  (isCustomGoalValid && areAllMilestonesFilled));
 
           final bottomPadding = MediaQuery.of(ctx).padding.bottom;
           return Padding(
@@ -2489,8 +3505,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                isTookInAction && !isOwner
-                                    ? 'Request Foster Custody'
+                                isTookInAction
+                                    ? (isOwner
+                                        ? 'Foster at My Place (Care Plan)'
+                                        : 'Request Foster Custody')
                                     : 'Log Rescue: $actionLabel',
                                 style: GoogleFonts.nunito(
                                   fontSize: 17,
@@ -2501,8 +3519,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               Text(
                                 isShelteredAction
                                     ? 'Marks report as Resolved • Safe in Shelter (+120 XP)'
-                                    : (isTookInAction && !isOwner
-                                        ? 'Requires reporter confirmation for animal welfare (+150 XP)'
+                                    : (isTookInAction
+                                        ? (isOwner
+                                            ? 'Set up Care Plan & daily milestones (+150 XP)'
+                                            : 'Requires reporter confirmation for animal welfare (+150 XP)')
                                         : '+$xp XP reward upon verification'),
                                 style: GoogleFonts.nunito(
                                   fontSize: 12,
@@ -2515,7 +3535,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ),
                       ],
                     ),
-                    if (isTookInAction && !isOwner) ...[
+                    if (isTookInAction) ...[
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.all(12),
@@ -2527,12 +3547,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.handshake_outlined,
-                                color: Color(0xFF673AB7), size: 20),
+                            Icon(isOwner ? Icons.volunteer_activism_rounded : Icons.handshake_outlined,
+                                color: const Color(0xFF673AB7), size: 20),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                'Foster Handshake: Taking this cat into foster care will send your Custom Care Plan and Trust Card to the reporter for approval.',
+                                isOwner
+                                    ? 'Foster Custody: Set up your Custom Care Plan and daily milestones for taking this cat into foster care at your place.'
+                                    : 'Foster Handshake: Taking this cat into foster care will send your Custom Care Plan and Trust Card to the reporter for approval.',
                                 style: GoogleFonts.nunito(
                                   fontSize: 11.5,
                                   fontWeight: FontWeight.w700,
@@ -2606,6 +3628,11 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             hintStyle: GoogleFonts.nunito(
                                 fontSize: 12,
                                 color: _navy.withValues(alpha: 0.4)),
+                            errorText: isCustomGoal &&
+                                    customGoalCtrl.text.trim().isNotEmpty
+                                ? customGoalError
+                                : null,
+                            errorMaxLines: 2,
                             filled: true,
                             fillColor: _lavLight,
                             contentPadding: const EdgeInsets.symmetric(
@@ -2699,6 +3726,11 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         final ctrl = getDayCtrl(dayNum, planDurationDays);
                         final isFirst = dayNum == 1;
                         final isLast = dayNum == planDurationDays;
+                        final dayText = ctrl.text.trim();
+                        final dayErr = dayText.isNotEmpty
+                            ? TextModerationService.validateTitle(dayText,
+                                label: 'Day $dayNum theme', minLength: 4)
+                            : null;
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 6),
                           child: TextField(
@@ -2732,6 +3764,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               labelStyle: GoogleFonts.nunito(
                                   fontSize: 11,
                                   color: _navy.withValues(alpha: 0.6)),
+                              errorText: dayErr,
+                              errorMaxLines: 2,
                               filled: true,
                               fillColor: _lavLight,
                               contentPadding: const EdgeInsets.symmetric(
@@ -2987,9 +4021,20 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           ),
                         ),
                       ),
+                      if (shelterNameCtrl.text.isNotEmpty && shelterNameError != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          shelterNameError,
+                          style: GoogleFonts.nunito(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFFE53935),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
                       Text(
-                        'Shelter Address / Contact (Optional)',
+                        'Shelter Address (Required)',
                         style: GoogleFonts.nunito(
                           fontSize: 13,
                           fontWeight: FontWeight.w800,
@@ -2999,6 +4044,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       const SizedBox(height: 6),
                       TextField(
                         controller: shelterAddressCtrl,
+                        onChanged: (_) => setSheetState(() {}),
                         style: GoogleFonts.nunito(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
@@ -3016,6 +4062,18 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           ),
                         ),
                       ),
+                      if (shelterAddressCtrl.text.isNotEmpty &&
+                          shelterAddressError != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          shelterAddressError,
+                          style: GoogleFonts.nunito(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFFE53935),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 10),
                       Container(
                         height: 140,
@@ -3247,7 +4305,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       const SizedBox(height: 12),
                     ],
                     Text(
-                      'Custom Note / Details (Optional)',
+                      isNoteMandatory
+                          ? 'Custom Note / Details (Required)'
+                          : 'Custom Note / Details (Optional)',
                       style: GoogleFonts.nunito(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
@@ -3257,6 +4317,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     const SizedBox(height: 6),
                     TextField(
                       controller: noteCtrl,
+                      onChanged: (_) => setSheetState(() {}),
                       maxLength: 150,
                       style: GoogleFonts.nunito(
                         fontSize: 13,
@@ -3266,7 +4327,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       decoration: InputDecoration(
                         hintText: isShelteredAction
                             ? 'e.g. Admitted safely into intake quarantine kennel #4'
-                            : 'e.g. Fed 2 cans of cat food near the alleyway',
+                            : (isTookInAction
+                                ? 'e.g. Safe foster room prepared with food, water, and warm blankets'
+                                : 'e.g. Fed 2 cans of cat food near the alleyway'),
                         hintStyle: GoogleFonts.nunito(
                             fontSize: 12,
                             color: _navy.withValues(alpha: 0.35)),
@@ -3283,44 +4346,19 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             color: _navy.withValues(alpha: 0.4)),
                       ),
                     ),
-                    const SizedBox(height: 4),
-                    GestureDetector(
-                      onTap: () =>
-                          setSheetState(() => isAnonymous = !isAnonymous),
-                      child: Row(
-                        children: [
-                          AnimatedContainer(
-                            duration: const Duration(milliseconds: 180),
-                            width: 18,
-                            height: 18,
-                            decoration: BoxDecoration(
-                              color:
-                                  isAnonymous ? _lavender : Colors.transparent,
-                              borderRadius: BorderRadius.circular(4),
-                              border: Border.all(
-                                color: isAnonymous
-                                    ? _lavender
-                                    : _navy.withValues(alpha: 0.25),
-                              ),
-                            ),
-                            child: isAnonymous
-                                ? const Icon(Icons.check,
-                                    size: 12, color: Colors.white)
-                                : null,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Post anonymously to community feed',
-                            style: GoogleFonts.nunito(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                              color: _navy.withValues(alpha: 0.65),
-                            ),
-                          ),
-                        ],
+                    if (noteCtrl.text.isNotEmpty && noteError != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        noteError,
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
                       ),
-                    ),
-                    if (isTookInAction && !isOwner && !areAllMilestonesFilled) ...[
+                    ],
+                    if (isTookInAction &&
+                        (!areAllMilestonesFilled || !isCustomGoalValid)) ...[
                       const SizedBox(height: 12),
                       Container(
                         padding: const EdgeInsets.symmetric(
@@ -3338,7 +4376,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                'Please enter a title for all $planDurationDays days to submit your Foster Care Plan.',
+                                !isCustomGoalValid
+                                    ? customGoalError
+                                    : (firstMilestoneError ??
+                                        'Please enter a valid title for all $planDurationDays days to submit your Foster Care Plan.'),
                                 style: GoogleFonts.nunito(
                                   fontSize: 11.5,
                                   fontWeight: FontWeight.w700,
@@ -3356,7 +4397,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor:
-                              canSubmit ? col : Colors.grey.shade300,
+                              canSubmit ? col : col.withValues(alpha: 0.7),
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
@@ -3364,9 +4405,97 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           ),
                           elevation: canSubmit ? 2 : 0,
                         ),
-                        onPressed: canSubmit
-                            ? () async {
+                        onPressed: isSubmitting
+                            ? null
+                            : () async {
+                                if (isSubmitting || !DoubleTapGuard.allow('action_form_${s.id}')) return;
                                 setSheetState(() => isSubmitting = true);
+                                if (proofFile == null) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('action_form_${s.id}');
+                                  _snack(
+                                      '⚠️ Please upload or take a verification photo.');
+                                  return;
+                                }
+                                if (isScanning) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('action_form_${s.id}');
+                                  _snack(
+                                      '⏳ AI is verifying the photo, please wait a moment...');
+                                  return;
+                                }
+                                if (scanResult == null || !scanResult!.isValid) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('action_form_${s.id}');
+                                  _snack(
+                                      '⚠️ Photo verification failed: ${scanResult?.message ?? "Please upload a clear photo of the cat."}');
+                                  return;
+                                }
+                                if (isShelteredAction) {
+                                  final sNameErr =
+                                      TextModerationService.validateFacilityName(
+                                          shelterNameCtrl.text,
+                                          label: 'Shelter');
+                                  if (sNameErr != null) {
+                                    setSheetState(() => isSubmitting = false);
+                                    DoubleTapGuard.reset('action_form_${s.id}');
+                                    _snack('⚠️ $sNameErr');
+                                    return;
+                                  }
+                                  final sAddrErr =
+                                      TextModerationService.validateAddress(
+                                          shelterAddressCtrl.text,
+                                          label: 'Shelter address');
+                                  if (sAddrErr != null) {
+                                    setSheetState(() => isSubmitting = false);
+                                    DoubleTapGuard.reset('action_form_${s.id}');
+                                    _snack('⚠️ $sAddrErr');
+                                    return;
+                                  }
+                                }
+                                if (isTookInAction) {
+                                  if (isCustomGoal) {
+                                    final goalErr =
+                                        TextModerationService.validateTitle(
+                                            customGoalCtrl.text,
+                                            label: 'Custom goal',
+                                            minLength: 4);
+                                    if (goalErr != null) {
+                                      setSheetState(() => isSubmitting = false);
+                                      DoubleTapGuard.reset('action_form_${s.id}');
+                                      _snack('⚠️ $goalErr');
+                                      return;
+                                    }
+                                  }
+                                  for (int d = 1; d <= planDurationDays; d++) {
+                                    final t = getDayCtrl(d, planDurationDays)
+                                        .text
+                                        .trim();
+                                    final mErr =
+                                        TextModerationService.validateTitle(
+                                            t,
+                                            label: 'Day $d theme',
+                                            minLength: 4);
+                                    if (mErr != null) {
+                                      setSheetState(() => isSubmitting = false);
+                                      DoubleTapGuard.reset('action_form_${s.id}');
+                                      _snack('⚠️ $mErr');
+                                      return;
+                                    }
+                                  }
+                                }
+                                if (isNoteMandatory) {
+                                  final noteErr =
+                                      TextModerationService.validateDescription(
+                                          noteCtrl.text,
+                                          fieldName: 'Note');
+                                  if (noteErr != null) {
+                                    setSheetState(() => isSubmitting = false);
+                                    DoubleTapGuard.reset('action_form_${s.id}');
+                                    _snack('⚠️ $noteErr');
+                                    return;
+                                  }
+                                }
                                 try {
                                   String finalNote = noteCtrl.text.trim();
                                   if (isShelteredAction &&
@@ -3467,7 +4596,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                       .logRescueAction(
                                     sightingId: s.id,
                                     action: action,
-                                    anonymous: isAnonymous,
+                                    anonymous: false,
                                     proofPhotoFile: proofFile,
                                     customNote: finalNote,
                                     updatedLatitude:
@@ -3520,10 +4649,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   }
                                 } catch (e) {
                                   setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('action_form_${s.id}');
                                   _snack('Failed to submit: $e');
                                 }
-                              }
-                            : null,
+                              },
                         child: isSubmitting
                             ? const SizedBox(
                                 height: 20,
@@ -3561,6 +4690,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         },
       ),
     );
+    } finally {
+      _isActionSheetOpen = false;
+    }
   }
 
   Widget _buildFreshnessBanner(Sighting s) {
@@ -3684,12 +4816,16 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   void _showRoamingUpdateSheet(Sighting s) {
+    if (_isActionSheetOpen) return;
+    _isActionSheetOpen = true;
     if (s.isVetVisitPending) {
+      _isActionSheetOpen = false;
       _snack('⏳ Vet visit verification is pending. Actions are currently locked.');
       return;
     }
     if (s.isAwaitingPostVetDecision) {
       if (!_isVetRescuer(s) && !_isOwner(s) && !s.isRescuerCustodyDelegated) {
+        _isActionSheetOpen = false;
         _snack(
             '⏳ ${s.lastVetRescuerName?.isNotEmpty == true ? s.lastVetRescuerName : "The rescuer"} currently has custody of this cat after vet care.');
         return;
@@ -3800,8 +4936,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         ),
       );
     },
-  );
-}
+    ).whenComplete(() {
+      _isActionSheetOpen = false;
+    });
+  }
 
   Widget _buildRoamingOptionTile({
     required IconData icon,
@@ -3876,8 +5014,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   void _showRelocationSheet(Sighting s) async {
-    if (!await _ensureNoConflictingRescueTrip(s)) return;
-    if (!await _ensureNoConflictingVetCare(s)) return;
+    if (_isActionSheetOpen) return;
+    _isActionSheetOpen = true;
+    try {
+      if (!DoubleTapGuard.allow('relocation_${s.id}', thresholdMs: 800)) return;
+      if (!await _ensureNoConflictingRescueTrip(s)) return;
+      if (!await _ensureNoConflictingVetCare(s)) return;
     File? proofFile;
     bool isScanning = false;
     CatValidationResult? scanResult;
@@ -3935,10 +5077,20 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             }
           }
 
+          final isNoteValid = TextModerationService.validateDescription(
+                  noteCtrl.text,
+                  fieldName: 'Roam note') ==
+              null;
+          final isAddrValid = TextModerationService.validateAddress(
+                  addressCtrl.text,
+                  label: 'Location address') ==
+              null;
           final canSubmit = proofFile != null &&
               scanResult?.isCat == true &&
               !isScanning &&
-              !isSubmitting;
+              !isSubmitting &&
+              isNoteValid &&
+              isAddrValid;
 
           final bottomPadding = MediaQuery.of(ctx).padding.bottom;
           return Padding(
@@ -3994,6 +5146,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     const SizedBox(height: 6),
                     TextField(
                       controller: addressCtrl,
+                      onChanged: (_) => setSheetState(() {}),
                       style: GoogleFonts.nunito(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w600,
@@ -4034,6 +5187,23 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               ),
                       ),
                     ),
+                    if (addressCtrl.text.isNotEmpty &&
+                        TextModerationService.validateAddress(
+                                addressCtrl.text,
+                                label: 'Location address') !=
+                            null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        TextModerationService.validateAddress(
+                            addressCtrl.text,
+                            label: 'Location address')!,
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 10),
                     Container(
                       height: 150,
@@ -4232,7 +5402,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       ),
                     const SizedBox(height: 12),
                     Text(
-                      'Roam Note (Optional)',
+                      'Roam Note / Details (Required)',
                       style: GoogleFonts.nunito(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w800,
@@ -4242,6 +5412,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     const SizedBox(height: 6),
                     TextField(
                       controller: noteCtrl,
+                      onChanged: (_) => setSheetState(() {}),
                       maxLength: 120,
                       style: GoogleFonts.nunito(
                         fontSize: 12.5,
@@ -4264,6 +5435,23 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             fontSize: 10, color: _navy.withValues(alpha: 0.4)),
                       ),
                     ),
+                    if (noteCtrl.text.isNotEmpty &&
+                        TextModerationService.validateDescription(
+                                noteCtrl.text,
+                                fieldName: 'Roam note') !=
+                            null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        TextModerationService.validateDescription(
+                            noteCtrl.text,
+                            fieldName: 'Roam note')!,
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
@@ -4271,15 +5459,59 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: canSubmit
                               ? const Color(0xFFFF9800)
-                              : Colors.grey.shade300,
+                              : const Color(0xFFFF9800).withValues(alpha: 0.7),
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14)),
+                          elevation: canSubmit ? 2 : 0,
                         ),
-                        onPressed: canSubmit
-                            ? () async {
+                        onPressed: isSubmitting
+                            ? null
+                            : () async {
+                                if (isSubmitting || !DoubleTapGuard.allow('roam_spot_${s.id}')) return;
                                 setSheetState(() => isSubmitting = true);
+                                if (proofFile == null) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('roam_spot_${s.id}');
+                                  _snack(
+                                      '⚠️ Please take or upload a cat photo at the new location.');
+                                  return;
+                                }
+                                if (isScanning) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('roam_spot_${s.id}');
+                                  _snack(
+                                      '⏳ AI is verifying the photo, please wait a moment...');
+                                  return;
+                                }
+                                if (scanResult?.isCat != true) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('roam_spot_${s.id}');
+                                  _snack(
+                                      '⚠️ Photo verification failed: ${scanResult?.message ?? "Please upload a clear cat photo."}');
+                                  return;
+                                }
+                                final addrErr =
+                                    TextModerationService.validateAddress(
+                                        addressCtrl.text,
+                                        label: 'Location address');
+                                if (addrErr != null) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('roam_spot_${s.id}');
+                                  _snack('⚠️ $addrErr');
+                                  return;
+                                }
+                                final noteErr =
+                                    TextModerationService.validateDescription(
+                                        noteCtrl.text,
+                                        fieldName: 'Roam note');
+                                if (noteErr != null) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('roam_spot_${s.id}');
+                                  _snack('⚠️ $noteErr');
+                                  return;
+                                }
                                 try {
                                   final awardedXp = await FirebaseService.instance.logRescueAction(
                                     sightingId: s.id,
@@ -4304,10 +5536,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   }
                                 } catch (e) {
                                   setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('roam_spot_${s.id}');
                                   _snack('Failed to update: $e');
                                 }
-                              }
-                            : null,
+                              },
                         child: isSubmitting
                             ? const SizedBox(
                                 height: 20,
@@ -4332,17 +5564,24 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         },
       ),
     );
+    } finally {
+      _isActionSheetOpen = false;
+    }
   }
 
   void _showNotHereDialog(Sighting s) async {
-    if (!await _ensureNoConflictingRescueTrip(s)) return;
-    if (!await _ensureNoConflictingVetCare(s)) return;
+    if (_isActionSheetOpen) return;
+    _isActionSheetOpen = true;
+    try {
+      if (!DoubleTapGuard.allow('not_here_${s.id}', thresholdMs: 800)) return;
+      if (!await _ensureNoConflictingRescueTrip(s)) return;
+      if (!await _ensureNoConflictingVetCare(s)) return;
     final noteCtrl = TextEditingController();
     String selectedReason = 'roaming'; // 'roaming' or 'helpedOffline'
     final isOwner = _isOwner(s);
 
     if (!mounted) return;
-    showDialog(
+    await showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx2, setDialogState) => AlertDialog(
@@ -4483,7 +5722,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 ),
                 const SizedBox(height: 12),
                 Text(
-                  'Details or Note (optional):',
+                  'Details or Note (Required):',
                   style: GoogleFonts.nunito(
                       fontSize: 11.5,
                       fontWeight: FontWeight.w700,
@@ -4492,6 +5731,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 const SizedBox(height: 6),
                 TextField(
                   controller: noteCtrl,
+                  onChanged: (_) => setDialogState(() {}),
                   maxLength: 120,
                   style: GoogleFonts.nunito(
                     fontSize: 12.5,
@@ -4516,6 +5756,21 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         fontSize: 10, color: _navy.withValues(alpha: 0.4)),
                   ),
                 ),
+                if (noteCtrl.text.isNotEmpty &&
+                    TextModerationService.validateDescription(noteCtrl.text,
+                            fieldName: 'Note') !=
+                        null) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    TextModerationService.validateDescription(noteCtrl.text,
+                        fieldName: 'Note')!,
+                    style: GoogleFonts.nunito(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFFE53935),
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -4534,6 +5789,15 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     borderRadius: BorderRadius.circular(10)),
               ),
               onPressed: () async {
+                if (!DoubleTapGuard.allow('not_here_dialog_${s.id}')) return;
+                final noteErr = TextModerationService.validateDescription(
+                    noteCtrl.text,
+                    fieldName: 'Note');
+                if (noteErr != null) {
+                  DoubleTapGuard.reset('not_here_dialog_${s.id}');
+                  _snack('⚠️ $noteErr');
+                  return;
+                }
                 Navigator.pop(ctx);
                 final isHelped = selectedReason == 'helpedOffline';
                 final note = noteCtrl.text.trim();
@@ -4576,6 +5840,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         ),
       ),
     );
+    } finally {
+      _isActionSheetOpen = false;
+    }
   }
 
   Future<void> _claimRescue(Sighting s) async {
@@ -4741,6 +6008,73 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       stream: FirebaseService.instance.streamSightingById(widget.sighting.id),
       builder: (context, snap) {
         final s = snap.data ?? widget.sighting;
+        if (_uid != null && s.blockedUserIds.contains(_uid)) {
+          return Scaffold(
+            backgroundColor: _bgWhite,
+            appBar: AppBar(
+              backgroundColor: Colors.white,
+              elevation: 0,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back, color: _navy),
+                onPressed: () => Navigator.pop(context),
+              ),
+              title: Text('Access Restricted',
+                  style: GoogleFonts.nunito(
+                      fontWeight: FontWeight.w800, color: _navy, fontSize: 16)),
+            ),
+            body: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(28.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: _urgent.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(Icons.block_rounded, size: 48, color: _urgent),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Access Restricted',
+                      style: GoogleFonts.nunito(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: _navy,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'You have been restricted from viewing this sighting report details due to a community report.',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.nunito(
+                        fontSize: 13,
+                        color: _navy.withValues(alpha: 0.65),
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _navy,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () => Navigator.pop(context),
+                      icon: const Icon(Icons.arrow_back, size: 16),
+                      label: Text('Back to Feed',
+                          style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }
         final isCaretaker = _uid != null &&
             (_uid == s.careTakerId ||
                 _isOwner(s) ||
@@ -6161,7 +7495,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
   void _showCareMilestoneSheet(int milestoneDay, Sighting s) {
     File? proofFile;
+    File? proofVideoFile;
     bool isSubmitting = false;
+    bool isScanningPhoto = false;
+    CatValidationResult? scanResult;
     String selectedCondition = 'Recovering & Eating Well';
     final conditions = [
       'Recovering & Eating Well',
@@ -6181,24 +7518,69 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       builder: (sheetContext) => StatefulBuilder(
         builder: (ctx, setSheetState) {
           Future<void> pickPhoto(ImageSource source) async {
-            final picked = await _picker.pickImage(
-              source: source,
-              maxWidth: 1200,
-              maxHeight: 1200,
-              imageQuality: 85,
-            );
-            if (picked == null) return;
-            setSheetState(() => proofFile = File(picked.path));
+            try {
+              final picked = await _picker.pickImage(
+                source: source,
+                maxWidth: 1200,
+                maxHeight: 1200,
+                imageQuality: 85,
+              );
+              if (picked == null) return;
+              final file = File(picked.path);
+              setSheetState(() {
+                proofFile = file;
+                isScanningPhoto = true;
+                scanResult = null;
+              });
+
+              final result = await _aiService.validateCatImage(file);
+              setSheetState(() {
+                isScanningPhoto = false;
+                scanResult = result;
+              });
+            } catch (e) {
+              setSheetState(() => isScanningPhoto = false);
+              _snack('Error picking photo: $e');
+            }
           }
+
+          Future<void> pickVideo(ImageSource source) async {
+            try {
+              final picked = await _picker.pickVideo(
+                source: source,
+                maxDuration: const Duration(minutes: 1),
+              );
+              if (picked == null) return;
+              final file = File(picked.path);
+              final bytes = await file.length();
+              if (bytes > 25 * 1024 * 1024) {
+                _snack(
+                    'Video is ${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB. Max allowed size is 25 MB.');
+                return;
+              }
+              setSheetState(() => proofVideoFile = file);
+            } catch (e) {
+              _snack('Error picking video: $e');
+            }
+          }
+
+
+          final isCustomFilled = !isCustomCondition ||
+              customConditionCtrl.text.trim().isNotEmpty;
+          final isNoteValid = TextModerationService.validateDescription(
+                  noteCtrl.text,
+                  fieldName: 'Care note') ==
+              null;
+          final canSubmit = !isSubmitting &&
+              proofFile != null &&
+              scanResult?.isCat == true &&
+              !isScanningPhoto &&
+              isCustomFilled &&
+              isNoteValid;
 
           final xp = milestoneDay == 1
               ? 30
               : (milestoneDay == s.effectiveMilestoneDays.last ? 60 : 25);
-
-          final isCustomFilled = !isCustomCondition ||
-              customConditionCtrl.text.trim().isNotEmpty;
-          final canSubmit =
-              !isSubmitting && proofFile != null && isCustomFilled;
 
           return Padding(
             padding:
@@ -6345,7 +7727,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ],
                     const SizedBox(height: 16),
                     Text(
-                      'Care Notes / Medical Update',
+                      'Care Notes / Medical Update (Required)',
                       style: GoogleFonts.nunito(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
@@ -6355,6 +7737,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     const SizedBox(height: 6),
                     TextField(
                       controller: noteCtrl,
+                      onChanged: (_) => setSheetState(() {}),
                       maxLines: 2,
                       style:
                           GoogleFonts.nunito(fontSize: 13, color: _navy),
@@ -6370,9 +7753,26 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ),
                       ),
                     ),
+                    if (noteCtrl.text.isNotEmpty &&
+                        TextModerationService.validateDescription(
+                                noteCtrl.text,
+                                fieldName: 'Care note') !=
+                            null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        TextModerationService.validateDescription(
+                            noteCtrl.text,
+                            fieldName: 'Care note')!,
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     Text(
-                      'Photo Proof of Cat (Mandatory)',
+                      'Photo Proof of Cat (Mandatory - AI Checked)',
                       style: GoogleFonts.nunito(
                         fontSize: 13,
                         fontWeight: FontWeight.w800,
@@ -6388,7 +7788,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    if (proofFile != null)
+                    if (proofFile != null) ...[
                       Stack(
                         children: [
                           ClipRRect(
@@ -6402,8 +7802,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             top: 4,
                             right: 4,
                             child: GestureDetector(
-                              onTap: () =>
-                                   setSheetState(() => proofFile = null),
+                              onTap: () => setSheetState(() {
+                                proofFile = null;
+                                scanResult = null;
+                              }),
                               child: Container(
                                 padding: const EdgeInsets.all(3),
                                 decoration: const BoxDecoration(
@@ -6416,8 +7818,76 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             ),
                           ),
                         ],
-                      )
-                    else
+                      ),
+                      const SizedBox(height: 8),
+                      if (isScanningPhoto)
+                        Row(
+                          children: [
+                            const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: _lavender,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'AI verifying cat photo...',
+                              style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: _lavender,
+                              ),
+                            ),
+                          ],
+                        )
+                      else if (scanResult != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: scanResult!.isCat
+                                ? const Color(0xFF2E7D32).withValues(alpha: 0.1)
+                                : Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: scanResult!.isCat
+                                  ? const Color(0xFF2E7D32).withValues(alpha: 0.3)
+                                  : Colors.red.shade300,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                scanResult!.isCat
+                                    ? Icons.verified_rounded
+                                    : Icons.error_outline_rounded,
+                                size: 14,
+                                color: scanResult!.isCat
+                                    ? const Color(0xFF2E7D32)
+                                    : Colors.red.shade700,
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  scanResult!.isCat
+                                      ? 'Cat Verified (${(scanResult!.confidence * 100).toStringAsFixed(0)}%) 🐾'
+                                      : scanResult!.message,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: scanResult!.isCat
+                                        ? const Color(0xFF1B5E20)
+                                        : Colors.red.shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ] else
                       Row(
                         children: [
                           OutlinedButton.icon(
@@ -6459,22 +7929,169 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           ),
                         ],
                       ),
+                    const SizedBox(height: 16),
+
+                    // Optional Video Section
+                    Row(
+                      children: [
+                        Text(
+                          'Video Clip',
+                          style: GoogleFonts.nunito(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: _navy,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: _lavender.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'Optional',
+                            style: GoogleFonts.nunito(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: _lavender,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Add a short video (up to 1 min) showing cat recovery, feeding, or playful movement.',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        color: _navy.withValues(alpha: 0.6),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (proofVideoFile != null)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ReelVideoPlayer(
+                            videoFile: proofVideoFile,
+                            maxHeight: 280,
+                            autoPlay: true,
+                            isLooping: true,
+                            onRemove: () =>
+                                setSheetState(() => proofVideoFile = null),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              const Icon(Icons.check_circle_rounded,
+                                  size: 14, color: Color(0xFF2E7D32)),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Reel attached • Tap ✕ to remove',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11,
+                                  color: const Color(0xFF2E7D32),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      )
+                    else
+                      Row(
+                        children: [
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: _lavender,
+                              side: BorderSide(
+                                  color: _lavender.withValues(alpha: 0.4)),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                            onPressed: () => pickVideo(ImageSource.camera),
+                            icon: const Icon(Icons.videocam_outlined, size: 16),
+                            label: Text('Record Video',
+                                style: GoogleFonts.nunito(
+                                    fontWeight: FontWeight.w700, fontSize: 12)),
+                          ),
+                          const SizedBox(width: 10),
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: _navy,
+                              side: BorderSide(
+                                  color: _navy.withValues(alpha: 0.2)),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12)),
+                            ),
+                            onPressed: () => pickVideo(ImageSource.gallery),
+                            icon: const Icon(Icons.video_library_outlined, size: 16),
+                            label: Text('Pick Video',
+                                style: GoogleFonts.nunito(
+                                    fontWeight: FontWeight.w700, fontSize: 12)),
+                          ),
+                        ],
+                      ),
                     const SizedBox(height: 20),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor:
-                              canSubmit ? _lavender : Colors.grey.shade300,
+                              canSubmit ? _lavender : _lavender.withValues(alpha: 0.7),
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(
                               vertical: 14),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14)),
+                          elevation: canSubmit ? 2 : 0,
                         ),
-                        onPressed: canSubmit
-                            ? () async {
+                        onPressed: isSubmitting
+                            ? null
+                            : () async {
+                                if (isSubmitting || !DoubleTapGuard.allow('milestone_${s.id}_$milestoneDay')) return;
                                 setSheetState(() => isSubmitting = true);
+                                if (proofFile == null) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('milestone_${s.id}_$milestoneDay');
+                                  _snack(
+                                      '⚠️ Please upload or take a milestone proof photo.');
+                                  return;
+                                }
+                                if (isScanningPhoto) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('milestone_${s.id}_$milestoneDay');
+                                  _snack(
+                                      '⏳ AI is verifying the photo, please wait a moment...');
+                                  return;
+                                }
+                                if (scanResult?.isCat != true) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('milestone_${s.id}_$milestoneDay');
+                                  _snack(
+                                      '⚠️ Photo verification failed: ${scanResult?.message ?? "Please upload a clear cat photo."}');
+                                  return;
+                                }
+                                if (isCustomCondition &&
+                                    customConditionCtrl.text.trim().isEmpty) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('milestone_${s.id}_$milestoneDay');
+                                  _snack(
+                                      '⚠️ Please specify the custom condition for this milestone.');
+                                  return;
+                                }
+                                final noteErr =
+                                    TextModerationService.validateDescription(
+                                        noteCtrl.text,
+                                        fieldName: 'Care note');
+                                if (noteErr != null) {
+                                  setSheetState(() => isSubmitting = false);
+                                  DoubleTapGuard.reset('milestone_${s.id}_$milestoneDay');
+                                  _snack('⚠️ $noteErr');
+                                  return;
+                                }
                                 try {
                                   final finalCondition = isCustomCondition &&
                                           customConditionCtrl.text
@@ -6494,6 +8111,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                         ? noteCtrl.text.trim()
                                         : finalCondition,
                                     proofPhotoFile: proofFile,
+                                    proofVideoFile: proofVideoFile,
                                   );
                                   if (ctx.mounted) Navigator.pop(ctx);
                                   _snack(
@@ -6501,10 +8119,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                 } catch (e) {
                                   setSheetState(
                                       () => isSubmitting = false);
+                                  DoubleTapGuard.reset('milestone_${s.id}_$milestoneDay');
                                   _snack('Failed to submit check-in: $e');
                                 }
-                              }
-                            : null,
+                              },
                         child: isSubmitting
                             ? const SizedBox(
                                 height: 20,
@@ -7779,6 +9397,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       padding: const EdgeInsets.symmetric(vertical: 10),
                     ),
                     onPressed: () async {
+                      if (!DoubleTapGuard.allow('finalize_outcome_${s.id}')) return;
                       await FirebaseService.instance.completeCareOutcome(
                         sightingId: s.id,
                         outcomeAction: action,
@@ -7805,6 +9424,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
                   ),
                   onPressed: () async {
+                    if (!DoubleTapGuard.allow('decline_outcome_${s.id}')) return;
                     await FirebaseService.instance.declineOutcomeConfirmation(
                       sightingId: s.id,
                       updateId: s.pendingOutcomeUpdateId,
@@ -7830,6 +9450,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     }
     File? showcaseFile;
     bool isSubmitting = false;
+    bool isScanningPhoto = false;
+    CatValidationResult? scanResult;
 
     final facilityCtrl = TextEditingController(
       text: s.shelterOrClinicName?.isNotEmpty == true
@@ -7868,14 +9490,30 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       builder: (sheetContext) => StatefulBuilder(
         builder: (ctx, setSheetState) {
           Future<void> pickPhoto(ImageSource source) async {
-            final picked = await _picker.pickImage(
-              source: source,
-              maxWidth: 1200,
-              maxHeight: 1200,
-              imageQuality: 85,
-            );
-            if (picked == null) return;
-            setSheetState(() => showcaseFile = File(picked.path));
+            try {
+              final picked = await _picker.pickImage(
+                source: source,
+                maxWidth: 1200,
+                maxHeight: 1200,
+                imageQuality: 85,
+              );
+              if (picked == null) return;
+              final file = File(picked.path);
+              setSheetState(() {
+                showcaseFile = file;
+                isScanningPhoto = true;
+                scanResult = null;
+              });
+
+              final result = await _aiService.validateCatImage(file);
+              setSheetState(() {
+                isScanningPhoto = false;
+                scanResult = result;
+              });
+            } catch (e) {
+              setSheetState(() => isScanningPhoto = false);
+              _snack('Error picking photo: $e');
+            }
           }
 
           final bottomPadding = MediaQuery.of(ctx).padding.bottom;
@@ -7984,7 +9622,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ),
                     const SizedBox(height: 14),
                     Text(
-                      'Adoption Contact Info (WhatsApp / Phone / IG)',
+                      'Adoption Contact Phone Number (Phone only)',
                       style: GoogleFonts.nunito(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w800,
@@ -7994,14 +9632,15 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     const SizedBox(height: 6),
                     TextField(
                       controller: contactCtrl,
+                      keyboardType: TextInputType.phone,
                       style: GoogleFonts.nunito(fontSize: 13, color: _navy),
                       decoration: InputDecoration(
-                        hintText: 'e.g. WhatsApp: +62 812-3456-7890 or @instagram',
+                        hintText: 'e.g. +62 812-3456-7890',
                         hintStyle: GoogleFonts.nunito(
                           fontSize: 12.5,
                           color: _navy.withValues(alpha: 0.4),
                         ),
-                        prefixIcon: const Icon(Icons.contact_phone_outlined, size: 18, color: Color(0xFF2E7D32)),
+                        prefixIcon: const Icon(Icons.phone_outlined, size: 18, color: Color(0xFF2E7D32)),
                         filled: true,
                         fillColor: _bgWhite,
                         contentPadding: const EdgeInsets.all(12),
@@ -8083,7 +9722,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ),
                     const SizedBox(height: 14),
                     Text(
-                      'Adoption Story & Personality Notes',
+                      'Adoption Story & Personality Notes (Required)',
                       style: GoogleFonts.nunito(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w800,
@@ -8166,7 +9805,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             top: 6,
                             right: 6,
                             child: GestureDetector(
-                              onTap: () => setSheetState(() => showcaseFile = null),
+                              onTap: () => setSheetState(() {
+                                showcaseFile = null;
+                                scanResult = null;
+                              }),
                               child: Container(
                                 padding: const EdgeInsets.all(4),
                                 decoration: const BoxDecoration(
@@ -8179,6 +9821,74 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           ),
                         ],
                       ),
+                      const SizedBox(height: 8),
+                      if (isScanningPhoto)
+                        Row(
+                          children: [
+                            const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color(0xFF2E7D32),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'AI verifying cat photo...',
+                              style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFF2E7D32),
+                              ),
+                            ),
+                          ],
+                        )
+                      else if (scanResult != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: scanResult!.isCat
+                                ? const Color(0xFF2E7D32).withValues(alpha: 0.1)
+                                : Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: scanResult!.isCat
+                                  ? const Color(0xFF2E7D32).withValues(alpha: 0.3)
+                                  : Colors.red.shade300,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                scanResult!.isCat
+                                    ? Icons.verified_rounded
+                                    : Icons.error_outline_rounded,
+                                size: 14,
+                                color: scanResult!.isCat
+                                    ? const Color(0xFF2E7D32)
+                                    : Colors.red.shade700,
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  scanResult!.isCat
+                                      ? 'Cat Verified (${(scanResult!.confidence * 100).toStringAsFixed(0)}%) 🐾'
+                                      : scanResult!.message,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: scanResult!.isCat
+                                        ? const Color(0xFF1B5E20)
+                                        : Colors.red.shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                     ] else ...[
                       Row(
                         children: [
@@ -8240,8 +9950,47 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         onPressed: isSubmitting
                             ? null
                             : () async {
+                                if (isSubmitting || !DoubleTapGuard.allow('open_adoption_${s.id}')) return;
+                                final facilityErr =
+                                    TextModerationService.validateFacilityName(
+                                        facilityCtrl.text,
+                                        label: 'Foster home name');
+                                if (facilityErr != null) {
+                                  DoubleTapGuard.reset('open_adoption_${s.id}');
+                                  _snack('⚠️ $facilityErr');
+                                  return;
+                                }
+                                final contactErr =
+                                    TextModerationService.validatePhoneNumber(
+                                        contactCtrl.text,
+                                        label: 'Adoption contact phone number');
+                                if (contactErr != null) {
+                                  DoubleTapGuard.reset('open_adoption_${s.id}');
+                                  _snack('⚠️ $contactErr');
+                                  return;
+                                }
+                                final storyErr =
+                                    TextModerationService.validateDescription(
+                                        noteCtrl.text,
+                                        fieldName: 'Adoption story');
+                                if (storyErr != null) {
+                                  DoubleTapGuard.reset('open_adoption_${s.id}');
+                                  _snack('⚠️ $storyErr');
+                                  return;
+                                }
                                 if (showcaseFile == null) {
+                                  DoubleTapGuard.reset('open_adoption_${s.id}');
                                   _snack('Please take or upload a showcase photo. It is mandatory for the Adoption Showcase profile.');
+                                  return;
+                                }
+                                if (isScanningPhoto) {
+                                  DoubleTapGuard.reset('open_adoption_${s.id}');
+                                  _snack('AI is still scanning the cat photo. Please wait a moment.');
+                                  return;
+                                }
+                                if (scanResult?.isCat != true) {
+                                  DoubleTapGuard.reset('open_adoption_${s.id}');
+                                  _snack(scanResult?.message ?? 'Please upload a photo of a real cat.');
                                   return;
                                 }
                                 setSheetState(() => isSubmitting = true);
@@ -8262,6 +10011,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                     _snack('🏡 Adoption Showcase Profile published! Report updated to Needs Home (+$earnedXp XP)');
                                   }
                                 } catch (e) {
+                                  DoubleTapGuard.reset('open_adoption_${s.id}');
                                   setSheetState(() => isSubmitting = false);
                                   _snack('Failed to list for adoption: $e');
                                 }
@@ -8300,7 +10050,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       return;
     }
     File? proofFile;
+    File? proofVideoFile;
     bool isSubmitting = false;
+    bool isScanningPhoto = false;
+    CatValidationResult? scanResult;
     final isRehome = outcomeAction == 'rehomed';
     final isSheltered = outcomeAction == 'sheltered';
     final noteCtrl = TextEditingController(
@@ -8331,14 +10084,50 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       builder: (sheetContext) => StatefulBuilder(
         builder: (ctx, setSheetState) {
           Future<void> pickPhoto(ImageSource source) async {
-            final picked = await _picker.pickImage(
-              source: source,
-              maxWidth: 1200,
-              maxHeight: 1200,
-              imageQuality: 85,
-            );
-            if (picked == null) return;
-            setSheetState(() => proofFile = File(picked.path));
+            try {
+              final picked = await _picker.pickImage(
+                source: source,
+                maxWidth: 1200,
+                maxHeight: 1200,
+                imageQuality: 85,
+              );
+              if (picked == null) return;
+              final file = File(picked.path);
+              setSheetState(() {
+                proofFile = file;
+                isScanningPhoto = true;
+                scanResult = null;
+              });
+
+              final result = await _aiService.validateCatImage(file);
+              setSheetState(() {
+                isScanningPhoto = false;
+                scanResult = result;
+              });
+            } catch (e) {
+              setSheetState(() => isScanningPhoto = false);
+              _snack('Error picking photo: $e');
+            }
+          }
+
+          Future<void> pickVideo(ImageSource source) async {
+            try {
+              final picked = await _picker.pickVideo(
+                source: source,
+                maxDuration: const Duration(minutes: 1),
+              );
+              if (picked == null) return;
+              final file = File(picked.path);
+              final bytes = await file.length();
+              if (bytes > 25 * 1024 * 1024) {
+                _snack(
+                    'Video is ${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB. Max allowed size is 25 MB.');
+                return;
+              }
+              setSheetState(() => proofVideoFile = file);
+            } catch (e) {
+              _snack('Error picking video: $e');
+            }
           }
 
           final bottomPadding = MediaQuery.of(ctx).padding.bottom;
@@ -8360,8 +10149,16 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               : (outcomeAction == 'returnedToSpot'
                   ? const Color(0xFF00897B)
                   : const Color(0xFF2E7D32));
-          final canSubmit = proofFile != null &&
-              (!isSheltered || shelterNameCtrl.text.trim().isNotEmpty);
+          final isOutcomeNoteValid = !isRehome ||
+              TextModerationService.validateDescription(noteCtrl.text,
+                      fieldName: 'Outcome note') ==
+                  null;
+          final canSubmit = !isSubmitting &&
+              proofFile != null &&
+              scanResult?.isCat == true &&
+              !isScanningPhoto &&
+              (!isSheltered || shelterNameCtrl.text.trim().isNotEmpty) &&
+              isOutcomeNoteValid;
 
           return Padding(
             padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
@@ -8634,26 +10431,51 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       const SizedBox(height: 14),
                     ],
                     Text(
-                      'Outcome Note / Details',
-                      style: GoogleFonts.nunito(fontSize: 13, fontWeight: FontWeight.w800, color: _navy),
+                      isRehome
+                          ? 'Outcome Note / Details (Required)'
+                          : 'Outcome Note / Details',
+                      style: GoogleFonts.nunito(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: _navy),
                     ),
                     const SizedBox(height: 6),
                     TextField(
                       controller: noteCtrl,
+                      onChanged: (_) => setSheetState(() {}),
                       maxLines: 2,
                       decoration: InputDecoration(
                         filled: true,
                         fillColor: _lavLight,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none),
                       ),
                     ),
+                    if (isRehome &&
+                        noteCtrl.text.isNotEmpty &&
+                        TextModerationService.validateDescription(noteCtrl.text,
+                                fieldName: 'Outcome note') !=
+                            null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        TextModerationService.validateDescription(
+                            noteCtrl.text,
+                            fieldName: 'Outcome note')!,
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     Text(
-                      'Outcome Photo Proof (Required)',
+                      'Outcome Photo Proof (Required - AI Checked)',
                       style: GoogleFonts.nunito(fontSize: 13, fontWeight: FontWeight.w800, color: _navy),
                     ),
                     const SizedBox(height: 8),
-                    if (proofFile != null)
+                    if (proofFile != null) ...[
                       Stack(
                         children: [
                           ClipRRect(
@@ -8664,7 +10486,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             top: 4,
                             right: 4,
                             child: GestureDetector(
-                              onTap: () => setSheetState(() => proofFile = null),
+                              onTap: () => setSheetState(() {
+                                proofFile = null;
+                                scanResult = null;
+                              }),
                               child: Container(
                                 padding: const EdgeInsets.all(4),
                                 decoration: const BoxDecoration(color: Colors.black54, shape: BoxShape.circle),
@@ -8673,8 +10498,76 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             ),
                           ),
                         ],
-                      )
-                    else
+                      ),
+                      const SizedBox(height: 8),
+                      if (isScanningPhoto)
+                        Row(
+                          children: [
+                            SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: primaryCol,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'AI verifying cat photo...',
+                              style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: primaryCol,
+                              ),
+                            ),
+                          ],
+                        )
+                      else if (scanResult != null)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: scanResult!.isCat
+                                ? const Color(0xFF2E7D32).withValues(alpha: 0.1)
+                                : Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: scanResult!.isCat
+                                  ? const Color(0xFF2E7D32).withValues(alpha: 0.3)
+                                  : Colors.red.shade300,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                scanResult!.isCat
+                                    ? Icons.verified_rounded
+                                    : Icons.error_outline_rounded,
+                                size: 14,
+                                color: scanResult!.isCat
+                                    ? const Color(0xFF2E7D32)
+                                    : Colors.red.shade700,
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  scanResult!.isCat
+                                      ? 'Cat Verified (${(scanResult!.confidence * 100).toStringAsFixed(0)}%) 🐾'
+                                      : scanResult!.message,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: scanResult!.isCat
+                                        ? const Color(0xFF1B5E20)
+                                        : Colors.red.shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ] else
                       Row(
                         children: [
                           Expanded(
@@ -8694,22 +10587,172 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           ),
                         ],
                       ),
+                    const SizedBox(height: 16),
+
+                    // Optional Video Section
+                    Row(
+                      children: [
+                        Text(
+                          'Celebration / Release Video Clip',
+                          style: GoogleFonts.nunito(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: _navy,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: primaryCol.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            'Optional',
+                            style: GoogleFonts.nunito(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w800,
+                              color: primaryCol,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Share an optional short video (up to 1 min) celebrating the cat\'s forever home or colony release.',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        color: _navy.withValues(alpha: 0.6),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    if (proofVideoFile != null)
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ReelVideoPlayer(
+                            videoFile: proofVideoFile,
+                            maxHeight: 280,
+                            autoPlay: true,
+                            isLooping: true,
+                            onRemove: () =>
+                                setSheetState(() => proofVideoFile = null),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            children: [
+                              const Icon(Icons.check_circle_rounded,
+                                  size: 14, color: Color(0xFF2E7D32)),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Reel attached • Tap ✕ to remove',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11,
+                                  color: const Color(0xFF2E7D32),
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      )
+                    else
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => pickVideo(ImageSource.camera),
+                              icon: Icon(Icons.videocam_outlined, size: 16, color: primaryCol),
+                              label: Text('Record Video',
+                                  style: GoogleFonts.nunito(
+                                      fontWeight: FontWeight.w800,
+                                      color: _navy,
+                                      fontSize: 12)),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => pickVideo(ImageSource.gallery),
+                              icon: const Icon(Icons.video_library_outlined, size: 16, color: _lavender),
+                              label: Text('Pick Video',
+                                  style: GoogleFonts.nunito(
+                                      fontWeight: FontWeight.w800,
+                                      color: _navy,
+                                      fontSize: 12)),
+                            ),
+                          ),
+                        ],
+                      ),
                     const SizedBox(height: 18),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: canSubmit ? primaryCol : Colors.grey.shade300,
+                          backgroundColor: canSubmit
+                              ? primaryCol
+                              : primaryCol.withValues(alpha: 0.7),
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(14)),
+                          elevation: canSubmit ? 2 : 0,
                         ),
-                        onPressed: (isSubmitting || !canSubmit)
+                        onPressed: isSubmitting
                             ? null
                             : () async {
-                                if (isSheltered && shelterNameCtrl.text.trim().isEmpty) {
-                                  _snack('Please enter the shelter or organization name.');
+                                if (isSubmitting || !DoubleTapGuard.allow('outcome_proof_${s.id}')) return;
+                                if (proofFile == null) {
+                                  DoubleTapGuard.reset('outcome_proof_${s.id}');
+                                  _snack(
+                                      '⚠️ Please upload or take a celebration photo with the cat.');
                                   return;
+                                }
+                                if (isScanningPhoto) {
+                                  DoubleTapGuard.reset('outcome_proof_${s.id}');
+                                  _snack(
+                                      '⏳ AI is verifying the photo, please wait a moment...');
+                                  return;
+                                }
+                                if (scanResult?.isCat != true) {
+                                  DoubleTapGuard.reset('outcome_proof_${s.id}');
+                                  _snack(
+                                      '⚠️ Photo verification failed: ${scanResult?.message ?? "Please upload a clear cat photo."}');
+                                  return;
+                                }
+                                if (isSheltered) {
+                                  final sErr =
+                                      TextModerationService.validateFacilityName(
+                                          shelterNameCtrl.text,
+                                          label: 'Shelter name');
+                                  if (sErr != null) {
+                                    DoubleTapGuard.reset('outcome_proof_${s.id}');
+                                    _snack('⚠️ $sErr');
+                                    return;
+                                  }
+                                }
+                                if (isRehome) {
+                                  final nErr =
+                                      TextModerationService.validateDescription(
+                                          noteCtrl.text,
+                                          fieldName: 'Outcome note');
+                                  if (nErr != null) {
+                                    DoubleTapGuard.reset('outcome_proof_${s.id}');
+                                    _snack('⚠️ $nErr');
+                                    return;
+                                  }
+                                } else if (noteCtrl.text.trim().isNotEmpty) {
+                                  final nErr =
+                                      TextModerationService.validateDescription(
+                                          noteCtrl.text,
+                                          fieldName: 'Outcome note');
+                                  if (nErr != null) {
+                                    DoubleTapGuard.reset('outcome_proof_${s.id}');
+                                    _snack('⚠️ $nErr');
+                                    return;
+                                  }
                                 }
                                 setSheetState(() => isSubmitting = true);
                                 try {
@@ -8731,6 +10774,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                             ? 'Rehomed with a loving family!'
                                             : (isSheltered ? 'Admitted to shelter' : 'Returned safely to spot')),
                                     proofPhotoFile: proofFile,
+                                    proofVideoFile: proofVideoFile,
                                     updatedLatitude: (isSheltered || outcomeAction == 'returnedToSpot')
                                         ? shelterLat
                                         : null,
@@ -8757,6 +10801,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                             : '🌿 Cat returned to spot as a protected Community Cat! +$earnedXp XP'));
                                   }
                                 } catch (e) {
+                                  DoubleTapGuard.reset('outcome_proof_${s.id}');
                                   setSheetState(() => isSubmitting = false);
                                   _snack('Failed to complete outcome: $e');
                                 }
@@ -10858,6 +12903,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           final col = _aColor(key);
           return GestureDetector(
             onTap: () {
+              if (_isActionSheetOpen) return;
+              if (!DoubleTapGuard.allow('action_tile_${key}_${s.id}')) return;
               if (isDeclinedTookIn) {
                 _snack(
                     'Your foster custody request for this cat was previously declined by the reporter.');
@@ -11186,7 +13233,6 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     final sid = s.id;
     final type = u['type'] ?? 'comment';
     final name = u['authorName'] ?? 'Anonymous';
-    final text = u['text'] ?? '';
     final action = u['action'] as String?;
     final isWay = type == 'onMyWay';
     final isWayCancelled = type == 'onMyWayCancelled';
@@ -11279,183 +13325,202 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-              Row(children: [
-                GestureDetector(
-                  onTap: () {
-                    final authorUid = u['authorId']?.toString() ?? '';
-                    if (!isAnon && authorUid.isNotEmpty) {
-                      _showRescuerTrustModal(authorUid, name);
-                    }
-                  },
-                  child: Row(
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(
+                    child: Wrap(
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: [
+                        GestureDetector(
+                          onTap: () {
+                            final authorUid = u['authorId']?.toString() ?? '';
+                            if (!isAnon && authorUid.isNotEmpty) {
+                              _showRescuerTrustModal(authorUid, name);
+                            }
+                          },
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(dName,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: GoogleFonts.nunito(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w800,
+                                        color: _navy)),
+                              ),
+                              if (!isAnon) ...[
+                                const SizedBox(width: 3),
+                                Icon(Icons.shield_outlined,
+                                    size: 12, color: _lavender),
+                              ],
+                            ],
+                          ),
+                        ),
+                        if (isMilestone)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color:
+                                    const Color(0xFFFFA000).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6)),
+                            child: Text(
+                                'Day ${u['milestoneDay'] ?? 1} Care Check-In',
+                                style: GoogleFonts.nunito(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: const Color(0xFFFFA000))),
+                          ),
+                        if (isAdoptionOpened)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color:
+                                    const Color(0xFFE65100).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6)),
+                            child: Text('Adoption Open 🏡',
+                                style: GoogleFonts.nunito(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: const Color(0xFFE65100))),
+                          ),
+                        if (isOutcomeResolved || isOutcomeRequest)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color:
+                                    const Color(0xFF2E7D32).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6)),
+                            child: Text(
+                                action == 'rehomed'
+                                    ? 'Permanently Rehomed 🏡'
+                                    : (action == 'sheltered'
+                                        ? 'Shelter Transfer 🏛️'
+                                        : 'Returned (TNR) 🌿'),
+                                style: GoogleFonts.nunito(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: const Color(0xFF2E7D32))),
+                          ),
+                        if (isCustodyRequest)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color:
+                                    const Color(0xFF673AB7).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6)),
+                            child: Text('Foster Request',
+                                style: GoogleFonts.nunito(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: const Color(0xFF673AB7))),
+                          ),
+                        if (isHandoverApproved)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color:
+                                    const Color(0xFF2E7D32).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6)),
+                            child: Text('Custody Transferred',
+                                style: GoogleFonts.nunito(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: const Color(0xFF2E7D32))),
+                          ),
+                        if (isAct && action != null)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color:
+                                    _aColor(action).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6)),
+                            child: Text(_aLabels[action] ?? action,
+                                style: GoogleFonts.nunito(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w800,
+                                    color: _aColor(action))),
+                          ),
+                        if (isWay)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: isTripCancelled
+                                    ? const Color(0xFF78909C).withValues(alpha: 0.12)
+                                    : _lavender.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6)),
+                            child: Text(
+                              isTripCancelled ? 'Trip Cancelled' : 'On My Way',
+                              style: GoogleFonts.nunito(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: isTripCancelled
+                                    ? const Color(0xFF78909C)
+                                    : _lavender,
+                              ),
+                            ),
+                          ),
+                        if (isWayCancelled)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                                color: const Color(0xFF78909C).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6)),
+                            child: Text(
+                              'Rescue Cancelled',
+                              style: GoogleFonts.nunito(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: const Color(0xFF78909C),
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text(dName,
+                      Text(_fmtTime(u['createdAt']),
                           style: GoogleFonts.nunito(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                              color: _navy)),
-                      if (!isAnon) ...[
-                        const SizedBox(width: 3),
-                        Icon(Icons.shield_outlined,
-                            size: 12, color: _lavender),
-                      ],
+                              fontSize: 10,
+                              color: _navy.withValues(alpha: 0.4),
+                              fontWeight: FontWeight.w600)),
+                      if (isEdited && !isDeleted)
+                        Padding(
+                          padding: const EdgeInsets.only(left: 4),
+                          child: Text('(edited)',
+                              style: GoogleFonts.nunito(
+                                  fontSize: 10,
+                                  fontStyle: FontStyle.italic,
+                                  color: _navy.withValues(alpha: 0.35))),
+                        ),
+                      if (!isDeleted && !isWayCancelled)
+                        GestureDetector(
+                          onTap: () => _showCommentMenu(u, s),
+                          child: Padding(
+                            padding: const EdgeInsets.only(left: 4),
+                            child: Icon(Icons.more_horiz,
+                                size: 16,
+                                color: _navy.withValues(alpha: 0.4)),
+                          ),
+                        ),
                     ],
                   ),
-                ),
-                const SizedBox(width: 6),
-                if (isMilestone)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                        color:
-                            const Color(0xFFFFA000).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6)),
-                    child: Text(
-                        'Day ${u['milestoneDay'] ?? 1} Care Check-In',
-                        style: GoogleFonts.nunito(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFFFFA000))),
-                  ),
-                if (isAdoptionOpened)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                        color:
-                            const Color(0xFFE65100).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6)),
-                    child: Text('Adoption Open 🏡',
-                        style: GoogleFonts.nunito(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFFE65100))),
-                  ),
-                if (isOutcomeResolved || isOutcomeRequest)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                        color:
-                            const Color(0xFF2E7D32).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6)),
-                    child: Text(
-                        action == 'rehomed'
-                            ? 'Permanently Rehomed 🏡'
-                            : (action == 'sheltered'
-                                ? 'Shelter Transfer 🏛️'
-                                : 'Returned (TNR) 🌿'),
-                        style: GoogleFonts.nunito(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFF2E7D32))),
-                  ),
-                if (isCustodyRequest)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                        color:
-                            const Color(0xFF673AB7).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6)),
-                    child: Text('Foster Request',
-                        style: GoogleFonts.nunito(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFF673AB7))),
-                  ),
-                if (isHandoverApproved)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                        color:
-                            const Color(0xFF2E7D32).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6)),
-                    child: Text('Custody Transferred',
-                        style: GoogleFonts.nunito(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFF2E7D32))),
-                  ),
-                if (isAct && action != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                        color:
-                            _aColor(action).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6)),
-                    child: Text(_aLabels[action] ?? action,
-                        style: GoogleFonts.nunito(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: _aColor(action))),
-                  ),
-                if (isWay)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                        color: isTripCancelled
-                            ? const Color(0xFF78909C).withValues(alpha: 0.12)
-                            : _lavender.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6)),
-                    child: Text(
-                      isTripCancelled ? 'Trip Cancelled' : 'On My Way',
-                      style: GoogleFonts.nunito(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        color: isTripCancelled
-                            ? const Color(0xFF78909C)
-                            : _lavender,
-                      ),
-                    ),
-                  ),
-                if (isWayCancelled)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                        color: const Color(0xFF78909C).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(6)),
-                    child: Text(
-                      'Rescue Cancelled',
-                      style: GoogleFonts.nunito(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        color: const Color(0xFF78909C),
-                      ),
-                    ),
-                  ),
-                const Spacer(),
-                Text(_fmtTime(u['createdAt']),
-                    style: GoogleFonts.nunito(
-                        fontSize: 10,
-                        color: _navy.withValues(alpha: 0.4),
-                        fontWeight: FontWeight.w600)),
-                if (isEdited && !isDeleted)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4),
-                    child: Text('(edited)',
-                        style: GoogleFonts.nunito(
-                            fontSize: 10,
-                            fontStyle: FontStyle.italic,
-                            color: _navy.withValues(alpha: 0.35))),
-                  ),
-                if (!isDeleted && !isWayCancelled)
-                  GestureDetector(
-                    onTap: () => _showCommentMenu(u, sid),
-                    child: Padding(
-                      padding: const EdgeInsets.only(left: 6),
-                      child: Icon(Icons.more_horiz,
-                          size: 16,
-                          color: _navy.withValues(alpha: 0.4)),
-                    ),
-                  ),
-              ]),
+                ],
+              ),
               const SizedBox(height: 2),
               if (isDeleted)
                 Text('(comment deleted)',
@@ -11476,164 +13541,169 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 )
               else if (isWayCancelled)
                 Text(
-                  '$dName $text',
+                  '$dName cancelled the rescue.',
                   style: GoogleFonts.nunito(
                     fontSize: 13,
                     color: _navy.withValues(alpha: 0.65),
                     fontWeight: FontWeight.w600,
                   ),
                 )
-              else if (isAdoptionOpened)
-                Container(
-                  margin: const EdgeInsets.only(top: 2),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE65100).withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: const Color(0xFFE65100).withValues(alpha: 0.25),
-                      width: 1,
-                    ),
-                  ),
-                  child: RichText(
-                    text: TextSpan(
-                      style: GoogleFonts.nunito(
-                          fontSize: 13,
-                          color: const Color(0xFFBF360C),
-                          fontWeight: FontWeight.w600,
-                          height: 1.4),
+              else ...[
+                InkWell(
+                  onTap: () => _showUpdateDetailsModal(u, s),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        TextSpan(
-                            text: '$dName ',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFFBF360C))),
-                        TextSpan(
-                            text: text.isNotEmpty
-                                ? text
-                                : 'completed foster rehabilitation and officially opened this cat for permanent adoption! 🏡🐾' +
-                                    (u['customNote'] != null &&
-                                            u['customNote'].toString().isNotEmpty
-                                        ? ' "${u['customNote']}"'
-                                        : '')),
-                      ],
-                    ),
-                  ),
-                )
-              else if (isOutcomeResolved || isOutcomeRequest)
-                Container(
-                  margin: const EdgeInsets.only(top: 2),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: const Color(0xFF2E7D32).withValues(alpha: 0.25),
-                      width: 1,
-                    ),
-                  ),
-                  child: RichText(
-                    text: TextSpan(
-                      style: GoogleFonts.nunito(
-                          fontSize: 13,
-                          color: const Color(0xFF1B5E20),
-                          fontWeight: FontWeight.w600,
-                          height: 1.4),
-                      children: [
-                        TextSpan(
-                            text: '$dName ',
-                            style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                color: Color(0xFF1B5E20))),
-                        TextSpan(
-                            text: text.isNotEmpty
-                                ? text
-                                : ((action == 'rehomed'
-                                        ? 'successfully rehomed this cat with a loving forever family! 🏡🎉'
-                                        : (action == 'sheltered'
-                                            ? 'safely transferred this cat to an animal shelter partner! 🏛️🐾'
-                                            : 'completed recovery care and safely returned this cat to its territory! 🌿🐾')) +
-                                    (u['customNote'] != null &&
-                                            u['customNote'].toString().isNotEmpty
-                                        ? ' "${u['customNote']}"'
-                                        : ''))),
-                      ],
-                    ),
-                  ),
-                )
-              else if (isAct || isWay)
-                RichText(
-                    text: TextSpan(
-                  style: GoogleFonts.nunito(
-                      fontSize: 13,
-                      color: _navy.withValues(alpha: 0.75),
-                      fontWeight: FontWeight.w600,
-                      height: 1.4),
-                  children: [
-                    TextSpan(
-                        text: '$dName ',
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w700)),
-                    TextSpan(text: text),
-                  ],
-                ))
-              else
-                Text(text,
-                    style: GoogleFonts.nunito(
-                        fontSize: 13,
-                        color: _navy.withValues(alpha: 0.75),
-                        fontWeight: FontWeight.w600,
-                        height: 1.4)),
-              if (u['proofPhotoUrl'] != null &&
-                  u['proofPhotoUrl'].toString().isNotEmpty) ...[
-                const SizedBox(height: 8),
-                GestureDetector(
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => _AllPhotosScreen(
-                          photoUrls: [u['proofPhotoUrl'].toString()]),
-                    ),
-                  ),
-                  child: Stack(
-                    children: [
-                      PawImage(
-                        url: u['proofPhotoUrl'].toString(),
-                        width: 140,
-                        height: 100,
-                        fit: BoxFit.cover,
-                        borderRadius: BorderRadius.circular(12),
-                        placeholder: const SizedBox.shrink(),
-                      ),
-                      Positioned(
-                        bottom: 6,
-                        left: 6,
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.7),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
+                        RichText(
+                          text: TextSpan(
+                            style: GoogleFonts.nunito(
+                                fontSize: 13,
+                                color: (isOutcomeResolved || isOutcomeRequest)
+                                    ? const Color(0xFF1B5E20)
+                                    : (isAdoptionOpened
+                                        ? const Color(0xFFBF360C)
+                                        : _navy.withValues(alpha: 0.8)),
+                                fontWeight: FontWeight.w600,
+                                height: 1.4),
                             children: [
-                              const Icon(Icons.verified,
-                                  size: 11, color: Color(0xFF7BBF5E)),
-                              const SizedBox(width: 4),
-                              Text(
-                                'Proof Photo',
-                                style: GoogleFonts.nunito(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.w800,
-                                  color: Colors.white,
-                                ),
+                              if (type != 'comment')
+                                TextSpan(
+                                    text: '$dName ',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w800)),
+                              TextSpan(
+                                text: _getCleanSummaryText(u),
                               ),
                             ],
                           ),
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: _lavLight.withValues(alpha: 0.7),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: _lavender.withValues(alpha: 0.28),
+                              width: 1,
+                            ),
+                          ),
+                          child: Wrap(
+                            spacing: 5,
+                            runSpacing: 4,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.info_outline_rounded,
+                                      size: 13, color: _lavender),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    'Tap to view full details',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: _navy,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              if (_getCustomNote(u) != null &&
+                                  _getCustomNote(u)!.isNotEmpty) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 5, vertical: 1.5),
+                                  decoration: BoxDecoration(
+                                    color: _lavender.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.edit_note_rounded,
+                                          size: 11, color: _lavender),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        'Note',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: _lavender,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              if (u['proofPhotoUrl'] != null &&
+                                  u['proofPhotoUrl'].toString().isNotEmpty) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 5, vertical: 1.5),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF2E7D32)
+                                        .withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.photo_camera_rounded,
+                                          size: 10, color: Color(0xFF2E7D32)),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        'Photo',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: const Color(0xFF2E7D32),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              if (u['proofVideoUrl'] != null &&
+                                  u['proofVideoUrl'].toString().isNotEmpty) ...[
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 5, vertical: 1.5),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF673AB7)
+                                        .withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.videocam_rounded,
+                                          size: 11, color: Color(0xFF673AB7)),
+                                      const SizedBox(width: 2),
+                                      Text(
+                                        'Video',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.w800,
+                                          color: const Color(0xFF673AB7),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                              Icon(Icons.chevron_right_rounded,
+                                  size: 14,
+                                  color: _navy.withValues(alpha: 0.4)),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -12008,7 +14078,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                     if (!rDeleted)
                                       GestureDetector(
                                         onTap: () =>
-                                            _showCommentMenu(r, sid),
+                                            _showCommentMenu(r, s),
                                         child: Padding(
                                           padding:
                                               const EdgeInsets.only(
@@ -12342,10 +14412,23 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14))),
                     onPressed: () async {
+                      final titleErr =
+                          TextModerationService.validateReportTitle(tc.text);
+                      if (titleErr != null) {
+                        _snack('⚠️ $titleErr');
+                        return;
+                      }
+                      final descErr =
+                          TextModerationService.validateDescription(dc.text,
+                              fieldName: 'Description');
+                      if (descErr != null) {
+                        _snack('⚠️ $descErr');
+                        return;
+                      }
                       await FirebaseService.instance.updateSighting(
                           s.id,
-                          title: tc.text,
-                          description: dc.text);
+                          title: tc.text.trim(),
+                          description: dc.text.trim());
                       if (mounted) {
                         Navigator.pop(context);
                         _snack('Report updated!');
