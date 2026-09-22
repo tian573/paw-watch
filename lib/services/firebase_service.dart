@@ -1816,6 +1816,77 @@ class FirebaseService {
     await batch.commit();
   }
 
+  /// Delete multiple coordination chat threads and their messages
+  Future<void> deleteMultipleChatThreads(List<String> chatIds) async {
+    for (final chatId in chatIds) {
+      await deleteChatThread(chatId);
+    }
+  }
+
+  /// Edit a coordination chat message text
+  Future<void> editChatMessage({
+    required String chatId,
+    required String messageId,
+    required String newText,
+  }) async {
+    final chatDocRef = _firestore.collection('coordinationChats').doc(chatId);
+    final msgDocRef = chatDocRef.collection('messages').doc(messageId);
+
+    await msgDocRef.update({
+      'text': newText.trim(),
+      'isEdited': true,
+      'editedAt': FieldValue.serverTimestamp(),
+    });
+
+    try {
+      final latestMsgQuery = await chatDocRef
+          .collection('messages')
+          .orderBy('createdAt', descending: true)
+          .limit(1)
+          .get();
+      if (latestMsgQuery.docs.isNotEmpty &&
+          latestMsgQuery.docs.first.id == messageId) {
+        await chatDocRef.update({
+          'lastMessage': newText.trim(),
+          'lastUpdatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      debugPrint('Sync lastMessage after edit notice: $e');
+    }
+  }
+
+  /// Mark a single coordination chat message as deleted
+  Future<void> deleteChatMessage({
+    required String chatId,
+    required String messageId,
+  }) async {
+    final chatDocRef = _firestore.collection('coordinationChats').doc(chatId);
+    await chatDocRef.collection('messages').doc(messageId).update({
+      'isDeleted': true,
+      'text': 'This message was deleted',
+      'photoUrl': FieldValue.delete(),
+      'deletedAt': FieldValue.serverTimestamp(),
+    });
+
+    try {
+      final latestMsgQuery = await chatDocRef
+          .collection('messages')
+          .orderBy('createdAt', descending: true)
+          .limit(1)
+          .get();
+      if (latestMsgQuery.docs.isNotEmpty &&
+          latestMsgQuery.docs.first.id == messageId) {
+        await chatDocRef.update({
+          'lastMessage': '🚫 This message was deleted',
+          'lastUpdatedAt': FieldValue.serverTimestamp(),
+        });
+      }
+    } catch (e) {
+      debugPrint('Sync lastMessage after delete notice: $e');
+    }
+  }
+
   /// Block a user in the chat thread
   Future<void> blockUserInChat({
     required String chatId,
@@ -1875,6 +1946,9 @@ class FirebaseService {
     String? sightingTitle,
     String? sightingPhoto,
     bool isSystemMessage = false,
+    String? replyToId,
+    String? replyToSenderName,
+    String? replyToText,
   }) async {
     final user = _auth.currentUser;
     if (user == null && !isSystemMessage) return;
@@ -1934,14 +2008,19 @@ class FirebaseService {
     await chatDocRef.set(metadata, SetOptions(merge: true));
 
     // Add message
-    await chatDocRef.collection('messages').add({
+    final msgData = <String, dynamic>{
       'senderId': senderId,
       'senderName': senderName,
       'text': text.trim(),
       'createdAt': FieldValue.serverTimestamp(),
       'photoUrl': photoUrl,
       'isSystemMessage': isSystemMessage,
-    });
+    };
+    if (replyToId != null) msgData['replyToId'] = replyToId;
+    if (replyToSenderName != null) msgData['replyToSenderName'] = replyToSenderName;
+    if (replyToText != null) msgData['replyToText'] = replyToText;
+
+    await chatDocRef.collection('messages').add(msgData);
   }
 
   /// Mark a chat thread as read for a given user

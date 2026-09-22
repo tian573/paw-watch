@@ -1,0 +1,358 @@
+
+<style>
+  .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0}
+  .sec-title{font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:0.6px;color:var(--color-text-secondary);margin:0 0 10px}
+  .card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:12px 14px;margin-bottom:8px}
+  .row{display:flex;align-items:flex-start;gap:10px}
+  .tag{font-size:11px;padding:2px 7px;border-radius:99px;white-space:nowrap}
+  .t-coral{background:#FAECE7;color:#993C1D}
+  .t-amber{background:#FAEEDA;color:#854F0B}
+  .t-blue{background:#E6F1FB;color:#185FA5}
+  .t-teal{background:#E1F5EE;color:#0F6E56}
+  .t-purple{background:#EEEDFE;color:#534AB7}
+  .t-gray{background:var(--color-background-secondary);color:var(--color-text-secondary)}
+  .sz{font-size:12px;font-weight:500;padding:2px 8px;border-radius:4px;min-width:28px;text-align:center}
+  .xs{background:#E1F5EE;color:#085041}
+  .s{background:#E6F1FB;color:#0C447C}
+  .m{background:#EEEDFE;color:#3C3489}
+  .l{background:#FAEEDA;color:#633806}
+  .xl{background:#FAECE7;color:#712B13}
+  .story-id{font-size:11px;color:var(--color-text-tertiary);font-family:monospace;margin:0 0 2px}
+  .story-text{font-size:13px;color:var(--color-text-primary);margin:0 0 6px;line-height:1.5}
+  .ac{font-size:12px;color:var(--color-text-secondary);border-left:2px solid var(--color-border-tertiary);padding-left:8px;margin:0 0 6px;line-height:1.7}
+  .footer{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .rank{font-size:12px;font-weight:500;color:var(--color-text-tertiary);min-width:22px}
+  .epic-pill{font-size:11px;padding:1px 8px;border-radius:99px;font-weight:500}
+  .divider{border:none;border-top:1px dashed var(--color-border-tertiary);margin:20px 0}
+  .sprint-box{border:1.5px solid #1D9E75;border-radius:var(--border-radius-lg);padding:14px;margin-bottom:8px}
+  .sprint-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px}
+  .task-row{display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid var(--color-border-tertiary)}
+  .task-row:last-child{border-bottom:none}
+  .task-name{font-size:13px;color:var(--color-text-primary);flex:1}
+  .task-sub{font-size:12px;color:var(--color-text-secondary)}
+  .stat-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-bottom:20px}
+  .stat{background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:10px 12px;text-align:center}
+  .stat-num{font-size:20px;font-weight:500;color:#0F6E56}
+  .stat-lbl{font-size:11px;color:var(--color-text-secondary);margin-top:2px}
+</style>
+
+<h2 class="sr-only">PawWatch complete Scrum plan including prioritized product backlog, sprint backlog, and effort estimates</h2>
+
+<div style="padding:1rem 0">
+
+  <p class="sec-title">Legend</p>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:20px">
+    <span class="tag t-coral">P1 — critical</span>
+    <span class="tag t-amber">P2 — high</span>
+    <span class="tag t-blue">P3 — medium</span>
+    <span class="tag t-gray">P4 — nice to have</span>
+    <span class="sz xs">XS</span><span class="sz s">S</span><span class="sz m">M</span><span class="sz l">L</span><span class="sz xl">XL</span>
+  </div>
+
+  <p class="sec-title" style="margin-bottom:4px">Prioritized product backlog</p>
+  <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px">Ranked by business value. Items in Sprint 1 are marked ↓</p>
+
+  <div class="card">
+    <p style="font-size:12px;font-weight:500;color:#993C1D;margin:0 0 10px">P1 — Critical (must ship in v1)</p>
+
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row" style="margin-bottom:4px">
+        <span class="rank">01</span>
+        <div style="flex:1">
+          <p class="story-id">PW-001 · Epic: Auth</p>
+          <p class="story-text">User registration with email &amp; password</p>
+          <p class="ac">✓ Register with email + password<br>✓ Display name set on signup<br>✓ Firestore user doc created<br>✓ Error on duplicate email</p>
+          <div class="footer"><span class="tag t-coral">P1</span><span class="sz s">S</span><span class="tag t-teal">Sprint 1 ↓</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row" style="margin-bottom:4px">
+        <span class="rank">02</span>
+        <div style="flex:1">
+          <p class="story-id">PW-002 · Epic: Auth</p>
+          <p class="story-text">User login and persistent session</p>
+          <p class="ac">✓ Login with email + password<br>✓ Error on wrong credentials<br>✓ Session persists on restart</p>
+          <div class="footer"><span class="tag t-coral">P1</span><span class="sz s">S</span><span class="tag t-teal">Sprint 1 ↓</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row" style="margin-bottom:4px">
+        <span class="rank">03</span>
+        <div style="flex:1">
+          <p class="story-id">PW-003 · Epic: Sighting</p>
+          <p class="story-text">Report a sighting with photo, description, GPS location</p>
+          <p class="ac">✓ Form: photo + description + GPS<br>✓ Auto-fill location from device<br>✓ Manual pin adjustment on map<br>✓ Saved to Firestore as "open"<br>✓ Reporter earns +20 XP</p>
+          <div class="footer"><span class="tag t-coral">P1</span><span class="sz l">L</span><span class="tag t-teal">Sprint 1 ↓</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row" style="margin-bottom:4px">
+        <span class="rank">04</span>
+        <div style="flex:1">
+          <p class="story-id">PW-008 · Epic: Map</p>
+          <p class="story-text">Live map showing nearby sightings</p>
+          <p class="ac">✓ Color-coded pins by status<br>✓ Tap pin to open detail<br>✓ Centers on user location<br>✓ Real-time Firestore listener</p>
+          <div class="footer"><span class="tag t-coral">P1</span><span class="sz l">L</span><span class="tag t-teal">Sprint 1 ↓</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row" style="margin-bottom:4px">
+        <span class="rank">05</span>
+        <div style="flex:1">
+          <p class="story-id">PW-005 · Epic: Actions</p>
+          <p class="story-text">Log a "fed" action on an open sighting</p>
+          <p class="ac">✓ "Fed" action on any open sighting<br>✓ Optional note + photo<br>✓ Status updates to "fed"<br>✓ User earns +30 XP<br>✓ Appears in activity log</p>
+          <div class="footer"><span class="tag t-coral">P1</span><span class="sz m">M</span><span class="tag t-teal">Sprint 1 ↓</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row" style="margin-bottom:4px">
+        <span class="rank">06</span>
+        <div style="flex:1">
+          <p class="story-id">PW-006 · Epic: Actions</p>
+          <p class="story-text">Log full rescue actions (took in, vet, sheltered, rehomed)</p>
+          <p class="ac">✓ 5 rescue action types selectable<br>✓ Correct XP per type awarded<br>✓ Sighting status updates<br>✓ Resolved pins visually distinct</p>
+          <div class="footer"><span class="tag t-coral">P1</span><span class="sz l">L</span><span class="tag t-teal">Sprint 1 ↓</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row" style="margin-bottom:4px">
+        <span class="rank">07</span>
+        <div style="flex:1">
+          <p class="story-id">PW-009 · Epic: Feed</p>
+          <p class="story-text">Community feed of recent sightings</p>
+          <p class="ac">✓ Sorted by recency<br>✓ Card shows photo, badge, distance, time<br>✓ Pull-to-refresh<br>✓ Tap opens sighting detail</p>
+          <div class="footer"><span class="tag t-coral">P1</span><span class="sz m">M</span><span class="tag t-teal">Sprint 1 ↓</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="row" style="margin-bottom:4px">
+        <span class="rank">08</span>
+        <div style="flex:1">
+          <p class="story-id">PW-014 · Epic: Profile</p>
+          <p class="story-text">View my profile with stats and level</p>
+          <p class="ac">✓ Shows name, level, XP bar<br>✓ Shows rescue + feed + report counts<br>✓ Shows earned and locked badges</p>
+          <div class="footer"><span class="tag t-coral">P1</span><span class="sz m">M</span><span class="tag t-teal">Sprint 1 ↓</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:8px">
+    <p style="font-size:12px;font-weight:500;color:#854F0B;margin:0 0 10px">P2 — High (Sprint 2)</p>
+
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row">
+        <span class="rank">09</span>
+        <div style="flex:1">
+          <p class="story-id">PW-010 · Epic: Gamification</p>
+          <p class="story-text">Earn XP for every action with animated XP bar</p>
+          <p class="ac">✓ XP awarded per action type<br>✓ Real-time update on profile<br>✓ XP bar animates on earn</p>
+          <div class="footer"><span class="tag t-amber">P2</span><span class="sz m">M</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row">
+        <span class="rank">10</span>
+        <div style="flex:1">
+          <p class="story-id">PW-011 · Epic: Gamification</p>
+          <p class="story-text">Level up as XP accumulates with title progression</p>
+          <p class="ac">✓ Level thresholds defined<br>✓ Title updates per tier<br>✓ Level-up celebration UI</p>
+          <div class="footer"><span class="tag t-amber">P2</span><span class="sz m">M</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row">
+        <span class="rank">11</span>
+        <div style="flex:1">
+          <p class="story-id">PW-004 · Epic: Sighting</p>
+          <p class="story-text">Mark a sighting as urgent for immediate visibility</p>
+          <p class="ac">✓ Urgency toggle on report form<br>✓ Urgent badge on feed + map<br>✓ Urgent sightings sort to top</p>
+          <div class="footer"><span class="tag t-amber">P2</span><span class="sz s">S</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="row">
+        <span class="rank">12</span>
+        <div style="flex:1">
+          <p class="story-id">PW-007 · Epic: Actions</p>
+          <p class="story-text">Mark a sighting as "still here" to keep it active</p>
+          <p class="ac">✓ Action available on open sightings<br>✓ Updates lastActionAt<br>✓ Earns +10 XP, bumps recency</p>
+          <div class="footer"><span class="tag t-amber">P2</span><span class="sz xs">XS</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:8px">
+    <p style="font-size:12px;font-weight:500;color:#185FA5;margin:0 0 10px">P3 — Medium (Sprint 3)</p>
+
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row">
+        <span class="rank">13</span>
+        <div style="flex:1">
+          <p class="story-id">PW-012 · Epic: Gamification</p>
+          <p class="story-text">Earn milestone badges visible on profile</p>
+          <p class="ac">✓ Auto-awarded on trigger<br>✓ Locked badges show grayed out<br>✓ In-app notification on earn</p>
+          <div class="footer"><span class="tag t-blue">P3</span><span class="sz l">L</span></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="row">
+        <span class="rank">14</span>
+        <div style="flex:1">
+          <p class="story-id">PW-015 · Epic: Feed</p>
+          <p class="story-text">Filter feed by status (open, fed, rescued)</p>
+          <p class="ac">✓ Filter chips on feed screen<br>✓ Map pins also filter<br>✓ Selection persists per session</p>
+          <div class="footer"><span class="tag t-blue">P3</span><span class="sz s">S</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:8px">
+    <p style="font-size:12px;font-weight:500;color:var(--color-text-secondary);margin:0 0 10px">P4 — Nice to have (post-launch)</p>
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row">
+        <span class="rank">15</span>
+        <div style="flex:1">
+          <p class="story-id">PW-013 · Epic: Gamification</p>
+          <p class="story-text">City leaderboard showing top rescuers weekly</p>
+          <div class="footer"><span class="tag t-gray">P4</span><span class="sz l">L</span></div>
+        </div>
+      </div>
+    </div>
+    <div style="border-bottom:0.5px solid var(--color-border-tertiary);padding-bottom:10px;margin-bottom:10px">
+      <div class="row">
+        <span class="rank">16</span>
+        <div style="flex:1">
+          <p class="story-id">PW-016 · Epic: Social</p>
+          <p class="story-text">Comment on a sighting to coordinate with others</p>
+          <div class="footer"><span class="tag t-gray">P4</span><span class="sz l">L</span></div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="row">
+        <span class="rank">17</span>
+        <div style="flex:1">
+          <p class="story-id">PW-017 · Epic: Notifications</p>
+          <p class="story-text">Push notification when a new sighting appears nearby</p>
+          <div class="footer"><span class="tag t-gray">P4</span><span class="sz xl">XL</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <p class="sec-title">Sprint 1 backlog — "working core"</p>
+  <p style="font-size:12px;color:var(--color-text-secondary);margin:0 0 12px">Goal: by end of Sprint 1, a user can sign up, see the map, report a sighting, and take an action on it.</p>
+
+  <div class="stat-row">
+    <div class="stat"><div class="stat-num">8</div><div class="stat-lbl">stories</div></div>
+    <div class="stat"><div class="stat-num">2 wks</div><div class="stat-lbl">sprint duration</div></div>
+    <div class="stat"><div class="stat-num">34</div><div class="stat-lbl">story points</div></div>
+    <div class="stat"><div class="stat-num">5</div><div class="stat-lbl">epics covered</div></div>
+  </div>
+
+  <div class="sprint-box">
+    <div class="sprint-header">
+      <span style="font-size:13px;font-weight:500;color:#0F6E56">Sprint 1 tasks</span>
+      <span style="font-size:12px;color:var(--color-text-secondary)">T-shirt · SP</span>
+    </div>
+
+    <p style="font-size:11px;font-weight:500;color:var(--color-text-tertiary);margin:0 0 6px;text-transform:uppercase;letter-spacing:0.5px">Auth</p>
+    <div class="task-row">
+      <div style="flex:1"><p class="task-name">PW-001 User registration</p><p class="task-sub">Firebase Auth + Firestore user doc</p></div>
+      <span class="sz s">S</span><span class="tag t-gray" style="margin-left:4px">3 SP</span>
+    </div>
+    <div class="task-row">
+      <div style="flex:1"><p class="task-name">PW-002 User login + session</p><p class="task-sub">Persistent auth state via Firebase</p></div>
+      <span class="sz s">S</span><span class="tag t-gray" style="margin-left:4px">2 SP</span>
+    </div>
+
+    <p style="font-size:11px;font-weight:500;color:var(--color-text-tertiary);margin:14px 0 6px;text-transform:uppercase;letter-spacing:0.5px">Map</p>
+    <div class="task-row">
+      <div style="flex:1"><p class="task-name">PW-008 Live map screen</p><p class="task-sub">google_maps_flutter + Firestore real-time pins</p></div>
+      <span class="sz l">L</span><span class="tag t-gray" style="margin-left:4px">5 SP</span>
+    </div>
+
+    <p style="font-size:11px;font-weight:500;color:var(--color-text-tertiary);margin:14px 0 6px;text-transform:uppercase;letter-spacing:0.5px">Sighting</p>
+    <div class="task-row">
+      <div style="flex:1"><p class="task-name">PW-003 Report sighting form</p><p class="task-sub">image_picker + geolocator + Firestore write</p></div>
+      <span class="sz l">L</span><span class="tag t-gray" style="margin-left:4px">5 SP</span>
+    </div>
+
+    <p style="font-size:11px;font-weight:500;color:var(--color-text-tertiary);margin:14px 0 6px;text-transform:uppercase;letter-spacing:0.5px">Actions</p>
+    <div class="task-row">
+      <div style="flex:1"><p class="task-name">PW-005 "Fed" action</p><p class="task-sub">Action sheet + Firestore subcollection write</p></div>
+      <span class="sz m">M</span><span class="tag t-gray" style="margin-left:4px">3 SP</span>
+    </div>
+    <div class="task-row">
+      <div style="flex:1"><p class="task-name">PW-006 Full rescue actions</p><p class="task-sub">5 action types + XP logic + status update</p></div>
+      <span class="sz l">L</span><span class="tag t-gray" style="margin-left:4px">5 SP</span>
+    </div>
+
+    <p style="font-size:11px;font-weight:500;color:var(--color-text-tertiary);margin:14px 0 6px;text-transform:uppercase;letter-spacing:0.5px">Feed</p>
+    <div class="task-row">
+      <div style="flex:1"><p class="task-name">PW-009 Community feed</p><p class="task-sub">Firestore query + sighting cards + pull-to-refresh</p></div>
+      <span class="sz m">M</span><span class="tag t-gray" style="margin-left:4px">3 SP</span>
+    </div>
+
+    <p style="font-size:11px;font-weight:500;color:var(--color-text-tertiary);margin:14px 0 6px;text-transform:uppercase;letter-spacing:0.5px">Profile</p>
+    <div class="task-row">
+      <div style="flex:1"><p class="task-name">PW-014 Profile screen</p><p class="task-sub">Stats, XP bar, level, badge display</p></div>
+      <span class="sz m">M</span><span class="tag t-gray" style="margin-left:4px">3 SP</span>
+    </div>
+
+    <div style="margin-top:14px;padding-top:12px;border-top:0.5px solid var(--color-border-tertiary);display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:12px;color:var(--color-text-secondary)">Sprint 1 total</span>
+      <span style="font-size:13px;font-weight:500;color:#0F6E56">34 SP &nbsp;·&nbsp; 2 weeks</span>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <p class="sec-title">Sizing reference</p>
+  <div class="card">
+    <div class="task-row" style="padding:6px 0">
+      <span class="sz xs">XS</span><p class="task-name" style="margin-left:8px">Under 2 hrs — trivial change, one file</p>
+    </div>
+    <div class="task-row" style="padding:6px 0">
+      <span class="sz s">S</span><p class="task-name" style="margin-left:8px">Half a day — straightforward, well-understood</p>
+    </div>
+    <div class="task-row" style="padding:6px 0">
+      <span class="sz m">M</span><p class="task-name" style="margin-left:8px">1–2 days — some complexity, multiple files</p>
+    </div>
+    <div class="task-row" style="padding:6px 0">
+      <span class="sz l">L</span><p class="task-name" style="margin-left:8px">3–4 days — significant work, external plugin</p>
+    </div>
+    <div class="task-row" style="padding:6px 0;border-bottom:none">
+      <span class="sz xl">XL</span><p class="task-name" style="margin-left:8px">5+ days — complex, break into smaller stories</p>
+    </div>
+  </div>
+
+</div>

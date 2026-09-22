@@ -326,6 +326,9 @@ class _HomeScreenState extends State<HomeScreen>
           child: StreamBuilder<List<Sighting>>(
             stream: FirebaseService.instance.streamSightings(),
             builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                debugPrint('⚠️ Firestore streamSightings error: ${snapshot.error}');
+              }
               final allSightings = snapshot.data ?? [];
               final currentUid = FirebaseAuth.instance.currentUser?.uid;
               final filtered = _filterAndSortSightings(allSightings, currentUid);

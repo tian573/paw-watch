@@ -602,6 +602,9 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     return StreamBuilder<List<Sighting>>(
       stream: FirebaseService.instance.streamSightings(),
       builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          debugPrint('⚠️ Firestore map streamSightings error: ${snapshot.error}');
+        }
         final sightings = snapshot.data ?? [];
         final filteredSightings = _filterSightings(sightings);
         final filteredShelters = _filterShelters();

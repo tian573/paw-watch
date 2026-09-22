@@ -1,15 +1,18 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../models/sighting.dart';
 import '../../models/chat_message.dart';
+import '../../models/user_profile.dart';
 import '../../services/firebase_service.dart';
 import '../../services/text_moderation_service.dart';
 import '../../utils/double_tap_guard.dart';
+import 'sighting_detail.dart';
 
 class CoordinationChatScreen extends StatefulWidget {
   final Sighting sighting;
@@ -35,15 +38,21 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
   static const _lavLight = Color(0xFFF3F0F9);
 
   final TextEditingController _msgCtrl = TextEditingController();
+  final FocusNode _focusNode = FocusNode();
   final ScrollController _scrollController = ScrollController();
   final ImagePicker _picker = ImagePicker();
   File? _selectedPhotoFile;
   bool _isUploadingPhoto = false;
   bool _isSending = false;
+  ChatMessage? _replyingToMessage;
   final Set<String> _locallyHiddenMessageIds = {};
   final Set<String> _revealedReportedMessageIds = {};
   late final String _chatId;
   late final String _myUid;
+  late final Stream<DocumentSnapshot<Map<String, dynamic>>> _chatDocStream;
+  late final Stream<List<ChatMessage>> _chatMessagesStream;
+  final Map<String, Uint8List> _base64Cache = {};
+  bool _isMarkingRead = false;
 
   @override
   void initState() {
@@ -54,6 +63,8 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
       _myUid,
       widget.otherUserId,
     );
+    _chatDocStream = FirebaseService.instance.streamChatDoc(_chatId);
+    _chatMessagesStream = FirebaseService.instance.streamChatMessages(_chatId);
     if (_myUid.isNotEmpty) {
       FirebaseService.instance.markChatAsRead(
         chatId: _chatId,
@@ -65,6 +76,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
   @override
   void dispose() {
     _msgCtrl.dispose();
+    _focusNode.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -102,11 +114,13 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
       }
     }
 
+    final replyMsg = _replyingToMessage;
     // Synchronously clear immediately to prevent double submission
     if (textToSend == null) {
       _msgCtrl.clear();
     }
     _selectedPhotoFile = null;
+    _replyingToMessage = null;
     if (mounted) {
       setState(() {
         if (photoToSend != null) _isUploadingPhoto = true;
@@ -151,6 +165,11 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
         sightingTitle: widget.sighting.displayTitle,
         sightingPhoto: widget.sighting.photoUrls.isNotEmpty
             ? widget.sighting.photoUrls.first
+            : null,
+        replyToId: replyMsg?.id,
+        replyToSenderName: replyMsg?.senderName,
+        replyToText: replyMsg != null
+            ? (replyMsg.text.isNotEmpty ? replyMsg.text : '📷 Photo')
             : null,
       );
 
@@ -482,6 +501,647 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
     }
   }
 
+  void _showUserTrustCard(String uid, String fallbackName) {
+    if (uid.isEmpty || uid == 'anon') return;
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StreamBuilder<UserProfile>(
+          stream: FirebaseService.instance.streamUserProfile(uid),
+          builder: (context, snapshot) {
+            final profile = snapshot.data ??
+                UserProfile(
+                  uid: uid,
+                  displayName: fallbackName,
+                  email: '',
+                  joinedAt: DateTime.now(),
+                );
+
+            return Container(
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              padding: EdgeInsets.fromLTRB(
+                  20, 16, 20, 32 + MediaQuery.of(ctx).padding.bottom),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: _navy.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Container(
+                        width: 52,
+                        height: 52,
+                        decoration: BoxDecoration(
+                          color: profile.trustTierColor.withValues(alpha: 0.2),
+                          shape: BoxShape.circle,
+                          border:
+                              Border.all(color: profile.trustTierColor, width: 2),
+                        ),
+                        child: Center(
+                          child: Text(
+                            profile.initials,
+                            style: GoogleFonts.nunito(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w800,
+                              color: profile.trustTierColor,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    profile.displayName,
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w800,
+                                      color: _navy,
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: profile.trustTierColor
+                                        .withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(profile.trustTierIcon,
+                                          size: 12,
+                                          color: profile.trustTierColor),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        profile.trustTierTitle,
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w800,
+                                          color: profile.trustTierColor,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              profile.city.isNotEmpty
+                                  ? profile.city
+                                  : (widget.otherUserRole ?? 'PawWatch Member'),
+                              style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                                color: _navy.withValues(alpha: 0.5),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: _lavLight,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        Column(
+                          children: [
+                            Text(
+                              '${profile.trustScore.toStringAsFixed(1)} ★',
+                              style: GoogleFonts.nunito(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: const Color(0xFFFFA000),
+                              ),
+                            ),
+                            Text('Trust Score',
+                                style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    color: _navy.withValues(alpha: 0.6))),
+                          ],
+                        ),
+                        Container(
+                            width: 1,
+                            height: 28,
+                            color: _navy.withValues(alpha: 0.1)),
+                        Column(
+                          children: [
+                            Text(
+                              '${profile.successfulRescues}',
+                              style: GoogleFonts.nunito(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: const Color(0xFF2E7D32),
+                              ),
+                            ),
+                            Text('Rescues Done',
+                                style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    color: _navy.withValues(alpha: 0.6))),
+                          ],
+                        ),
+                        Container(
+                            width: 1,
+                            height: 28,
+                            color: _navy.withValues(alpha: 0.1)),
+                        Column(
+                          children: [
+                            Text(
+                              'Lv.${profile.level}',
+                              style: GoogleFonts.nunito(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w900,
+                                color: _lavender,
+                              ),
+                            ),
+                            Text('${profile.totalXp} XP',
+                                style: GoogleFonts.nunito(
+                                    fontSize: 11,
+                                    color: _navy.withValues(alpha: 0.6))),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (profile.bio.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    Text(
+                      '"${profile.bio}"',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                        color: _navy.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 18),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _navy,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                      ),
+                      onPressed: () => Navigator.pop(ctx),
+                      child: Text('Close Trust Card',
+                          style: GoogleFonts.nunito(
+                              fontWeight: FontWeight.w800, fontSize: 13)),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showMessageOptions(ChatMessage msg, bool isMe) {
+    if (msg.isDeleted) return;
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        child: SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 14),
+
+              // Reply option for both sender and recipient
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF673AB7).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.reply_rounded,
+                      color: Color(0xFF673AB7), size: 20),
+                ),
+                title: Text(
+                  'Reply',
+                  style: GoogleFonts.nunito(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: _navy,
+                  ),
+                ),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  setState(() {
+                    _replyingToMessage = msg;
+                  });
+                  _focusNode.requestFocus();
+                },
+              ),
+
+              if (msg.text.isNotEmpty)
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: _lavLight,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.copy_rounded,
+                        color: _lavender, size: 20),
+                  ),
+                  title: Text(
+                    'Copy Text',
+                    style: GoogleFonts.nunito(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: _navy,
+                    ),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    Clipboard.setData(ClipboardData(text: msg.text));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Message copied to clipboard 📋'),
+                        duration: Duration(seconds: 2),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+                ),
+              if (isMe && msg.text.isNotEmpty)
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEDE7F6),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.edit_rounded,
+                        color: Color(0xFF673AB7), size: 20),
+                  ),
+                  title: Text(
+                    'Edit Message',
+                    style: GoogleFonts.nunito(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: _navy,
+                    ),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showEditMessageDialog(msg);
+                  },
+                ),
+              if (isMe)
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.delete_outline_rounded,
+                        color: Colors.red, size: 20),
+                  ),
+                  title: Text(
+                    'Delete Message',
+                    style: GoogleFonts.nunito(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.red.shade700,
+                    ),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showDeleteMessageDialog(msg);
+                  },
+                ),
+              if (!isMe)
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.flag_outlined,
+                        color: Colors.red, size: 20),
+                  ),
+                  title: Text(
+                    'Report Message',
+                    style: GoogleFonts.nunito(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.red.shade700,
+                    ),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _showReportPhotoDialog(msg);
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showEditMessageDialog(ChatMessage msg) async {
+    final editCtrl = TextEditingController(text: msg.text);
+    String? errorText;
+    bool isSaving = false;
+
+    await showDialog(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (context, setDlgState) => AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF673AB7).withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.edit_rounded,
+                    color: Color(0xFF673AB7), size: 20),
+              ),
+              const SizedBox(width: 10),
+              Text(
+                'Edit Message',
+                style: GoogleFonts.nunito(
+                  fontWeight: FontWeight.w900,
+                  fontSize: 17,
+                  color: _navy,
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              TextField(
+                controller: editCtrl,
+                autofocus: true,
+                maxLines: 4,
+                minLines: 1,
+                style: GoogleFonts.nunito(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: _navy,
+                ),
+                decoration: InputDecoration(
+                  hintText: 'Edit your message...',
+                  hintStyle: GoogleFonts.nunito(
+                    color: _navy.withValues(alpha: 0.4),
+                  ),
+                  errorText: errorText,
+                  errorMaxLines: 2,
+                  filled: true,
+                  fillColor: _lavLight,
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide:
+                        BorderSide(color: _lavender.withValues(alpha: 0.3)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    borderSide:
+                        const BorderSide(color: Color(0xFF673AB7), width: 1.5),
+                  ),
+                ),
+                onChanged: (_) {
+                  if (errorText != null) {
+                    setDlgState(() => errorText = null);
+                  }
+                },
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isSaving ? null : () => Navigator.pop(dCtx),
+              child: Text(
+                'Cancel',
+                style: GoogleFonts.nunito(
+                  fontWeight: FontWeight.w700,
+                  color: _navy.withValues(alpha: 0.6),
+                ),
+              ),
+            ),
+            ElevatedButton(
+              onPressed: isSaving
+                  ? null
+                  : () async {
+                      final newText = editCtrl.text.trim();
+                      if (newText.isEmpty) {
+                        setDlgState(
+                            () => errorText = 'Message cannot be empty');
+                        return;
+                      }
+                      if (newText == msg.text.trim()) {
+                        Navigator.pop(dCtx);
+                        return;
+                      }
+                      final modError =
+                          TextModerationService.validateChatMessage(newText);
+                      if (modError != null) {
+                        setDlgState(() => errorText = modError);
+                        return;
+                      }
+
+                      final messenger = ScaffoldMessenger.of(context);
+                      setDlgState(() => isSaving = true);
+                      try {
+                        await FirebaseService.instance.editChatMessage(
+                          chatId: _chatId,
+                          messageId: msg.id,
+                          newText: newText,
+                        );
+                        if (dCtx.mounted) Navigator.pop(dCtx);
+                        if (mounted) {
+                          messenger.showSnackBar(
+                            const SnackBar(
+                              content: Text('Message updated ✏️'),
+                              behavior: SnackBarBehavior.floating,
+                              duration: Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        setDlgState(() {
+                          isSaving = false;
+                          errorText = 'Failed to update: $e';
+                        });
+                      }
+                    },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF673AB7),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              child: isSaving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Text(
+                      'Save',
+                      style: GoogleFonts.nunito(fontWeight: FontWeight.w800),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showDeleteMessageDialog(ChatMessage msg) async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delete_outline_rounded,
+                  color: Colors.red, size: 20),
+            ),
+            const SizedBox(width: 10),
+            Text(
+              'Delete Message',
+              style: GoogleFonts.nunito(
+                fontWeight: FontWeight.w900,
+                fontSize: 17,
+                color: _navy,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to delete this message? It will be permanently removed for everyone.',
+          style: GoogleFonts.nunito(
+            fontSize: 13.5,
+            color: _navy.withValues(alpha: 0.8),
+            height: 1.4,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.nunito(
+                fontWeight: FontWeight.w700,
+                color: _navy.withValues(alpha: 0.6),
+              ),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+              elevation: 0,
+            ),
+            child: Text(
+              'Delete',
+              style: GoogleFonts.nunito(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true && mounted) {
+      final messenger = ScaffoldMessenger.of(context);
+      try {
+        await FirebaseService.instance.deleteChatMessage(
+          chatId: _chatId,
+          messageId: msg.id,
+        );
+        if (mounted) {
+          messenger.showSnackBar(
+            const SnackBar(
+              content: Text('Message deleted 🗑️'),
+              behavior: SnackBarBehavior.floating,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          messenger.showSnackBar(
+            SnackBar(content: Text('Failed to delete message: $e')),
+          );
+        }
+      }
+    }
+  }
+
   Widget _buildChatPhoto(
     String url, {
     double? width,
@@ -493,12 +1153,13 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
       try {
         final commaIdx = url.indexOf(',');
         final b64 = commaIdx != -1 ? url.substring(commaIdx + 1) : url;
-        final bytes = base64Decode(b64);
+        final bytes = _base64Cache.putIfAbsent(b64, () => base64Decode(b64));
         return Image.memory(
           bytes,
           width: width,
           height: height,
           fit: fit,
+          cacheWidth: isFullScreen ? null : 600,
           errorBuilder: (ctx, err, stack) =>
               _chatImagePlaceholder(height, isFullScreen: isFullScreen),
         );
@@ -847,18 +1508,23 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
         : '';
 
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-      stream: FirebaseService.instance.streamChatDoc(_chatId),
+      stream: _chatDocStream,
       builder: (context, chatDocSnap) {
         final chatData = chatDocSnap.data?.data();
         if (chatData != null && _myUid.isNotEmpty) {
           final unreadBy =
               (chatData['unreadBy'] as List<dynamic>?)?.cast<String>() ?? [];
-          if (unreadBy.contains(_myUid)) {
+          if (unreadBy.contains(_myUid) && !_isMarkingRead) {
+            _isMarkingRead = true;
             WidgetsBinding.instance.addPostFrameCallback((_) {
               FirebaseService.instance.markChatAsRead(
                 chatId: _chatId,
                 userId: _myUid,
-              );
+              ).then((_) {
+                _isMarkingRead = false;
+              }).catchError((_) {
+                _isMarkingRead = false;
+              });
             });
           }
         }
@@ -877,57 +1543,81 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
               onPressed: () => Navigator.pop(context),
             ),
             titleSpacing: 0,
-            title: Row(
-              children: [
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: _lavender.withValues(alpha: 0.2),
-                    shape: BoxShape.circle,
-                    border:
-                        Border.all(color: _lavender.withValues(alpha: 0.5)),
-                  ),
-                  child: Center(
-                    child: Text(
-                      widget.otherUserName.isNotEmpty
-                          ? widget.otherUserName.substring(0, 1).toUpperCase()
-                          : 'U',
-                      style: GoogleFonts.nunito(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
-                        color: _lavender,
+            title: InkWell(
+              onTap: () => _showUserTrustCard(
+                  widget.otherUserId, widget.otherUserName),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 38,
+                      height: 38,
+                      decoration: BoxDecoration(
+                        color: _lavender.withValues(alpha: 0.2),
+                        shape: BoxShape.circle,
+                        border:
+                            Border.all(color: _lavender.withValues(alpha: 0.5)),
+                      ),
+                      child: Center(
+                        child: Text(
+                          widget.otherUserName.isNotEmpty
+                              ? widget.otherUserName
+                                  .substring(0, 1)
+                                  .toUpperCase()
+                              : 'U',
+                          style: GoogleFonts.nunito(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: _lavender,
+                          ),
+                        ),
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.otherUserName,
-                        style: GoogleFonts.nunito(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                          color: _navy,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  widget.otherUserName,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.w800,
+                                    color: _navy,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Icon(
+                                Icons.verified_user_rounded,
+                                size: 14,
+                                color: const Color(0xFF673AB7),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            widget.otherUserRole ?? 'Rescue Coordination',
+                            style: GoogleFonts.nunito(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF673AB7),
+                            ),
+                          ),
+                        ],
                       ),
-                      Text(
-                        widget.otherUserRole ?? 'Rescue Coordination',
-                        style: GoogleFonts.nunito(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w600,
-                          color: const Color(0xFF673AB7),
-                        ),
-                      ),
-                    ],
-                  ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
             actions: [
               PopupMenuButton<String>(
@@ -996,60 +1686,80 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
           ),
           body: Column(
             children: [
-              // Sighting Context Header
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  border: Border(
-                    bottom: BorderSide(color: _navy.withValues(alpha: 0.08)),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: _buildThumbnail(photo),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Re: ${widget.sighting.displayTitle}',
-                            style: GoogleFonts.nunito(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w800,
-                              color: _navy,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          Text(
-                            '📍 ${widget.sighting.displayLocation}',
-                            style: GoogleFonts.nunito(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: _navy.withValues(alpha: 0.55),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
+              // Sighting Context Header (Tappable -> Opens SightingDetail)
+              Material(
+                color: Colors.white,
+                child: InkWell(
+                  onTap: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) =>
+                            SightingDetailScreen(sighting: widget.sighting),
+                      ),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 14, vertical: 8),
+                    decoration: BoxDecoration(
+                      border: Border(
+                        bottom: BorderSide(
+                            color: _navy.withValues(alpha: 0.08)),
                       ),
                     ),
-                  ],
+                    child: Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: _buildThumbnail(photo),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Re: ${widget.sighting.displayTitle}',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w800,
+                                  color: _navy,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              Text(
+                                '📍 ${widget.sighting.displayLocation}',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                  color: _navy.withValues(alpha: 0.55),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Icon(
+                          Icons.chevron_right_rounded,
+                          color: _navy.withValues(alpha: 0.4),
+                          size: 20,
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
               ),
 
               // Message Stream
               Expanded(
-                child: StreamBuilder<List<ChatMessage>>(
-                  stream:
-                      FirebaseService.instance.streamChatMessages(_chatId),
-                  builder: (context, snapshot) {
+                child: RepaintBoundary(
+                  child: StreamBuilder<List<ChatMessage>>(
+                    stream: _chatMessagesStream,
+                    builder: (context, snapshot) {
                     final messages = snapshot.data ?? [];
 
                     if (messages.isEmpty) {
@@ -1148,13 +1858,14 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                   },
                 ),
               ),
+            ),
 
               // Bottom Section: Quick Chips + Input OR Blocked Banner
               if (isBlockedByMe)
                 Container(
                   width: double.infinity,
                   padding: EdgeInsets.fromLTRB(16, 12, 16,
-                      12 + MediaQuery.of(context).padding.bottom),
+                      12 + MediaQuery.paddingOf(context).bottom),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFFF4EC),
                     border: Border(
@@ -1215,7 +1926,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                 Container(
                   width: double.infinity,
                   padding: EdgeInsets.fromLTRB(16, 14, 16,
-                      14 + MediaQuery.of(context).padding.bottom),
+                      14 + MediaQuery.paddingOf(context).bottom),
                   decoration: BoxDecoration(
                     color: const Color(0xFFF0F1F5),
                     border: Border(
@@ -1325,100 +2036,112 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                   ),
 
                 // Input Bar
-                Container(
-                  padding: EdgeInsets.fromLTRB(
-                    12,
-                    8,
-                    12,
-                    8 + MediaQuery.of(context).padding.bottom,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    boxShadow: [
-                      BoxShadow(
-                        color: _navy.withValues(alpha: 0.06),
-                        blurRadius: 10,
-                        offset: const Offset(0, -2),
+                Builder(
+                  builder: (context) {
+                    final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+                    final navBottom =
+                        bottomInset > 0 ? 0.0 : MediaQuery.paddingOf(context).bottom;
+                    return Container(
+                      padding: EdgeInsets.fromLTRB(
+                        12,
+                        8,
+                        12,
+                        8 + navBottom,
                       ),
-                    ],
-                  ),
-                  child: Row(
-                    children: [
-                      GestureDetector(
-                        onTap: _isUploadingPhoto ? null : _showAttachPhotoMenu,
-                        child: Container(
-                          padding: const EdgeInsets.all(9),
-                          decoration: BoxDecoration(
-                            color: _lavLight,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                                color: _lavender.withValues(alpha: 0.25)),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        boxShadow: [
+                          BoxShadow(
+                            color: _navy.withValues(alpha: 0.06),
+                            blurRadius: 10,
+                            offset: const Offset(0, -2),
                           ),
-                          child: const Icon(Icons.camera_alt_rounded,
-                              color: _lavender, size: 19),
-                        ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: _lavLight,
-                            borderRadius: BorderRadius.circular(22),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 14),
-                          child: TextField(
-                            controller: _msgCtrl,
-                            textCapitalization: TextCapitalization.sentences,
-                            style: GoogleFonts.nunito(
-                              fontSize: 13.5,
-                              color: _navy,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            decoration: InputDecoration(
-                              hintText:
-                                  'Type a message to ${widget.otherUserName}...',
-                              hintStyle: GoogleFonts.nunito(
-                                fontSize: 12.5,
-                                color: _navy.withValues(alpha: 0.4),
+                      child: Row(
+                        children: [
+                          GestureDetector(
+                            onTap:
+                                _isUploadingPhoto ? null : _showAttachPhotoMenu,
+                            child: Container(
+                              padding: const EdgeInsets.all(9),
+                              decoration: BoxDecoration(
+                                color: _lavLight,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                    color: _lavender.withValues(alpha: 0.25)),
                               ),
-                              border: InputBorder.none,
-                              isDense: true,
-                              contentPadding:
-                                  const EdgeInsets.symmetric(vertical: 10),
+                              child: const Icon(Icons.camera_alt_rounded,
+                                  color: _lavender, size: 19),
                             ),
-                            onSubmitted: (_) => _sendMessage(),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      GestureDetector(
-                        onTap: (_isSending || _isUploadingPhoto)
-                            ? null
-                            : () => _sendMessage(),
-                        child: Container(
-                          padding: const EdgeInsets.all(10),
-                          decoration: BoxDecoration(
-                            color: (_isSending || _isUploadingPhoto)
-                                ? _lavender.withValues(alpha: 0.6)
-                                : _lavender,
-                            shape: BoxShape.circle,
-                          ),
-                          child: (_isSending || _isUploadingPhoto)
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.white,
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: _lavLight,
+                                borderRadius: BorderRadius.circular(22),
+                              ),
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 14),
+                              child: TextField(
+                                focusNode: _focusNode,
+                                controller: _msgCtrl,
+                                textCapitalization:
+                                    TextCapitalization.sentences,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 13.5,
+                                  color: _navy,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                decoration: InputDecoration(
+                                  hintText:
+                                      'Type a message to ${widget.otherUserName}...',
+                                  hintStyle: GoogleFonts.nunito(
+                                    fontSize: 12.5,
+                                    color: _navy.withValues(alpha: 0.4),
                                   ),
-                                )
-                              : const Icon(Icons.send_rounded,
-                                  color: Colors.white, size: 18),
-                        ),
+                                  border: InputBorder.none,
+                                  isDense: true,
+                                  contentPadding:
+                                      const EdgeInsets.symmetric(vertical: 10),
+                                ),
+                                onSubmitted: (_) => _sendMessage(),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          GestureDetector(
+                            onTap: (_isSending || _isUploadingPhoto)
+                                ? null
+                                : () => _sendMessage(),
+                            child: Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: (_isSending || _isUploadingPhoto)
+                                    ? _lavender.withValues(alpha: 0.6)
+                                    : _lavender,
+                                shape: BoxShape.circle,
+                              ),
+                              child: (_isSending || _isUploadingPhoto)
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Icon(Icons.send_rounded,
+                                      color: Colors.white, size: 18),
+                            ),
+                          ),
+                        ],
                       ),
-                    ],
-                  ),
+                    );
+                  },
                 ),
+
               ],
             ],
           ),
@@ -1511,27 +2234,98 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
     final timeStr =
         '${msg.createdAt.hour.toString().padLeft(2, '0')}:${msg.createdAt.minute.toString().padLeft(2, '0')}';
 
+    if (msg.isDeleted) {
+      return Align(
+        alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: isMe
+                ? _lavender.withValues(alpha: 0.12)
+                : Colors.grey.shade100,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(16),
+              topRight: const Radius.circular(16),
+              bottomLeft: Radius.circular(isMe ? 16 : 4),
+              bottomRight: Radius.circular(isMe ? 4 : 16),
+            ),
+            border: Border.all(
+              color: isMe
+                  ? _lavender.withValues(alpha: 0.25)
+                  : Colors.grey.shade300,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.block_rounded,
+                size: 13,
+                color: _navy.withValues(alpha: 0.45),
+              ),
+              const SizedBox(width: 6),
+              Text(
+                isMe ? 'You deleted this message' : 'This message was deleted',
+                style: GoogleFonts.nunito(
+                  fontSize: 12,
+                  fontStyle: FontStyle.italic,
+                  fontWeight: FontWeight.w600,
+                  color: _navy.withValues(alpha: 0.55),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                timeStr,
+                style: GoogleFonts.nunito(
+                  fontSize: 9.5,
+                  fontWeight: FontWeight.w700,
+                  color: _navy.withValues(alpha: 0.4),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.76,
-        ),
+      child: GestureDetector(
+        onLongPress: () => _showMessageOptions(msg, isMe),
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.sizeOf(context).width * 0.76,
+          ),
         child: Column(
           crossAxisAlignment:
               isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
             // Sender name for other user
             if (!isMe)
-              Padding(
-                padding: const EdgeInsets.only(left: 4, bottom: 3),
-                child: Text(
-                  msg.senderName,
-                  style: GoogleFonts.nunito(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    color: _navy.withValues(alpha: 0.55),
+              GestureDetector(
+                onTap: () => _showUserTrustCard(msg.senderId, msg.senderName),
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 4, bottom: 3),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        msg.senderName,
+                        style: GoogleFonts.nunito(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: _navy.withValues(alpha: 0.7),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(
+                        Icons.verified_user_rounded,
+                        size: 11,
+                        color: const Color(0xFF673AB7).withValues(alpha: 0.7),
+                      ),
+                    ],
                   ),
                 ),
               ),
@@ -1561,6 +2355,54 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // REPLY PREVIEW BANNER
+                  if (msg.replyToText != null && msg.replyToText!.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(8, 8, 8, 2),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: isMe
+                            ? Colors.black.withValues(alpha: 0.12)
+                            : _lavLight,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border(
+                          left: BorderSide(
+                            color: isMe ? Colors.white : _lavender,
+                            width: 3.5,
+                          ),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            msg.replyToSenderName ?? 'Replied message',
+                            style: GoogleFonts.nunito(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.w800,
+                              color: isMe
+                                  ? Colors.white.withValues(alpha: 0.9)
+                                  : const Color(0xFF673AB7),
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            msg.replyToText!,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.nunito(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: isMe
+                                  ? Colors.white.withValues(alpha: 0.75)
+                                  : _navy.withValues(alpha: 0.7),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
                   // PHOTO SECTION
                   if (hasPhoto) ...[
                     if (shouldShield)
@@ -1711,7 +2553,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                       ),
                     ),
 
-                  // FOOTER: Timestamp + Report option for non-photo or photo caption
+                  // FOOTER: Timestamp + (edited) + checkmark
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
                     child: Row(
@@ -1728,23 +2570,26 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                                 : _navy.withValues(alpha: 0.45),
                           ),
                         ),
+                        if (msg.isEdited) ...[
+                          const SizedBox(width: 4),
+                          Text(
+                            '(edited)',
+                            style: GoogleFonts.nunito(
+                              fontSize: 9.5,
+                              fontStyle: FontStyle.italic,
+                              fontWeight: FontWeight.w600,
+                              color: isMe
+                                  ? Colors.white.withValues(alpha: 0.75)
+                                  : _navy.withValues(alpha: 0.45),
+                            ),
+                          ),
+                        ],
                         if (isMe) ...[
                           const SizedBox(width: 4),
                           Icon(
                             Icons.done_all_rounded,
                             size: 13,
                             color: Colors.white.withValues(alpha: 0.75),
-                          ),
-                        ],
-                        if (!isMe && !hasPhoto) ...[
-                          const SizedBox(width: 6),
-                          GestureDetector(
-                            onTap: () => _showReportPhotoDialog(msg),
-                            child: Icon(
-                              Icons.flag_outlined,
-                              size: 12,
-                              color: _navy.withValues(alpha: 0.35),
-                            ),
                           ),
                         ],
                       ],
@@ -1756,6 +2601,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
           ],
         ),
       ),
-    );
+    ),
+  );
   }
 }

@@ -11,6 +11,12 @@ class ChatMessage {
   final bool isReported;
   final String? reportedBy;
   final String? reportReason;
+  final bool isEdited;
+  final DateTime? editedAt;
+  final bool isDeleted;
+  final String? replyToId;
+  final String? replyToSenderName;
+  final String? replyToText;
 
   const ChatMessage({
     required this.id,
@@ -23,6 +29,12 @@ class ChatMessage {
     this.isReported = false,
     this.reportedBy,
     this.reportReason,
+    this.isEdited = false,
+    this.editedAt,
+    this.isDeleted = false,
+    this.replyToId,
+    this.replyToSenderName,
+    this.replyToText,
   });
 
   factory ChatMessage.fromFirestore(DocumentSnapshot doc) {
@@ -32,6 +44,13 @@ class ChatMessage {
       parsedDate = (data['createdAt'] as Timestamp).toDate();
     } else if (data['createdAt'] is String) {
       parsedDate = DateTime.tryParse(data['createdAt']) ?? DateTime.now();
+    }
+
+    DateTime? parsedEditedAt;
+    if (data['editedAt'] is Timestamp) {
+      parsedEditedAt = (data['editedAt'] as Timestamp).toDate();
+    } else if (data['editedAt'] is String) {
+      parsedEditedAt = DateTime.tryParse(data['editedAt']);
     }
 
     return ChatMessage(
@@ -45,6 +64,12 @@ class ChatMessage {
       isReported: data['isReported'] == true,
       reportedBy: data['reportedBy']?.toString(),
       reportReason: data['reportReason']?.toString(),
+      isEdited: data['isEdited'] == true,
+      editedAt: parsedEditedAt,
+      isDeleted: data['isDeleted'] == true,
+      replyToId: data['replyToId']?.toString(),
+      replyToSenderName: data['replyToSenderName']?.toString(),
+      replyToText: data['replyToText']?.toString(),
     );
   }
 
@@ -59,6 +84,12 @@ class ChatMessage {
       'isReported': isReported,
       'reportedBy': reportedBy,
       'reportReason': reportReason,
+      'isEdited': isEdited,
+      'editedAt': editedAt != null ? Timestamp.fromDate(editedAt!) : null,
+      'isDeleted': isDeleted,
+      if (replyToId != null) 'replyToId': replyToId,
+      if (replyToSenderName != null) 'replyToSenderName': replyToSenderName,
+      if (replyToText != null) 'replyToText': replyToText,
     };
   }
 }

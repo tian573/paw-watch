@@ -3351,6 +3351,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     double shelterLat = s.effectiveLatitude;
     double shelterLng = s.effectiveLongitude;
     bool isLocatingShelter = false;
+    bool isGpsAutoFilledShelter = false;
+    bool isSearchingShelter = false;
+    final shelterSearchCtrl = TextEditingController();
+    final shelterMapCtrl = MapController();
     final shelterNameCtrl = TextEditingController();
     final shelterAddressCtrl = TextEditingController(text: isShelteredAction ? s.effectiveLocationAddress : '');
     final noteCtrl = TextEditingController();
@@ -4041,52 +4045,50 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           color: _navy,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      TextField(
-                        controller: shelterAddressCtrl,
-                        onChanged: (_) => setSheetState(() {}),
-                        style: GoogleFonts.nunito(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: _navy),
-                        decoration: InputDecoration(
-                          hintText:
-                              'e.g. Jl. Pejaten Barat No. 23 (Open for adoption)',
-                          filled: true,
-                          fillColor: _lavLight,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
+                      const SizedBox(height: 8),
+                      _buildLocationSearchBar(
+                        controller: shelterSearchCtrl,
+                        isSearching: isSearchingShelter,
+                        themeColor: const Color(0xFF673AB7),
+                        hintText: 'Search shelter address, landmark, or city...',
+                        onSearch: (query) async {
+                          if (query.trim().isEmpty) return;
+                          setSheetState(() => isSearchingShelter = true);
+                          final locResult = await LocationService()
+                              .searchLocation(query.trim());
+                          if (locResult != null) {
+                            shelterLat = locResult.latitude;
+                            shelterLng = locResult.longitude;
+                            shelterAddressCtrl.text = locResult.formattedAddress;
+                            isGpsAutoFilledShelter = false;
+                            try {
+                              shelterMapCtrl.move(
+                                  ll.LatLng(shelterLat, shelterLng), 16.0);
+                            } catch (_) {}
+                          } else {
+                            _snack(
+                                'Location not found. Try a different search term.');
+                          }
+                          setSheetState(() => isSearchingShelter = false);
+                        },
+                        onClear: () =>
+                            setSheetState(() => shelterSearchCtrl.clear()),
                       ),
-                      if (shelterAddressCtrl.text.isNotEmpty &&
-                          shelterAddressError != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          shelterAddressError,
-                          style: GoogleFonts.nunito(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                            color: const Color(0xFFE53935),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          height: 180,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8EAF0),
+                            borderRadius: BorderRadius.circular(14),
+                            border:
+                                Border.all(color: _navy.withValues(alpha: 0.1)),
                           ),
-                        ),
-                      ],
-                      const SizedBox(height: 10),
-                      Container(
-                        height: 140,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                              color: _navy.withValues(alpha: 0.15)),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(14),
                           child: Stack(
                             children: [
                               FlutterMap(
+                                mapController: shelterMapCtrl,
                                 options: MapOptions(
                                   initialCenter:
                                       ll.LatLng(shelterLat, shelterLng),
@@ -4094,6 +4096,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   onTap: (tapPos, point) async {
                                     shelterLat = point.latitude;
                                     shelterLng = point.longitude;
+                                    isGpsAutoFilledShelter = false;
                                     setSheetState(
                                         () => isLocatingShelter = true);
                                     final addr = await LocationService()
@@ -4116,66 +4119,124 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                       Marker(
                                         point:
                                             ll.LatLng(shelterLat, shelterLng),
-                                        width: 38,
-                                        height: 38,
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF673AB7),
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                                color: Colors.white, width: 2),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.black
-                                                    .withValues(alpha: 0.25),
-                                                blurRadius: 6,
-                                              ),
-                                            ],
-                                          ),
-                                          child: const Center(
-                                            child: Icon(Icons.apartment,
-                                                size: 18,
-                                                color: Colors.white),
-                                          ),
+                                        width: 46,
+                                        height: 46,
+                                        child: _buildMapPinMarker(
+                                          color: const Color(0xFF673AB7),
+                                          icon: Icons.apartment,
                                         ),
                                       ),
                                     ],
                                   ),
                                 ],
                               ),
-                              if (isLocatingShelter)
-                                Container(
-                                  color: Colors.black.withValues(alpha: 0.2),
-                                  child: const Center(
-                                    child: CircularProgressIndicator(
-                                      color: Color(0xFF673AB7),
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                ),
                               Positioned(
-                                bottom: 6,
-                                left: 6,
+                                right: 10,
+                                top: 10,
+                                child: Column(
+                                  children: [
+                                    _buildMapButton(
+                                      Icons.my_location,
+                                      onTap: () async {
+                                        setSheetState(
+                                            () => isLocatingShelter = true);
+                                        final res = await LocationService()
+                                            .getCurrentUserLocation();
+                                        shelterLat = res.latitude;
+                                        shelterLng = res.longitude;
+                                        shelterAddressCtrl.text =
+                                            res.formattedAddress;
+                                        isGpsAutoFilledShelter =
+                                            res.isGpsAutoFilled;
+                                        setSheetState(
+                                            () => isLocatingShelter = false);
+                                        try {
+                                          shelterMapCtrl.move(
+                                              ll.LatLng(
+                                                  shelterLat, shelterLng),
+                                              16.0);
+                                        } catch (_) {}
+                                      },
+                                    ),
+                                    const SizedBox(height: 6),
+                                    _buildMapButton(
+                                      Icons.add,
+                                      onTap: () {
+                                        try {
+                                          final z =
+                                              shelterMapCtrl.camera.zoom + 1;
+                                          shelterMapCtrl.move(
+                                              ll.LatLng(
+                                                  shelterLat, shelterLng),
+                                              z);
+                                        } catch (_) {}
+                                      },
+                                    ),
+                                    const SizedBox(height: 4),
+                                    _buildMapButton(
+                                      Icons.remove,
+                                      onTap: () {
+                                        try {
+                                          final z =
+                                              shelterMapCtrl.camera.zoom - 1;
+                                          shelterMapCtrl.move(
+                                              ll.LatLng(
+                                                  shelterLat, shelterLng),
+                                              z);
+                                        } catch (_) {}
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Positioned(
+                                bottom: 8,
+                                left: 8,
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.6),
-                                    borderRadius: BorderRadius.circular(6),
+                                    color: Colors.white.withValues(alpha: 0.92),
+                                    borderRadius: BorderRadius.circular(8),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.1),
+                                        blurRadius: 4,
+                                      ),
+                                    ],
                                   ),
-                                  child: Text(
-                                    'Tap map to set shelter location',
-                                    style: GoogleFonts.nunito(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white,
-                                    ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.touch_app_outlined,
+                                          size: 12,
+                                          color: Color(0xFF673AB7)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Tap map to set shelter location',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: _navy,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
                             ],
                           ),
                         ),
+                      ),
+                      const SizedBox(height: 10),
+                      _buildLocationAddressDisplay(
+                        addressText: shelterAddressCtrl.text,
+                        isLocating: isLocatingShelter,
+                        isGpsAutoFilled: isGpsAutoFilledShelter,
+                        themeColor: const Color(0xFF673AB7),
+                        errorText: shelterAddressCtrl.text.isNotEmpty
+                            ? shelterAddressError
+                            : null,
                       ),
                       const SizedBox(height: 12),
                     ],
@@ -4815,7 +4876,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     );
   }
 
-  void _showRoamingUpdateSheet(Sighting s) {
+  void _showRoamingUpdateSheet(Sighting s) async {
     if (_isActionSheetOpen) return;
     _isActionSheetOpen = true;
     if (s.isVetVisitPending) {
@@ -4831,7 +4892,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         return;
       }
     }
-    showModalBottomSheet(
+    final selectedOption = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
@@ -4902,10 +4963,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 title: '🐾 Still Here at Pinned Spot',
                 subtitle: 'Confirm the cat is right at this location (+ photo)',
                 xpTag: '+15 XP',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showActionProofSheet('stillHere', s);
-                },
+                onTap: () => Navigator.pop(ctx, 'stillHere'),
               ),
               const SizedBox(height: 10),
               _buildRoamingOptionTile(
@@ -4914,10 +4972,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 title: '📍 Moved Nearby (Update Location)',
                 subtitle: 'Cat has moved to a nearby street, alley, or building',
                 xpTag: '+25 XP',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showRelocationSheet(s);
-                },
+                onTap: () => Navigator.pop(ctx, 'moved'),
               ),
               const SizedBox(height: 10),
               _buildRoamingOptionTile(
@@ -4926,19 +4981,25 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 title: '🔍 Checked: Cat Not Here Right Now',
                 subtitle: 'Visited the area but could not find the cat',
                 xpTag: '+10 XP',
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showNotHereDialog(s);
-                },
+                onTap: () => Navigator.pop(ctx, 'notHere'),
               ),
             ],
           ),
         ),
       );
     },
-    ).whenComplete(() {
-      _isActionSheetOpen = false;
-    });
+    );
+
+    _isActionSheetOpen = false;
+    if (!mounted || selectedOption == null) return;
+
+    if (selectedOption == 'stillHere') {
+      _showActionProofSheet('stillHere', s);
+    } else if (selectedOption == 'moved') {
+      _showRelocationSheet(s);
+    } else if (selectedOption == 'notHere') {
+      _showNotHereDialog(s);
+    }
   }
 
   Widget _buildRoamingOptionTile({
@@ -5013,6 +5074,238 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     );
   }
 
+  Widget _buildMapPinMarker({Color color = const Color(0xFFFF9800), IconData icon = Icons.pets}) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 36,
+          height: 36,
+          decoration: BoxDecoration(
+            color: color,
+            shape: BoxShape.circle,
+            border: Border.all(color: Colors.white, width: 2.5),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.4),
+                blurRadius: 8,
+                offset: const Offset(0, 3),
+              ),
+            ],
+          ),
+          child: Icon(icon, color: Colors.white, size: 18),
+        ),
+        Container(
+          width: 8,
+          height: 4,
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.3),
+            borderRadius: BorderRadius.circular(50),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMapButton(IconData icon, {required VoidCallback onTap}) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          boxShadow: [
+            BoxShadow(
+              color: _navy.withValues(alpha: 0.1),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Icon(icon, size: 18, color: _navy),
+      ),
+    );
+  }
+
+  Widget _buildLocationSearchBar({
+    required TextEditingController controller,
+    required bool isSearching,
+    required Color themeColor,
+    String hintText = 'Search street, landmark, or city...',
+    required ValueChanged<String> onSearch,
+    required VoidCallback onClear,
+  }) {
+    return Container(
+      height: 42,
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(
+        color: _bgWhite,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _navy.withValues(alpha: 0.12)),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 12),
+          Icon(Icons.search_rounded,
+              size: 18, color: _navy.withValues(alpha: 0.45)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: controller,
+              textInputAction: TextInputAction.search,
+              onSubmitted: onSearch,
+              style: GoogleFonts.nunito(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w700,
+                color: _navy,
+              ),
+              decoration: InputDecoration(
+                hintText: hintText,
+                hintStyle: GoogleFonts.nunito(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                  color: _navy.withValues(alpha: 0.4),
+                ),
+                border: InputBorder.none,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+            ),
+          ),
+          if (isSearching)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: themeColor),
+              ),
+            )
+          else if (controller.text.isNotEmpty)
+            GestureDetector(
+              onTap: onClear,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: Icon(Icons.close_rounded,
+                    size: 16, color: _navy.withValues(alpha: 0.4)),
+              ),
+            )
+          else
+            GestureDetector(
+              onTap: () => onSearch(controller.text),
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: themeColor.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  'Search',
+                  style: GoogleFonts.nunito(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    color: themeColor,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLocationAddressDisplay({
+    required String addressText,
+    required bool isLocating,
+    required bool isGpsAutoFilled,
+    required Color themeColor,
+    String? errorText,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.location_on, size: 16, color: themeColor),
+            const SizedBox(width: 8),
+            Expanded(
+              child: isLocating
+                  ? Text(
+                      'Fetching real-time location...',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12,
+                        color: _navy.withValues(alpha: 0.5),
+                        fontStyle: FontStyle.italic,
+                      ),
+                    )
+                  : Text(
+                      addressText.isNotEmpty
+                          ? addressText
+                          : 'Tap map or search to pin location',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12,
+                        color: _navy.withValues(alpha: 0.8),
+                        fontWeight: FontWeight.w600,
+                        height: 1.4,
+                      ),
+                    ),
+            ),
+            const SizedBox(width: 8),
+            if (isGpsAutoFilled)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.check_circle, size: 13, color: _resolved),
+                  const SizedBox(width: 3),
+                  Text(
+                    'GPS Auto-filled',
+                    style: GoogleFonts.nunito(
+                      fontSize: 11,
+                      color: _resolved,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              )
+            else
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.pin_drop_outlined, size: 13, color: themeColor),
+                  const SizedBox(width: 3),
+                  Text(
+                    'Pinned',
+                    style: GoogleFonts.nunito(
+                      fontSize: 11,
+                      color: themeColor,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+        if (errorText != null && errorText.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Text(
+            errorText,
+            style: GoogleFonts.nunito(
+              fontSize: 11.5,
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFFE53935),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
   void _showRelocationSheet(Sighting s) async {
     if (_isActionSheetOpen) return;
     _isActionSheetOpen = true;
@@ -5024,22 +5317,16 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     bool isScanning = false;
     CatValidationResult? scanResult;
     bool isSubmitting = false;
-    bool isLocating = true;
+    bool isLocating = false;
+    bool isGpsAutoFilled = false;
+    bool isSearchingLocation = false;
     double newLat = s.effectiveLatitude;
     double newLng = s.effectiveLongitude;
     String newAddress = s.effectiveLocationAddress;
     final noteCtrl = TextEditingController();
     final addressCtrl = TextEditingController(text: newAddress);
-
-    LocationService().getCurrentUserLocation().then((res) {
-      newLat = res.latitude;
-      newLng = res.longitude;
-      newAddress = res.formattedAddress;
-      addressCtrl.text = newAddress;
-      isLocating = false;
-    }).catchError((_) {
-      isLocating = false;
-    });
+    final searchCtrl = TextEditingController();
+    final mapCtrl = MapController();
 
     if (!mounted) return;
     showModalBottomSheet(
@@ -5136,99 +5423,68 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      'New Location Address / Landmark',
+                      'Location (Required)',
                       style: GoogleFonts.nunito(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w800,
                         color: _navy,
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    TextField(
-                      controller: addressCtrl,
-                      onChanged: (_) => setSheetState(() {}),
-                      style: GoogleFonts.nunito(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                        color: _navy,
-                      ),
-                      decoration: InputDecoration(
-                        filled: true,
-                        fillColor: _lavLight,
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
-                        ),
-                        suffixIcon: isLocating
-                            ? const Padding(
-                                padding: EdgeInsets.all(12),
-                                child: SizedBox(
-                                  width: 14,
-                                  height: 14,
-                                  child: CircularProgressIndicator(
-                                      strokeWidth: 2, color: _lavender),
-                                ),
-                              )
-                            : IconButton(
-                                icon: const Icon(Icons.my_location,
-                                    color: _lavender, size: 18),
-                                onPressed: () async {
-                                  setSheetState(() => isLocating = true);
-                                  final res = await LocationService()
-                                      .getCurrentUserLocation();
-                                  newLat = res.latitude;
-                                  newLng = res.longitude;
-                                  newAddress = res.formattedAddress;
-                                  addressCtrl.text = newAddress;
-                                  setSheetState(() => isLocating = false);
-                                },
-                              ),
-                      ),
+                    const SizedBox(height: 8),
+                    _buildLocationSearchBar(
+                      controller: searchCtrl,
+                      isSearching: isSearchingLocation,
+                      themeColor: const Color(0xFFFF9800),
+                      hintText: 'Search street, landmark, or city...',
+                      onSearch: (query) async {
+                        if (query.trim().isEmpty) return;
+                        setSheetState(() => isSearchingLocation = true);
+                        final locResult = await LocationService()
+                            .searchLocation(query.trim());
+                        if (locResult != null) {
+                          newLat = locResult.latitude;
+                          newLng = locResult.longitude;
+                          newAddress = locResult.formattedAddress;
+                          addressCtrl.text = newAddress;
+                          isGpsAutoFilled = false;
+                          try {
+                            mapCtrl.move(ll.LatLng(newLat, newLng), 16.0);
+                          } catch (_) {}
+                        } else {
+                          _snack('Location not found. Try a different search term.');
+                        }
+                        setSheetState(() => isSearchingLocation = false);
+                      },
+                      onClear: () => setSheetState(() => searchCtrl.clear()),
                     ),
-                    if (addressCtrl.text.isNotEmpty &&
-                        TextModerationService.validateAddress(
-                                addressCtrl.text,
-                                label: 'Location address') !=
-                            null) ...[
-                      const SizedBox(height: 4),
-                      Text(
-                        TextModerationService.validateAddress(
-                            addressCtrl.text,
-                            label: 'Location address')!,
-                        style: GoogleFonts.nunito(
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w700,
-                          color: const Color(0xFFE53935),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        height: 180,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE8EAF0),
+                          borderRadius: BorderRadius.circular(14),
+                          border:
+                              Border.all(color: _navy.withValues(alpha: 0.1)),
                         ),
-                      ),
-                    ],
-                    const SizedBox(height: 10),
-                    Container(
-                      height: 150,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(
-                            color: _navy.withValues(alpha: 0.15)),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
                         child: Stack(
                           children: [
                             FlutterMap(
+                              mapController: mapCtrl,
                               options: MapOptions(
                                 initialCenter: ll.LatLng(newLat, newLng),
                                 initialZoom: 16.0,
                                 onTap: (tapPos, point) async {
                                   newLat = point.latitude;
                                   newLng = point.longitude;
+                                  isGpsAutoFilled = false;
                                   setSheetState(() => isLocating = true);
                                   final addr = await LocationService()
                                       .getAddressFromCoordinates(
                                           point.latitude, point.longitude);
                                   newAddress = addr;
-                                  addressCtrl.text = newAddress;
+                                  addressCtrl.text = addr;
                                   setSheetState(() => isLocating = false);
                                 },
                               ),
@@ -5242,26 +5498,11 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   markers: [
                                     Marker(
                                       point: ll.LatLng(newLat, newLng),
-                                      width: 38,
-                                      height: 38,
-                                      child: Container(
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFFF9800),
-                                          shape: BoxShape.circle,
-                                          border: Border.all(
-                                              color: Colors.white, width: 2),
-                                          boxShadow: [
-                                            BoxShadow(
-                                              color: Colors.black
-                                                  .withValues(alpha: 0.25),
-                                              blurRadius: 6,
-                                            ),
-                                          ],
-                                        ),
-                                        child: const Center(
-                                          child: Icon(Icons.pets,
-                                              size: 18, color: Colors.white),
-                                        ),
+                                      width: 46,
+                                      height: 46,
+                                      child: _buildMapPinMarker(
+                                        color: const Color(0xFFFF9800),
+                                        icon: Icons.pets,
                                       ),
                                     ),
                                   ],
@@ -5269,28 +5510,103 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               ],
                             ),
                             Positioned(
-                              bottom: 6,
-                              left: 6,
+                              right: 10,
+                              top: 10,
+                              child: Column(
+                                children: [
+                                  _buildMapButton(
+                                    Icons.my_location,
+                                    onTap: () async {
+                                      setSheetState(() => isLocating = true);
+                                      final res = await LocationService()
+                                          .getCurrentUserLocation();
+                                      newLat = res.latitude;
+                                      newLng = res.longitude;
+                                      newAddress = res.formattedAddress;
+                                      addressCtrl.text = newAddress;
+                                      isGpsAutoFilled = res.isGpsAutoFilled;
+                                      setSheetState(() => isLocating = false);
+                                      try {
+                                        mapCtrl.move(
+                                            ll.LatLng(newLat, newLng), 16.0);
+                                      } catch (_) {}
+                                    },
+                                  ),
+                                  const SizedBox(height: 6),
+                                  _buildMapButton(
+                                    Icons.add,
+                                    onTap: () {
+                                      try {
+                                        final z = mapCtrl.camera.zoom + 1;
+                                        mapCtrl.move(
+                                            ll.LatLng(newLat, newLng), z);
+                                      } catch (_) {}
+                                    },
+                                  ),
+                                  const SizedBox(height: 4),
+                                  _buildMapButton(
+                                    Icons.remove,
+                                    onTap: () {
+                                      try {
+                                        final z = mapCtrl.camera.zoom - 1;
+                                        mapCtrl.move(
+                                            ll.LatLng(newLat, newLng), z);
+                                      } catch (_) {}
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Positioned(
+                              bottom: 8,
+                              left: 8,
                               child: Container(
                                 padding: const EdgeInsets.symmetric(
                                     horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.6),
-                                  borderRadius: BorderRadius.circular(6),
+                                  color: Colors.white.withValues(alpha: 0.92),
+                                  borderRadius: BorderRadius.circular(8),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.1),
+                                      blurRadius: 4,
+                                    ),
+                                  ],
                                 ),
-                                child: Text(
-                                  'Tap map to relocate pin',
-                                  style: GoogleFonts.nunito(
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w700,
-                                    color: Colors.white,
-                                  ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.touch_app_outlined,
+                                        size: 12, color: Color(0xFFFF9800)),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'Tap map to drop pin',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: _navy,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
                           ],
                         ),
                       ),
+                    ),
+                    const SizedBox(height: 10),
+                    _buildLocationAddressDisplay(
+                      addressText: addressCtrl.text,
+                      isLocating: isLocating,
+                      isGpsAutoFilled: isGpsAutoFilled,
+                      themeColor: const Color(0xFFFF9800),
+                      errorText: addressCtrl.text.isNotEmpty
+                          ? TextModerationService.validateAddress(
+                              addressCtrl.text,
+                              label: 'Location address',
+                            )
+                          : null,
                     ),
                     const SizedBox(height: 12),
                     Text(
@@ -10076,6 +10392,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     double shelterLat = s.effectiveLatitude;
     double shelterLng = s.effectiveLongitude;
     bool isLocatingShelter = false;
+    bool isGpsAutoFilledShelter = false;
+    bool isSearchingShelter = false;
+    final shelterSearchCtrl = TextEditingController();
+    final shelterMapCtrl = MapController();
 
     showModalBottomSheet(
       context: context,
@@ -10295,40 +10615,54 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           color: _navy,
                         ),
                       ),
-                      const SizedBox(height: 6),
-                      TextField(
-                        controller: shelterAddressCtrl,
-                        style: GoogleFonts.nunito(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: _navy),
-                        decoration: InputDecoration(
-                          hintText: outcomeAction == 'returnedToSpot'
-                              ? 'e.g. Near Taman Menteng Banyan Tree / RT 04 feeding spot'
-                              : 'e.g. Jl. Pejaten Barat No. 23 (Open for adoption)',
-                          filled: true,
-                          fillColor: _lavLight,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
+                      const SizedBox(height: 8),
+                      _buildLocationSearchBar(
+                        controller: shelterSearchCtrl,
+                        isSearching: isSearchingShelter,
+                        themeColor: outcomeAction == 'returnedToSpot'
+                            ? const Color(0xFF00897B)
+                            : const Color(0xFF673AB7),
+                        hintText: outcomeAction == 'returnedToSpot'
+                            ? 'Search release spot, landmark, or street...'
+                            : 'Search shelter address, landmark, or city...',
+                        onSearch: (query) async {
+                          if (query.trim().isEmpty) return;
+                          setSheetState(() => isSearchingShelter = true);
+                          final locResult = await LocationService()
+                              .searchLocation(query.trim());
+                          if (locResult != null) {
+                            shelterLat = locResult.latitude;
+                            shelterLng = locResult.longitude;
+                            shelterAddressCtrl.text = locResult.formattedAddress;
+                            isGpsAutoFilledShelter = false;
+                            try {
+                              shelterMapCtrl.move(
+                                  ll.LatLng(shelterLat, shelterLng), 16.0);
+                            } catch (_) {}
+                          } else {
+                            _snack(
+                                'Location not found. Try a different search term.');
+                          }
+                          setSheetState(() => isSearchingShelter = false);
+                        },
+                        onClear: () =>
+                            setSheetState(() => shelterSearchCtrl.clear()),
                       ),
-                      const SizedBox(height: 10),
-                      Container(
-                        height: 140,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                              color: _navy.withValues(alpha: 0.15)),
-                        ),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(14),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          height: 180,
+                          width: double.infinity,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE8EAF0),
+                            borderRadius: BorderRadius.circular(14),
+                            border:
+                                Border.all(color: _navy.withValues(alpha: 0.1)),
+                          ),
                           child: Stack(
                             children: [
                               FlutterMap(
+                                mapController: shelterMapCtrl,
                                 options: MapOptions(
                                   initialCenter:
                                       ll.LatLng(shelterLat, shelterLng),
@@ -10336,6 +10670,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   onTap: (tapPos, point) async {
                                     shelterLat = point.latitude;
                                     shelterLng = point.longitude;
+                                    isGpsAutoFilledShelter = false;
                                     setSheetState(
                                         () => isLocatingShelter = true);
                                     final addr = await LocationService()
@@ -10358,75 +10693,131 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                       Marker(
                                         point:
                                             ll.LatLng(shelterLat, shelterLng),
-                                        width: 38,
-                                        height: 38,
-                                        child: Container(
-                                          decoration: BoxDecoration(
-                                            color: outcomeAction == 'returnedToSpot'
-                                                ? const Color(0xFF00897B)
-                                                : const Color(0xFF673AB7),
-                                            shape: BoxShape.circle,
-                                            border: Border.all(
-                                                color: Colors.white, width: 2),
-                                            boxShadow: [
-                                              BoxShadow(
-                                                color: Colors.black
-                                                    .withValues(alpha: 0.25),
-                                                blurRadius: 6,
-                                              ),
-                                            ],
-                                          ),
-                                          child: Center(
-                                            child: Icon(
-                                                outcomeAction == 'returnedToSpot'
-                                                    ? Icons.park_rounded
-                                                    : Icons.apartment,
-                                                size: 18,
-                                                color: Colors.white),
-                                          ),
+                                        width: 46,
+                                        height: 46,
+                                        child: _buildMapPinMarker(
+                                          color: outcomeAction == 'returnedToSpot'
+                                              ? const Color(0xFF00897B)
+                                              : const Color(0xFF673AB7),
+                                          icon: outcomeAction == 'returnedToSpot'
+                                              ? Icons.park_rounded
+                                              : Icons.apartment,
                                         ),
                                       ),
                                     ],
                                   ),
                                 ],
                               ),
-                              if (isLocatingShelter)
-                                Container(
-                                  color: Colors.black.withValues(alpha: 0.2),
-                                  child: Center(
-                                    child: CircularProgressIndicator(
-                                      color: outcomeAction == 'returnedToSpot'
-                                          ? const Color(0xFF00897B)
-                                          : const Color(0xFF673AB7),
-                                      strokeWidth: 2,
-                                    ),
-                                  ),
-                                ),
                               Positioned(
-                                bottom: 6,
-                                left: 6,
+                                right: 10,
+                                top: 10,
+                                child: Column(
+                                  children: [
+                                    _buildMapButton(
+                                      Icons.my_location,
+                                      onTap: () async {
+                                        setSheetState(
+                                            () => isLocatingShelter = true);
+                                        final res = await LocationService()
+                                            .getCurrentUserLocation();
+                                        shelterLat = res.latitude;
+                                        shelterLng = res.longitude;
+                                        shelterAddressCtrl.text =
+                                            res.formattedAddress;
+                                        isGpsAutoFilledShelter =
+                                            res.isGpsAutoFilled;
+                                        setSheetState(
+                                            () => isLocatingShelter = false);
+                                        try {
+                                          shelterMapCtrl.move(
+                                              ll.LatLng(
+                                                  shelterLat, shelterLng),
+                                              16.0);
+                                        } catch (_) {}
+                                      },
+                                    ),
+                                    const SizedBox(height: 6),
+                                    _buildMapButton(
+                                      Icons.add,
+                                      onTap: () {
+                                        try {
+                                          final z =
+                                              shelterMapCtrl.camera.zoom + 1;
+                                          shelterMapCtrl.move(
+                                              ll.LatLng(
+                                                  shelterLat, shelterLng),
+                                              z);
+                                        } catch (_) {}
+                                      },
+                                    ),
+                                    const SizedBox(height: 4),
+                                    _buildMapButton(
+                                      Icons.remove,
+                                      onTap: () {
+                                        try {
+                                          final z =
+                                              shelterMapCtrl.camera.zoom - 1;
+                                          shelterMapCtrl.move(
+                                              ll.LatLng(
+                                                  shelterLat, shelterLng),
+                                              z);
+                                        } catch (_) {}
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Positioned(
+                                bottom: 8,
+                                left: 8,
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 8, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: Colors.black.withValues(alpha: 0.6),
-                                    borderRadius: BorderRadius.circular(6),
+                                    color: Colors.white.withValues(alpha: 0.92),
+                                    borderRadius: BorderRadius.circular(8),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.1),
+                                        blurRadius: 4,
+                                      ),
+                                    ],
                                   ),
-                                  child: Text(
-                                    outcomeAction == 'returnedToSpot'
-                                        ? 'Tap map to place colony release pin'
-                                        : 'Tap map to set shelter location',
-                                    style: GoogleFonts.nunito(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                      color: Colors.white,
-                                    ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.touch_app_outlined,
+                                          size: 12,
+                                          color: outcomeAction == 'returnedToSpot'
+                                              ? const Color(0xFF00897B)
+                                              : const Color(0xFF673AB7)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        outcomeAction == 'returnedToSpot'
+                                            ? 'Tap map to place colony release pin'
+                                            : 'Tap map to set shelter location',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          color: _navy,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
                               ),
                             ],
                           ),
                         ),
+                      ),
+                      const SizedBox(height: 10),
+                      _buildLocationAddressDisplay(
+                        addressText: shelterAddressCtrl.text,
+                        isLocating: isLocatingShelter,
+                        isGpsAutoFilled: isGpsAutoFilledShelter,
+                        themeColor: outcomeAction == 'returnedToSpot'
+                            ? const Color(0xFF00897B)
+                            : const Color(0xFF673AB7),
                       ),
                       const SizedBox(height: 14),
                     ],
@@ -12377,7 +12768,27 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     final cat = s.category;
     final isPriorityVet = s.isMedicalOrTriagePriority && !s.hasVetVisit;
 
-    if (s.isTnrCommunityCat) {
+    if (s.isNeedsHome ||
+        cat == 'Needs Home' ||
+        cat == 'Needs Foster' ||
+        cat == 'Rehomed') {
+      acts = [
+        {
+          'key': 'rehomed',
+          'icon': Icons.favorite_rounded,
+          'label': 'Rehomed',
+          'xp': '+200 XP',
+          'sub': 'Found forever home'
+        },
+        {
+          'key': 'sheltered',
+          'icon': Icons.house_rounded,
+          'label': 'Sheltered',
+          'xp': '+120 XP',
+          'sub': 'In shelter'
+        },
+      ];
+    } else if (s.isTnrCommunityCat) {
       acts = allActs;
     } else if (isPriorityVet) {
       acts = allActs
@@ -12389,10 +12800,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         cat == 'Needs Vet' ||
         cat == 'Trapped' ||
         cat == 'Urgent Rescue' ||
-        cat == 'Kitten' ||
-        cat == 'Needs Foster' ||
-        cat == 'Needs Home' ||
-        cat == 'Rehomed') {
+        cat == 'Kitten') {
       acts = allActs
           .where((a) =>
               a['key'] == 'tookIn' ||
@@ -12926,6 +13334,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               }
               if (key == 'roaming') {
                 _showRoamingUpdateSheet(s);
+              } else if (key == 'rehomed') {
+                _showOutcomeConfirmationRequestSheet('rehomed', s);
               } else if (s.isFeral &&
                   (key == 'tookIn' || key == 'sheltered')) {
                 _snack(
