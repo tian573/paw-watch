@@ -316,7 +316,7 @@ class _LoginScreenState extends State<LoginScreen>
         ),
         const SizedBox(height: 6),
         SizedBox(
-          width: MediaQuery.of(context).size.width * 0.55,
+          width: MediaQuery.sizeOf(context).width * 0.55,
           child: Text(
             'Log in to continue helping cats and your community.',
             style: GoogleFonts.nunito(

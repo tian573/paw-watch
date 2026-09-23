@@ -43,9 +43,12 @@ class _HomeScreenState extends State<HomeScreen>
   late AnimationController _arrowAnimController;
   late Animation<double> _arrowBounce;
 
+  late final Stream<List<Sighting>> _sightingsStream;
+
   @override
   void initState() {
     super.initState();
+    _sightingsStream = FirebaseService.instance.streamSightings();
     _checkFirstTimeUser();
     _loadDismissedDispatchIds();
     _fetchUserLocation();
@@ -324,7 +327,7 @@ class _HomeScreenState extends State<HomeScreen>
         _buildAppBar(),
         Expanded(
           child: StreamBuilder<List<Sighting>>(
-            stream: FirebaseService.instance.streamSightings(),
+            stream: _sightingsStream,
             builder: (context, snapshot) {
               if (snapshot.hasError) {
                 debugPrint('⚠️ Firestore streamSightings error: ${snapshot.error}');
@@ -611,7 +614,7 @@ class _HomeScreenState extends State<HomeScreen>
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
-        height: MediaQuery.of(ctx).size.height * 0.85,
+        height: MediaQuery.sizeOf(ctx).height * 0.85,
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -2745,7 +2748,7 @@ class _HomeScreenState extends State<HomeScreen>
         Divider(color: _navy.withValues(alpha: 0.08), height: 1),
         Expanded(
           child: StreamBuilder<List<Sighting>>(
-            stream: FirebaseService.instance.streamSightings(),
+            stream: _sightingsStream,
             builder: (context, snapshot) {
               final sightings = snapshot.data ?? [];
               final currentUid = FirebaseAuth.instance.currentUser?.uid;

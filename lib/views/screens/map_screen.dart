@@ -63,10 +63,15 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
 
   late AnimationController _pulseController;
   late Animation<double> _pulseAnimation;
+  late final Stream<List<Sighting>> _sightingsStream;
+  late final Stream<UserProfile> _userProfileStream;
 
   @override
   void initState() {
     super.initState();
+    _sightingsStream = FirebaseService.instance.streamSightings();
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+    _userProfileStream = FirebaseService.instance.streamUserProfile(uid);
 
     _pulseController = AnimationController(
       vsync: this,
@@ -394,7 +399,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
             onTap: widget.onProfileTap,
             behavior: HitTestBehavior.opaque,
             child: StreamBuilder<UserProfile>(
-              stream: FirebaseService.instance.streamUserProfile(user?.uid ?? 'anon'),
+              stream: _userProfileStream,
               builder: (context, snapshot) {
                 final level = snapshot.data?.level ?? 1;
                 return Container(
@@ -600,7 +605,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   // ---------------------------------------------------------------------------
   Widget _buildMapLayer() {
     return StreamBuilder<List<Sighting>>(
-      stream: FirebaseService.instance.streamSightings(),
+      stream: _sightingsStream,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           debugPrint('⚠️ Firestore map streamSightings error: ${snapshot.error}');

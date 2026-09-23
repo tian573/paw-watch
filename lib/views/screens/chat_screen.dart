@@ -525,7 +525,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
               padding: EdgeInsets.fromLTRB(
-                  20, 16, 20, 32 + MediaQuery.of(ctx).padding.bottom),
+                  20, 16, 20, 32 + MediaQuery.paddingOf(ctx).bottom),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1259,7 +1259,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
               ),
             ),
             Positioned(
-              top: MediaQuery.of(ctx).padding.top + 10,
+              top: MediaQuery.paddingOf(ctx).top + 10,
               right: 16,
               child: IconButton(
                 icon: const Icon(Icons.close_rounded,

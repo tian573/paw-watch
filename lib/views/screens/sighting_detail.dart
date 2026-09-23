@@ -91,9 +91,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
   String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
+  late final Stream<Sighting?> _sightingStream;
+
   @override
   void initState() {
     super.initState();
+    _sightingStream =
+        FirebaseService.instance.streamSightingById(widget.sighting.id);
     if (widget.initialAction != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
@@ -428,7 +432,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => Padding(
-        padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+        padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
         child: _editSheet(s, tc, dc),
       ),
     );
@@ -683,10 +687,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       builder: (ctx) {
         return StatefulBuilder(
           builder: (sheetContext, setModalState) {
-            final bottomPadding = MediaQuery.of(ctx).padding.bottom;
+            final bottomPadding = MediaQuery.paddingOf(ctx).bottom;
             return Padding(
               padding:
-                  EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+                  EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
               child: Container(
                 decoration: const BoxDecoration(
                   color: Colors.white,
@@ -915,8 +919,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        final maxHeight = MediaQuery.of(ctx).size.height * 0.88;
-        final bottomInset = MediaQuery.of(ctx).padding.bottom;
+        final maxHeight = MediaQuery.sizeOf(ctx).height * 0.88;
+        final bottomInset = MediaQuery.paddingOf(ctx).bottom;
         return Container(
           constraints: BoxConstraints(maxHeight: maxHeight),
           decoration: const BoxDecoration(
@@ -1586,8 +1590,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        final bottomInset = MediaQuery.of(ctx).padding.bottom;
-        final maxH = MediaQuery.of(ctx).size.height * 0.85;
+        final bottomInset = MediaQuery.paddingOf(ctx).bottom;
+        final maxH = MediaQuery.sizeOf(ctx).height * 0.85;
 
         return Container(
           constraints: BoxConstraints(maxHeight: maxH),
@@ -1877,8 +1881,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               proofScanResult?.isCat == true &&
               !isScanningProof &&
               !isSubmitting;
-          final bottomPadding = MediaQuery.of(context).viewInsets.bottom +
-              MediaQuery.of(context).padding.bottom +
+          final bottomPadding = MediaQuery.viewInsetsOf(context).bottom +
+              MediaQuery.paddingOf(context).bottom +
               32;
 
           Future<void> pickProof(ImageSource src) async {
@@ -1911,7 +1915,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
           return Container(
             constraints: BoxConstraints(
-              maxHeight: MediaQuery.of(context).size.height * 0.90,
+              maxHeight: MediaQuery.sizeOf(context).height * 0.90,
             ),
             decoration: const BoxDecoration(
               color: Colors.white,
@@ -2685,8 +2689,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ),
                   ),
                   SizedBox(
-                    height: MediaQuery.of(context).padding.bottom > 0
-                        ? MediaQuery.of(context).padding.bottom + 20
+                    height: MediaQuery.paddingOf(context).bottom > 0
+                        ? MediaQuery.paddingOf(context).bottom + 20
                         : 24,
                   ),
                 ],
@@ -3466,10 +3470,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               (!isTookInAction ||
                   (isCustomGoalValid && areAllMilestonesFilled));
 
-          final bottomPadding = MediaQuery.of(ctx).padding.bottom;
+          final bottomPadding = MediaQuery.paddingOf(ctx).bottom;
           return Padding(
             padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom),
+                bottom: MediaQuery.viewInsetsOf(ctx).bottom),
             child: Container(
               decoration: const BoxDecoration(
                 color: Colors.white,
@@ -4897,7 +4901,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) {
-        final bottomPadding = MediaQuery.of(ctx).padding.bottom;
+        final bottomPadding = MediaQuery.paddingOf(ctx).bottom;
         return Container(
           decoration: const BoxDecoration(
             color: Colors.white,
@@ -5379,10 +5383,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               isNoteValid &&
               isAddrValid;
 
-          final bottomPadding = MediaQuery.of(ctx).padding.bottom;
+          final bottomPadding = MediaQuery.paddingOf(ctx).bottom;
           return Padding(
             padding:
-                EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+                EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
             child: Container(
               decoration: const BoxDecoration(
                 color: Colors.white,
@@ -6321,7 +6325,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<Sighting?>(
-      stream: FirebaseService.instance.streamSightingById(widget.sighting.id),
+      stream: _sightingStream,
       builder: (context, snap) {
         final s = snap.data ?? widget.sighting;
         if (_uid != null && s.blockedUserIds.contains(_uid)) {
@@ -6579,7 +6583,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           _buildCommunity(s),
                           SizedBox(
                             height: ((s.urgency != 'resolved') ? 140.0 : 60.0) +
-                                MediaQuery.of(context).padding.bottom,
+                                MediaQuery.paddingOf(context).bottom,
                           ),
                         ],
                       ),
@@ -6662,7 +6666,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             ),
           ),
           Positioned(
-              top: kToolbarHeight + MediaQuery.of(context).padding.top - 8,
+              top: kToolbarHeight + MediaQuery.paddingOf(context).top - 8,
               left: 16,
               child: s.isTnrCommunityCat
                   ? Container(
@@ -6718,7 +6722,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           : _badge(s.urgency, s)),
           if (has && photos.length > 1)
             Positioned(
-              top: kToolbarHeight + MediaQuery.of(context).padding.top - 8,
+              top: kToolbarHeight + MediaQuery.paddingOf(context).top - 8,
               right: 16,
               child: Container(
                 padding:
@@ -7401,7 +7405,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         builder: (ctx, setSheetState) {
           return Padding(
             padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom),
+                bottom: MediaQuery.viewInsetsOf(ctx).bottom),
             child: Container(
               decoration: const BoxDecoration(
                 color: Colors.white,
@@ -7409,7 +7413,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     BorderRadius.vertical(top: Radius.circular(24)),
               ),
               padding: EdgeInsets.fromLTRB(
-                  20, 16, 20, 28 + MediaQuery.of(ctx).padding.bottom),
+                  20, 16, 20, 28 + MediaQuery.paddingOf(ctx).bottom),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -7900,7 +7904,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
           return Padding(
             padding:
-                EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+                EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
             child: Container(
               decoration: const BoxDecoration(
                 color: Colors.white,
@@ -7908,7 +7912,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     BorderRadius.vertical(top: Radius.circular(24)),
               ),
               padding: EdgeInsets.fromLTRB(
-                  20, 16, 20, 28 + MediaQuery.of(ctx).padding.bottom),
+                  20, 16, 20, 28 + MediaQuery.paddingOf(ctx).bottom),
               child: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -9832,13 +9836,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             }
           }
 
-          final bottomPadding = MediaQuery.of(ctx).padding.bottom;
+          final bottomPadding = MediaQuery.paddingOf(ctx).bottom;
 
           return Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
             child: Container(
               constraints: BoxConstraints(
-                maxHeight: MediaQuery.of(ctx).size.height * 0.88,
+                maxHeight: MediaQuery.sizeOf(ctx).height * 0.88,
               ),
               decoration: const BoxDecoration(
                 color: Colors.white,
@@ -10450,7 +10454,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             }
           }
 
-          final bottomPadding = MediaQuery.of(ctx).padding.bottom;
+          final bottomPadding = MediaQuery.paddingOf(ctx).bottom;
           final sheetTitle = isRehome
               ? 'Celebrate Rehomed Cat! 🏡🎉'
               : (isSheltered
@@ -10481,7 +10485,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               isOutcomeNoteValid;
 
           return Padding(
-            padding: EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+            padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
             child: Container(
               decoration: const BoxDecoration(
                 color: Colors.white,
@@ -11420,10 +11424,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       backgroundColor: Colors.transparent,
       builder: (sheetCtx) => StatefulBuilder(
         builder: (ctx, setSheetState) {
-          final bottomPadding = MediaQuery.of(ctx).padding.bottom;
+          final bottomPadding = MediaQuery.paddingOf(ctx).bottom;
           return Padding(
             padding:
-                EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
+                EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(ctx).bottom),
             child: Container(
               decoration: const BoxDecoration(
                 color: Colors.white,
@@ -11700,7 +11704,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => StatefulBuilder(
         builder: (ctx, setSheetState) {
-          final bottomPadding = MediaQuery.of(ctx).viewInsets.bottom;
+          final bottomPadding = MediaQuery.viewInsetsOf(ctx).bottom;
 
           return Container(
             decoration: const BoxDecoration(
@@ -14726,7 +14730,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
   Widget _editSheet(Sighting s, TextEditingController tc,
           TextEditingController dc) {
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    final bottomPadding = MediaQuery.paddingOf(context).bottom;
     return Container(
       decoration: const BoxDecoration(
           color: Colors.white,
@@ -14869,7 +14873,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         (!claimed && _isOwner(s))) {
       return const SizedBox.shrink();
     }
-    final bottomNavPadding = MediaQuery.of(context).padding.bottom;
+    final bottomNavPadding = MediaQuery.paddingOf(context).bottom;
     return Container(
       decoration: BoxDecoration(
           color: _bgWhite,
@@ -15015,7 +15019,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
               padding: EdgeInsets.fromLTRB(
-                  20, 16, 20, 32 + MediaQuery.of(ctx).padding.bottom),
+                  20, 16, 20, 32 + MediaQuery.paddingOf(ctx).bottom),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,

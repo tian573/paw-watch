@@ -819,7 +819,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
       backgroundColor: Colors.transparent,
       builder: (ctx) => Container(
         padding: EdgeInsets.fromLTRB(
-            20, 16, 20, 28 + MediaQuery.of(ctx).padding.bottom),
+            20, 16, 20, 28 + MediaQuery.paddingOf(ctx).bottom),
         decoration: const BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),

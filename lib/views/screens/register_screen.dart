@@ -321,7 +321,7 @@ class _RegisterScreenState extends State<RegisterScreen>
         ),
         const SizedBox(height: 6),
         SizedBox(
-          width: MediaQuery.of(context).size.width * 0.55,
+          width: MediaQuery.sizeOf(context).width * 0.55,
           child: Text(
             'Join our community and help make streets kinder for cats.',
             style: GoogleFonts.nunito(
@@ -748,7 +748,7 @@ class _RegisterScreenState extends State<RegisterScreen>
           length: 2,
           initialIndex: initialTab,
           child: Container(
-            height: MediaQuery.of(context).size.height * 0.78,
+            height: MediaQuery.sizeOf(context).height * 0.78,
             decoration: const BoxDecoration(
               color: _bgWhite,
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),

@@ -259,6 +259,19 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     }
   }
 
+  Stream<List<Map<String, dynamic>>>? _chatThreadsStream;
+  String? _initializedUid;
+
+  @override
+  void initState() {
+    super.initState();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      _initializedUid = uid;
+      _chatThreadsStream = FirebaseService.instance.streamUserChatThreads(uid);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
@@ -279,8 +292,13 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
       );
     }
 
+    if (_chatThreadsStream == null || _initializedUid != currentUid) {
+      _initializedUid = currentUid;
+      _chatThreadsStream = FirebaseService.instance.streamUserChatThreads(currentUid);
+    }
+
     return StreamBuilder<List<Map<String, dynamic>>>(
-      stream: FirebaseService.instance.streamUserChatThreads(currentUid),
+      stream: _chatThreadsStream,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           debugPrint('⚠️ Firestore streamUserChatThreads error: ${snapshot.error}');
@@ -457,7 +475,10 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                                         s?.displayTitle ?? chat['sightingTitle'] ?? 'Rescue Sighting';
                                     final otherName = s != null
                                         ? (s.reporterId == currentUid
-                                            ? (s.careTakerName ?? s.pendingHandoverRescuerName ?? 'Volunteer')
+                                            ? (s.careTakerName ??
+                                                s.pendingHandoverRescuerName ??
+                                                chat['otherUserName'] ??
+                                                'Volunteer')
                                             : s.reporterName)
                                         : (chat['otherUserName'] ?? 'Member');
                                     final photo = s?.photoUrls.isNotEmpty == true
@@ -825,6 +846,19 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                                                     ? 'Foster Caretaker'
                                                     : 'Reporter',
                                               ),
+                                            ),
+                                          );
+                                        } else {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(
+                                              content: Text(
+                                                sSnap.connectionState == ConnectionState.waiting
+                                                    ? 'Loading sighting details, please wait...'
+                                                    : 'This sighting is no longer available.',
+                                                style: GoogleFonts.nunito(fontWeight: FontWeight.w700),
+                                              ),
+                                              duration: const Duration(seconds: 2),
+                                              behavior: SnackBarBehavior.floating,
                                             ),
                                           );
                                         }

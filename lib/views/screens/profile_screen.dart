@@ -34,7 +34,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         builder: (ctx, setSheetState) {
           return Padding(
             padding: EdgeInsets.only(
-                bottom: MediaQuery.of(ctx).viewInsets.bottom),
+                bottom: MediaQuery.viewInsetsOf(ctx).bottom),
             child: Container(
               decoration: const BoxDecoration(
                 color: Colors.white,
