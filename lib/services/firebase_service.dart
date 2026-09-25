@@ -1548,6 +1548,31 @@ class FirebaseService {
     });
   }
 
+  /// Report/flag a user review or endorsement for admin review
+  Future<void> flagReview({
+    required String targetUserId,
+    required String reviewerName,
+    required String comment,
+    required double rating,
+    required String reason,
+    String? details,
+  }) async {
+    final user = _auth.currentUser;
+    await _firestore.collection('flags').add({
+      'type': 'review',
+      'targetUserId': targetUserId,
+      'reviewerName': reviewerName,
+      'comment': comment,
+      'rating': rating,
+      'reportedBy': user?.uid ?? 'anon',
+      'reporterEmail': user?.email ?? '',
+      'reason': reason,
+      'details': details ?? '',
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
+
   /// Block a user from viewing a specific sighting report details
   Future<void> blockUserFromSighting({
     required String sightingId,
@@ -1665,16 +1690,21 @@ class FirebaseService {
     String? displayName,
     String? bio,
     String? city,
+    String? photoUrl,
   }) async {
     final data = <String, dynamic>{};
     if (displayName != null) data['displayName'] = displayName.trim();
     if (bio != null) data['bio'] = bio.trim();
     if (city != null) data['city'] = city.trim();
+    if (photoUrl != null) data['photoUrl'] = photoUrl;
 
     if (data.isNotEmpty) {
       await _firestore.collection('users').doc(uid).set(data, SetOptions(merge: true));
       if (displayName != null && _auth.currentUser != null) {
         await _auth.currentUser!.updateDisplayName(displayName.trim());
+      }
+      if (photoUrl != null && _auth.currentUser != null) {
+        await _auth.currentUser!.updatePhotoURL(photoUrl);
       }
     }
   }

@@ -2306,51 +2306,19 @@ class _HomeScreenState extends State<HomeScreen>
                         .withValues(alpha: 0.25),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.hourglass_top_rounded,
-                        size: 12,
-                        color: isReporter
-                            ? const Color(0xFFE65100)
-                            : const Color(0xFF4A148C),
-                      ),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          isReporter
-                              ? 'Needs Your Verification'
-                              : 'Awaiting Reporter Verification',
-                          style: GoogleFonts.nunito(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w800,
-                            color: isReporter
-                                ? const Color(0xFFE65100)
-                                : const Color(0xFF4A148C),
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(width: 6),
-              InkWell(
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => SightingDetailScreen(sighting: s),
+                  child: Text(
+                    isReporter
+                        ? 'Needs Your Verification'
+                        : 'Awaiting Reporter Verification',
+                    style: GoogleFonts.nunito(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w800,
+                      color: isReporter
+                          ? const Color(0xFFE65100)
+                          : const Color(0xFF4A148C),
                     ),
-                  );
-                },
-                borderRadius: BorderRadius.circular(12),
-                child: Padding(
-                  padding: const EdgeInsets.all(4),
-                  child: Icon(Icons.open_in_new_rounded,
-                      size: 18, color: const Color(0xFF7B1FA2).withValues(alpha: 0.8)),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               ),
             ],
@@ -2446,8 +2414,8 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               label: Text(
                 isReporter
-                    ? 'Review & Verify Receipt 🩺'
-                    : 'View Report & Coordinate Chat 💬',
+                    ? 'Review & Verify Receipt'
+                    : 'View Report & Coordinate Chat',
                 style: GoogleFonts.nunito(
                   fontWeight: FontWeight.w800,
                   fontSize: 12.5,

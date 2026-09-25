@@ -380,10 +380,28 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                       ),
                     ),
                   ),
-            body: Column(
+            body: Stack(
               children: [
-                if (_isDeleting)
-                  const LinearProgressIndicator(
+                Positioned.fill(
+                  top: -40,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      Image.asset(
+                        'assets/images/chatbg.png',
+                        fit: BoxFit.cover,
+                        alignment: Alignment.topCenter,
+                      ),
+                      Container(
+                        color: Colors.black.withValues(alpha: 0.01),
+                      ),
+                    ],
+                  ),
+                ),
+                Column(
+                  children: [
+                    if (_isDeleting)
+                      const LinearProgressIndicator(
                     color: Color(0xFF673AB7),
                     backgroundColor: Color(0xFFEDE7F6),
                     minHeight: 3,
@@ -397,55 +415,68 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                       : chats.isEmpty
                           ? Center(
                               child: Padding(
-                                padding: const EdgeInsets.all(32),
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  children: [
-                                    Container(
-                                      padding: const EdgeInsets.all(12),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFFF1F0F5),
-                                        shape: BoxShape.circle,
-                                        border: Border.all(
-                                          color: _navy.withValues(alpha: 0.08),
-                                          width: 1.0,
+                                padding: const EdgeInsets.all(28),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 24, vertical: 32),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.95),
+                                    borderRadius: BorderRadius.circular(24),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.08),
+                                        blurRadius: 16,
+                                        offset: const Offset(0, 4),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.all(12),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFF1F0F5),
+                                          shape: BoxShape.circle,
+                                          border: Border.all(
+                                            color: _navy.withValues(alpha: 0.08),
+                                            width: 1.0,
+                                          ),
+                                        ),
+                                        child: Image.asset(
+                                          'assets/images/cattalking.png',
+                                          width: 76,
+                                          height: 76,
+                                          fit: BoxFit.contain,
                                         ),
                                       ),
-                                      child: Image.asset(
-                                        'assets/images/cattalking.png',
-                                        width: 76,
-                                        height: 76,
-                                        fit: BoxFit.contain,
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        'No Messages Yet',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w900,
+                                          color: _navy,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(height: 16),
-                                    Text(
-                                      'No Messages Yet',
-                                      style: GoogleFonts.nunito(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.w900,
-                                        color: _navy,
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'When you coordinate a foster handover or rescue with another member, your 1-on-1 chats will appear here.',
+                                        textAlign: TextAlign.center,
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 13,
+                                          color: _navy.withValues(alpha: 0.6),
+                                          height: 1.4,
+                                        ),
                                       ),
-                                    ),
-                                    const SizedBox(height: 8),
-                                    Text(
-                                      'When you coordinate a foster handover or rescue with another member, your 1-on-1 chats will appear here.',
-                                      textAlign: TextAlign.center,
-                                      style: GoogleFonts.nunito(
-                                        fontSize: 13,
-                                        color: _navy.withValues(alpha: 0.6),
-                                        height: 1.4,
-                                      ),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 ),
                               ),
                             )
-                          : ListView.separated(
-                              padding: const EdgeInsets.symmetric(vertical: 8),
+                          : ListView.builder(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                               itemCount: chats.length,
-                              separatorBuilder: (context, index) =>
-                                  Divider(height: 1, color: _navy.withValues(alpha: 0.06)),
                               itemBuilder: (context, index) {
                                 final chat = chats[index];
                                 final chatId = chat['chatId']?.toString() ?? '';
@@ -485,25 +516,37 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                                         ? s!.photoUrls.first
                                         : (chat['sightingPhoto']?.toString() ?? '');
 
-                                    return ListTile(
-                                      contentPadding:
-                                          const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                                      tileColor: isSelected
-                                          ? const Color(0xFF673AB7).withValues(alpha: 0.1)
-                                          : (isUnread
-                                              ? const Color(0xFF673AB7).withValues(alpha: 0.04)
-                                              : Colors.transparent),
-                                      shape: isSelected
-                                          ? const Border(
-                                              left: BorderSide(
-                                                  color: Color(0xFF673AB7), width: 4),
-                                            )
-                                          : (isUnread
-                                              ? const Border(
-                                                  left: BorderSide(
-                                                      color: Color(0xFF673AB7), width: 3.5),
-                                                )
-                                              : null),
+                                    return Container(
+                                      margin: const EdgeInsets.only(bottom: 8),
+                                      decoration: BoxDecoration(
+                                        color: isSelected
+                                            ? const Color(0xFFF3EDFC)
+                                            : (isUnread ? Colors.white : Colors.white.withValues(alpha: 0.94)),
+                                        borderRadius: BorderRadius.circular(18),
+                                        border: Border.all(
+                                          color: isSelected
+                                              ? const Color(0xFF673AB7)
+                                              : (isUnread
+                                                  ? const Color(0xFF673AB7).withValues(alpha: 0.35)
+                                                  : Colors.white),
+                                          width: isSelected ? 1.8 : 1.0,
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.06),
+                                            blurRadius: 8,
+                                            offset: const Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(18),
+                                        child: Material(
+                                          color: Colors.transparent,
+                                          child: ListTile(
+                                            contentPadding: const EdgeInsets.symmetric(
+                                                horizontal: 14, vertical: 6),
+                                            tileColor: Colors.transparent,
                                       leading: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
@@ -863,16 +906,21 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
                                           );
                                         }
                                       },
-                                    );
-                                  },
-                                );
-                              },
-                            ),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          );
+                        },
+                      ),
                 ),
               ],
             ),
-          ),
-        );
+          ],
+        ),
+      ),
+    );
       },
     );
   }

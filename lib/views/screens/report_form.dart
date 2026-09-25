@@ -38,7 +38,6 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
 
   String _reportType = 'needsHelp'; // 'needsHelp' or 'resolved'
   String? _selectedCategory; // null = completely neutral start
-  String? _selectedTemperament; // null = completely neutral start
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
@@ -998,82 +997,143 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
     );
   }
 
+  Widget _buildCategoryBoxItem(Map<String, dynamic> cat) {
+    final key = cat['key'] as String;
+    final isSelected = _selectedCategory == key;
+    final col = cat['color'] as Color;
+
+    return GestureDetector(
+      onTap: () => setState(() {
+        _selectedCategory = key;
+      }),
+      behavior: HitTestBehavior.opaque,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Title on top
+          Text(
+            cat['label'] as String,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.nunito(
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+              color: isSelected ? col : _navy,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 7),
+          // Big box with custom icon in the center
+          AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: 96,
+            height: 96,
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? col.withValues(alpha: 0.10)
+                  : const Color(0xFFF0F2F5),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: isSelected ? col : _navy.withValues(alpha: 0.12),
+                width: isSelected ? 2.2 : 1.2,
+              ),
+              boxShadow: isSelected
+                  ? [
+                      BoxShadow(
+                        color: col.withValues(alpha: 0.22),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Center(
+                  child: Image.asset(
+                    cat['asset'] as String,
+                    width: 58,
+                    height: 58,
+                    fit: BoxFit.contain,
+                  ),
+                ),
+                if (isSelected)
+                  Positioned(
+                    top: 6,
+                    right: 6,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: col,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.check_rounded,
+                        size: 13,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          // Short description at the bottom
+          Text(
+            cat['sublabel'] as String,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.nunito(
+              fontSize: 11,
+              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+              color: isSelected ? col : _navy.withValues(alpha: 0.55),
+              height: 1.2,
+            ),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCategorySection() {
     final categories = [
       {
-        'key': 'Urgent Rescue',
-        'icon': Icons.warning_amber_rounded,
-        'label': 'Trapped / In Danger',
-        'sublabel': 'Requires immediate extraction',
-        'taskType': '🎯 One-Time Task',
-        'color': const Color(0xFFFF5722),
-      },
-      {
         'key': 'Kitten',
-        'icon': Icons.pets,
-        'label': 'Vulnerable Kitten(s)',
-        'sublabel': 'Needs foster, shelter, or checkup',
-        'taskType': '🎯 One-Time Task',
+        'label': 'Vulnerable',
+        'sublabel': 'Kitten or high-risk cat',
+        'asset': 'assets/images/vulnerable.png',
         'color': const Color(0xFFE91E63),
       },
       {
         'key': 'Injured',
-        'icon': Icons.healing_outlined,
-        'label': 'Injured / Sick',
-        'sublabel': 'Needs vet visit or medical care',
-        'taskType': '🎯 One-Time Task',
+        'label': 'Injured/Sick',
+        'sublabel': 'Needs medical / vet care',
+        'asset': 'assets/images/injuredsick.png',
         'color': _urgent,
       },
       {
+        'key': 'Urgent Rescue',
+        'label': 'Trapped',
+        'sublabel': 'Immediate extraction',
+        'asset': 'assets/images/trapped.png',
+        'color': const Color(0xFFFF5722),
+      },
+      {
         'key': 'Needs Foster',
-        'icon': Icons.home_outlined,
-        'label': 'Needs Foster / Home',
-        'sublabel': 'Looking for an adopter or temporary home',
-        'taskType': '🎯 One-Time Task',
+        'label': 'Needs Home',
+        'sublabel': 'Seeking foster or adoption',
+        'asset': 'assets/images/needshome.png',
         'color': const Color(0xFF9C27B0),
       },
       {
         'key': 'Stray',
-        'icon': Icons.restaurant_outlined,
-        'label': 'Stray / Feeding Spot',
-        'sublabel': 'Needs food or daily community care',
-        'taskType': '🍲 Ongoing Care',
+        'label': 'Stray Community Care',
+        'sublabel': 'Daily feeding & community care',
+        'asset': 'assets/images/straycare.png',
         'color': _lavender,
-      },
-    ];
-
-    final temperaments = [
-      {
-        'key': 'friendly',
-        'icon': Icons.favorite_rounded,
-        'label': 'Friendly Pet (Adoptable)',
-        'sub': 'Approaches humans, meows, enjoys pets. Ideal for Adoption / Home.',
-        'tag': '🏡 Pet / Wants Home',
-        'color': const Color(0xFF9C27B0),
-      },
-      {
-        'key': 'shy',
-        'icon': Icons.sentiment_neutral_rounded,
-        'label': 'Shy / Timid Stray',
-        'sub': 'Cautious of people, but not wild. Socializable indoors with patience.',
-        'tag': '🏠 Needs Foster Care',
-        'color': const Color(0xFF1E88E5),
-      },
-      {
-        'key': 'feral',
-        'icon': Icons.nature_people_rounded,
-        'label': 'Feral / Colony Adult',
-        'sub': 'Avoids humans, never meows, hisses if cornered. Best for TNR colony care.',
-        'tag': '🌿 TNR Candidate',
-        'color': const Color(0xFF00897B),
-      },
-      {
-        'key': 'kitten',
-        'icon': Icons.pets_rounded,
-        'label': 'Kitten (Under 4 Months)',
-        'sub': 'Young and highly socializable. Requires foster care, nursing, or adoption.',
-        'tag': '🍼 Kitten / High Priority',
-        'color': const Color(0xFFE91E63),
       },
     ];
 
@@ -1086,327 +1146,33 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             title: '3. Cat Situation & Goal',
             subtitle: 'Choose category to set permitted rescue actions.',
           ),
-          const SizedBox(height: 12),
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: categories.length,
-            separatorBuilder: (context, index) => const SizedBox(height: 8),
-            itemBuilder: (context, index) {
-              final cat = categories[index];
-              final key = cat['key'] as String;
-              final isSelected = _selectedCategory == key;
-              final col = cat['color'] as Color;
-
-              return GestureDetector(
-                onTap: () => setState(() {
-                  _selectedCategory = key;
-                }),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 11),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? col.withValues(alpha: 0.08)
-                        : Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isSelected
-                          ? col
-                          : _navy.withValues(alpha: 0.1),
-                      width: isSelected ? 1.8 : 1,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: col.withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(cat['icon'] as IconData,
-                            size: 18, color: col),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    cat['label'] as String,
-                                    style: GoogleFonts.nunito(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w800,
-                                      color: _navy,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: col.withValues(alpha: 0.1),
-                                    borderRadius:
-                                        BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    cat['taskType'] as String,
-                                    style: GoogleFonts.nunito(
-                                      fontSize: 9.5,
-                                      fontWeight: FontWeight.w800,
-                                      color: col,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              cat['sublabel'] as String,
-                              style: GoogleFonts.nunito(
-                                fontSize: 11,
-                                color: _navy.withValues(alpha: 0.55),
-                                fontWeight: FontWeight.w600,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Icon(
-                        isSelected
-                            ? Icons.radio_button_checked
-                            : Icons.radio_button_off,
-                        color: isSelected
-                            ? col
-                            : _navy.withValues(alpha: 0.25),
-                        size: 20,
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
-          const SizedBox(height: 18),
-          const Divider(height: 1, color: Color(0x14000000)),
-          const SizedBox(height: 14),
+          const SizedBox(height: 16),
+          // Top Row: Vulnerable & Injured/Sick
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: _lavender.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(Icons.psychology_outlined,
-                    size: 16, color: _lavender),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Cat Socialization & Temperament (Optional)',
-                      style: GoogleFonts.nunito(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w900,
-                        color: _navy,
-                      ),
-                    ),
-                    Text(
-                      'Helps determine if cat fits in a home or outdoor TNR colony.',
-                      style: GoogleFonts.nunito(
-                        fontSize: 11,
-                        color: _navy.withValues(alpha: 0.55),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              Expanded(child: _buildCategoryBoxItem(categories[0])),
+              const SizedBox(width: 12),
+              Expanded(child: _buildCategoryBoxItem(categories[1])),
             ],
           ),
-          const SizedBox(height: 10),
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: temperaments.length,
-            separatorBuilder: (context, index) => const SizedBox(height: 7),
-            itemBuilder: (context, index) {
-              final item = temperaments[index];
-              final key = item['key'] as String;
-              final isSelected = _selectedTemperament == key;
-              final col = item['color'] as Color;
-
-              return GestureDetector(
-                onTap: () => setState(() {
-                  _selectedTemperament = isSelected ? null : key;
-                }),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 9),
-                  decoration: BoxDecoration(
-                    color: isSelected
-                        ? col.withValues(alpha: 0.08)
-                        : Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isSelected ? col : _navy.withValues(alpha: 0.1),
-                      width: isSelected ? 1.8 : 1,
-                    ),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(7),
-                        decoration: BoxDecoration(
-                          color: col.withValues(alpha: 0.12),
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(item['icon'] as IconData,
-                            size: 16, color: col),
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    item['label'] as String,
-                                    style: GoogleFonts.nunito(
-                                      fontSize: 12.5,
-                                      fontWeight: FontWeight.w800,
-                                      color: _navy,
-                                    ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                const SizedBox(width: 6),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 6, vertical: 2),
-                                  decoration: BoxDecoration(
-                                    color: col.withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(6),
-                                  ),
-                                  child: Text(
-                                    item['tag'] as String,
-                                    style: GoogleFonts.nunito(
-                                      fontSize: 9,
-                                      fontWeight: FontWeight.w800,
-                                      color: col,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              item['sub'] as String,
-                              style: GoogleFonts.nunito(
-                                fontSize: 10.5,
-                                color: _navy.withValues(alpha: 0.55),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            },
+          const SizedBox(height: 16),
+          // Middle Row: Trapped (Centered)
+          Center(
+            child: SizedBox(
+              width: 130,
+              child: _buildCategoryBoxItem(categories[2]),
+            ),
           ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: const Color(0xFF00897B).withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: const Color(0xFF00897B).withValues(alpha: 0.22),
-              ),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF00897B).withValues(alpha: 0.12),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Text('🐱✂️', style: TextStyle(fontSize: 18)),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '💡 Rescuer Tip: The Clipped Left Ear',
-                              style: GoogleFonts.nunito(
-                                fontSize: 12.5,
-                                fontWeight: FontWeight.w900,
-                                color: const Color(0xFF00695C),
-                              ),
-                            ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 6, vertical: 1.5),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF00897B)
-                                  .withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              'TNR Fun Fact',
-                              style: GoogleFonts.nunito(
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.w800,
-                                color: const Color(0xFF00695C),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Notice a flat notch on the cat\'s left ear tip? That is the universal international sign that this colony cat was already spayed/neutered and vaccinated!',
-                        style: GoogleFonts.nunito(
-                          fontSize: 11,
-                          color: _navy.withValues(alpha: 0.68),
-                          fontWeight: FontWeight.w600,
-                          height: 1.35,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
+          const SizedBox(height: 16),
+          // Bottom Row: Needs Home & Stray Community Care
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(child: _buildCategoryBoxItem(categories[3])),
+              const SizedBox(width: 12),
+              Expanded(child: _buildCategoryBoxItem(categories[4])),
+            ],
           ),
         ],
       ),
@@ -2216,9 +1982,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
       finalUrgency = 'resolved';
       finalCategory = 'Resolved';
     } else {
-      finalCategory = _selectedTemperament == 'feral'
-          ? 'Feral / Colony Cat'
-          : (_selectedCategory ?? 'Stray');
+      finalCategory = _selectedCategory ?? 'Stray';
       finalUrgency = (_selectedCategory == 'Injured' ||
               _selectedCategory == 'Urgent Rescue' ||
               _selectedCategory == 'Kitten')
@@ -2237,7 +2001,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
         urgency: finalUrgency,
         category: finalCategory,
         routineHours: _routineHoursController.text.trim(),
-        temperament: _selectedTemperament,
+        temperament: null,
       );
 
       if (mounted) {

@@ -2707,7 +2707,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       _snack('Vet visit has already been verified. Diagnosis cannot be modified.');
       return;
     }
-    String selectedTemp = s.temperament ?? 'feral';
+    final isNeedsRehomed = s.category == 'Needs Foster' ||
+        s.category == 'Needs Home' ||
+        s.isNeedsHome ||
+        s.isOpenForAdoption;
+    String selectedTemp = s.temperament ?? (isNeedsRehomed ? 'friendly' : 'feral');
+    if (isNeedsRehomed && selectedTemp == 'feral') {
+      selectedTemp = 'friendly';
+    }
     final noteCtrl = TextEditingController();
 
     await showDialog<void>(
@@ -2748,13 +2755,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 ),
                 const SizedBox(height: 12),
                 ...[
-                  {
-                    'key': 'feral',
-                    'label': '🌿 Feral / Colony Adult (Mandatory TNR)',
-                    'desc':
-                        'Unsocialized to humans. Cannot be adopted indoors; must be safely returned to colony.',
-                    'color': const Color(0xFF00897B),
-                  },
+                  if (!isNeedsRehomed)
+                    {
+                      'key': 'feral',
+                      'label': '🌿 Feral / Colony Adult (Mandatory TNR)',
+                      'desc':
+                          'Unsocialized to humans. Cannot be adopted indoors; must be safely returned to colony.',
+                      'color': const Color(0xFF00897B),
+                    },
                   {
                     'key': 'shy',
                     'label': '🐾 Shy / Timid Stray',
@@ -4301,11 +4309,15 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   'label': '🐾 Shy Stray',
                                   'color': const Color(0xFF1E88E5),
                                 },
-                                {
-                                  'key': 'feral',
-                                  'label': '🌿 Feral Adult (TNR)',
-                                  'color': const Color(0xFF00897B),
-                                },
+                                if (!(s.category == 'Needs Foster' ||
+                                    s.category == 'Needs Home' ||
+                                    s.isNeedsHome ||
+                                    s.isOpenForAdoption))
+                                  {
+                                    'key': 'feral',
+                                    'label': '🌿 Feral Adult (TNR)',
+                                    'color': const Color(0xFF00897B),
+                                  },
                                 {
                                   'key': 'kitten',
                                   'label': '🍼 Kitten',
