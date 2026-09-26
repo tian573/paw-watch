@@ -40,6 +40,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   final _picker = ImagePicker();
   final _commentCtrl = TextEditingController();
   final _replyCtrl = TextEditingController();
+  final _actionsScrollController = ScrollController();
   int _photoPage = 0;
   String? _replyingToId;
   String? _replyingToName;
@@ -117,6 +118,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   void dispose() {
     _commentCtrl.dispose();
     _replyCtrl.dispose();
+    _actionsScrollController.dispose();
     super.dispose();
   }
 
@@ -12748,35 +12750,40 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         'icon': Icons.medical_services,
         'label': 'Vet Visit',
         'xp': '+100 XP',
-        'sub': 'Took to vet'
+        'sub': 'Took to vet',
+        'asset': 'assets/images/guardianangel.png',
       },
       {
         'key': 'tookIn',
         'icon': Icons.home,
         'label': 'Took In',
         'xp': '+150 XP',
-        'sub': 'Taking care'
+        'sub': 'Taking care',
+        'asset': 'assets/images/needshome.png',
       },
       {
         'key': 'sheltered',
         'icon': Icons.house,
         'label': 'Sheltered',
         'xp': '+120 XP',
-        'sub': 'In shelter'
+        'sub': 'In shelter',
+        'asset': 'assets/images/shelter.png',
       },
       {
         'key': 'fed',
         'icon': Icons.restaurant,
         'label': 'Fed',
         'xp': '+30 XP',
-        'sub': 'Gave food'
+        'sub': 'Gave food',
+        'asset': 'assets/images/straycare.png',
       },
       {
         'key': 'roaming',
         'icon': Icons.edit_location_alt_outlined,
         'label': 'Still Here / Move',
         'xp': '+15-25 XP',
-        'sub': 'Update spot'
+        'sub': 'Update spot',
+        'asset': 'assets/images/location.png',
       },
     ];
 
@@ -12794,14 +12801,16 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           'icon': Icons.favorite_rounded,
           'label': 'Rehomed',
           'xp': '+200 XP',
-          'sub': 'Found forever home'
+          'sub': 'Found forever home',
+          'asset': 'assets/images/needshome.png',
         },
         {
           'key': 'sheltered',
           'icon': Icons.house_rounded,
           'label': 'Sheltered',
           'xp': '+120 XP',
-          'sub': 'In shelter'
+          'sub': 'In shelter',
+          'asset': 'assets/images/shelter.png',
         },
       ];
     } else if (s.isTnrCommunityCat) {
@@ -12828,9 +12837,6 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       acts = allActs;
     }
 
-    final int cols = acts.length <= 2 ? 2 : (acts.length == 4 ? 2 : 3);
-    final double ratio =
-        acts.length <= 2 ? 1.35 : (acts.length == 4 ? 1.2 : 0.92);
     final uid = _uid;
     final isClaimed = s.rescueClaimed;
     final isClaimedByMe = isClaimed && uid != null && s.rescueClaimedBy == uid;
@@ -13309,163 +13315,251 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           (!s.hasVetVisit || s.isTnrCommunityCat) &&
           !s.isCommunityFosterRequested) ...[
         const SizedBox(height: 12),
-        GridView.count(
-        crossAxisCount: cols,
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        mainAxisSpacing: 8,
-        crossAxisSpacing: 8,
-        childAspectRatio: ratio,
-        children: acts.map((a) {
-          final key = a['key'] as String;
-          final isTookIn = key == 'tookIn';
-          final isDeclinedTookIn = isTookIn && isFosterDeclinedForMe;
-          final isSel = _myAction == key;
-          final isTileLocked = isLockedForMe || isDeclinedTookIn;
-          final isVetPriorityTile =
-              key == 'vet' && s.isMedicalOrTriagePriority && !s.hasVetVisit;
-          final col = _aColor(key);
-          return GestureDetector(
-            onTap: () {
-              if (_isActionSheetOpen) return;
-              if (!DoubleTapGuard.allow('action_tile_${key}_${s.id}')) return;
-              if (isDeclinedTookIn) {
-                _snack(
-                    'Your foster custody request for this cat was previously declined by the reporter.');
-                return;
-              }
-              if (isLockedForMe) {
-                if (isVetPending) {
-                  _snack(_isOwner(s)
-                      ? '⏳ Actions are locked while vet visit report is pending. Please verify or decline the report in the banner above.'
-                      : '⏳ ${s.pendingVetRescuerName?.isNotEmpty == true ? s.pendingVetRescuerName : "A rescuer"} submitted a vet visit report. Actions are locked pending verification.');
-                } else if (s.isAwaitingPostVetDecision) {
-                  _snack(
-                      '⏳ ${s.lastVetRescuerName?.isNotEmpty == true ? s.lastVetRescuerName : "The rescuer"} is currently in charge of this cat after vet care.');
-                } else {
-                  _snack(
-                      '🏃 ${s.rescueClaimedByName.isNotEmpty ? s.rescueClaimedByName : "A rescuer"} is already heading to help this cat.');
-                }
-                return;
-              }
-              if (key == 'roaming') {
-                _showRoamingUpdateSheet(s);
-              } else if (key == 'rehomed') {
-                _showOutcomeConfirmationRequestSheet('rehomed', s);
-              } else if (s.isFeral &&
-                  (key == 'tookIn' || key == 'sheltered')) {
-                _snack(
-                    '🌿 This is an unsocialized feral cat. Foster and shelter adoptions are not suitable for feral cats. Mandatory TNR Return to Colony is the only permitted outcome.');
-              } else if ((key == 'tookIn' || key == 'sheltered') &&
-                  s.isMedicalOrTriagePriority &&
-                  !s.hasVetVisit) {
-                _showMedicalTriageGuidanceDialog(s, key);
-              } else {
-                _showActionProofSheet(key, s);
-              }
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              decoration: BoxDecoration(
-                color: isTileLocked
-                    ? Colors.grey.withValues(alpha: 0.08)
-                    : (isVetPriorityTile
-                        ? const Color(0xFF673AB7).withValues(alpha: 0.08)
-                        : (isSel ? col.withValues(alpha: 0.1) : _cardBg)),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                    color: isTileLocked
-                        ? (isDeclinedTookIn
-                            ? Colors.red.shade200
-                            : Colors.grey.withValues(alpha: 0.2))
-                        : (isVetPriorityTile
-                            ? const Color(0xFF673AB7)
-                            : (isSel ? col : _navy.withValues(alpha: 0.1))),
-                    width: (isSel || isVetPriorityTile) ? 1.5 : 1),
-              ),
-              child: Opacity(
-                opacity: isTileLocked ? 0.65 : 1.0,
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (isVetPriorityTile)
-                      Container(
-                        margin: const EdgeInsets.only(bottom: 2),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 1.5),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF673AB7),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          '⭐ Priority 1st',
-                          style: GoogleFonts.nunito(
-                            fontSize: 9,
-                            fontWeight: FontWeight.w900,
-                            color: Colors.white,
+        Container(
+          height: acts.length <= 2 ? 340 : 380,
+          decoration: BoxDecoration(
+            color: const Color(0xFFF9F9FB),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: _navy.withValues(alpha: 0.08),
+              width: 1.2,
+            ),
+          ),
+          child: RawScrollbar(
+            thumbVisibility: true,
+            trackVisibility: true,
+            thickness: 6,
+            radius: const Radius.circular(8),
+            thumbColor: _navy.withValues(alpha: 0.3),
+            trackColor: _navy.withValues(alpha: 0.06),
+            trackRadius: const Radius.circular(8),
+            controller: _actionsScrollController,
+            child: ListView.separated(
+              controller: _actionsScrollController,
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
+              itemCount: acts.length,
+              separatorBuilder: (context, index) => const SizedBox(height: 22),
+              itemBuilder: (context, index) {
+                final a = acts[index];
+                final key = a['key'] as String;
+                final isTookIn = key == 'tookIn';
+                final isDeclinedTookIn = isTookIn && isFosterDeclinedForMe;
+                final isSel = _myAction == key;
+                final isTileLocked = isLockedForMe || isDeclinedTookIn;
+                final isVetPriorityTile =
+                    key == 'vet' && s.isMedicalOrTriagePriority && !s.hasVetVisit;
+                final col = _aColor(key);
+                final assetPath = a['asset'] as String?;
+
+                return GestureDetector(
+                  onTap: () {
+                    if (_isActionSheetOpen) return;
+                    if (!DoubleTapGuard.allow('action_tile_${key}_${s.id}')) return;
+                    if (isDeclinedTookIn) {
+                      _snack(
+                          'Your foster custody request for this cat was previously declined by the reporter.');
+                      return;
+                    }
+                    if (isLockedForMe) {
+                      if (isVetPending) {
+                        _snack(_isOwner(s)
+                            ? '⏳ Actions are locked while vet visit report is pending. Please verify or decline the report in the banner above.'
+                            : '⏳ ${s.pendingVetRescuerName?.isNotEmpty == true ? s.pendingVetRescuerName : "A rescuer"} submitted a vet visit report. Actions are locked pending verification.');
+                      } else if (s.isAwaitingPostVetDecision) {
+                        _snack(
+                            '⏳ ${s.lastVetRescuerName?.isNotEmpty == true ? s.lastVetRescuerName : "The rescuer"} is currently in charge of this cat after vet care.');
+                      } else {
+                        _snack(
+                            '🏃 ${s.rescueClaimedByName.isNotEmpty ? s.rescueClaimedByName : "A rescuer"} is already heading to help this cat.');
+                      }
+                      return;
+                    }
+                    if (key == 'roaming') {
+                      _showRoamingUpdateSheet(s);
+                    } else if (key == 'rehomed') {
+                      _showOutcomeConfirmationRequestSheet('rehomed', s);
+                    } else if (s.isFeral &&
+                        (key == 'tookIn' || key == 'sheltered')) {
+                      _snack(
+                          '🌿 This is an unsocialized feral cat. Foster and shelter adoptions are not suitable for feral cats. Mandatory TNR Return to Colony is the only permitted outcome.');
+                    } else if ((key == 'tookIn' || key == 'sheltered') &&
+                        s.isMedicalOrTriagePriority &&
+                        !s.hasVetVisit) {
+                      _showMedicalTriageGuidanceDialog(s, key);
+                    } else {
+                      _showActionProofSheet(key, s);
+                    }
+                  },
+                  behavior: HitTestBehavior.opaque,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      // 1. Action Name (Title at top)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (isVetPriorityTile) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 6, vertical: 2),
+                              margin: const EdgeInsets.only(right: 6),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF673AB7),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                '⭐ Priority 1st',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w900,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ],
+                          Text(
+                            a['label'] as String,
+                            textAlign: TextAlign.center,
+                            style: GoogleFonts.nunito(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w800,
+                              color: isDeclinedTookIn
+                                  ? Colors.red.shade400
+                                  : (isTileLocked
+                                      ? _navy.withValues(alpha: 0.5)
+                                      : (isVetPriorityTile
+                                          ? const Color(0xFF673AB7)
+                                          : _navy)),
+                            ),
                           ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+
+                      // 2. Big box with custom icon in the center
+                      AnimatedContainer(
+                        duration: const Duration(milliseconds: 200),
+                        width: 110,
+                        height: 110,
+                        decoration: BoxDecoration(
+                          color: isTileLocked
+                              ? Colors.grey.withValues(alpha: 0.08)
+                              : (isVetPriorityTile
+                                  ? const Color(0xFF673AB7).withValues(alpha: 0.08)
+                                  : (isSel
+                                      ? col.withValues(alpha: 0.12)
+                                      : Colors.white)),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isTileLocked
+                                ? (isDeclinedTookIn
+                                    ? Colors.red.shade200
+                                    : Colors.grey.withValues(alpha: 0.2))
+                                : (isVetPriorityTile
+                                    ? const Color(0xFF673AB7)
+                                    : (isSel
+                                        ? col
+                                        : _navy.withValues(alpha: 0.14))),
+                            width: (isSel || isVetPriorityTile) ? 2.5 : 1.2,
+                          ),
+                          boxShadow: isTileLocked
+                              ? null
+                              : [
+                                  BoxShadow(
+                                    color: (isVetPriorityTile
+                                            ? const Color(0xFF673AB7)
+                                            : col)
+                                        .withValues(alpha: 0.16),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 3),
+                                  ),
+                                ],
+                        ),
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Opacity(
+                              opacity: isTileLocked ? 0.45 : 1.0,
+                              child: assetPath != null
+                                  ? Image.asset(
+                                      assetPath,
+                                      width: 66,
+                                      height: 66,
+                                      fit: BoxFit.contain,
+                                    )
+                                  : Icon(
+                                      isDeclinedTookIn
+                                          ? Icons.block_rounded
+                                          : (a['icon'] as IconData),
+                                      size: 40,
+                                      color: isDeclinedTookIn
+                                          ? Colors.red.shade400
+                                          : (isVetPriorityTile
+                                              ? const Color(0xFF673AB7)
+                                              : col),
+                                    ),
+                            ),
+                            if (isTileLocked && !isDeclinedTookIn)
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.45),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.lock_rounded,
+                                  size: 16,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            if (isDeclinedTookIn)
+                              Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color:
+                                      Colors.red.shade400.withValues(alpha: 0.8),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.close_rounded,
+                                  size: 16,
+                                  color: Colors.white,
+                                ),
+                              ),
+                          ],
                         ),
                       ),
-                    Icon(
+                      const SizedBox(height: 7),
+
+                      // 3. Short desc at bottom
+                      Text(
                         isDeclinedTookIn
-                            ? Icons.block_rounded
-                            : (a['icon'] as IconData),
-                        size: isVetPriorityTile ? 22 : 24,
-                        color: isDeclinedTookIn
-                            ? Colors.red.shade400
-                            : (isTileLocked
-                                ? Colors.grey
-                                : (isVetPriorityTile
-                                    ? const Color(0xFF673AB7)
-                                    : col))),
-                    const SizedBox(height: 3),
-                    Text(
-                        isDeclinedTookIn
-                            ? 'Declined'
-                            : (a['xp'] as String),
-                        style: GoogleFonts.nunito(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: isDeclinedTookIn
-                                ? Colors.red.shade400
-                                : (isTileLocked
-                                    ? Colors.grey
-                                    : (isVetPriorityTile
-                                        ? const Color(0xFF673AB7)
-                                        : col)))),
-                    const SizedBox(height: 2),
-                    Text(a['label'] as String,
-                        style: GoogleFonts.nunito(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w800,
-                            color: isDeclinedTookIn
-                                ? Colors.grey.shade600
-                                : _navy)),
-                    const SizedBox(height: 1),
-                    Text(
-                        isDeclinedTookIn
-                            ? 'Not available'
-                            : (isVetPriorityTile
-                                ? 'Triage & checkup'
-                                : (a['sub'] as String)),
+                            ? 'Not available (Declined)'
+                            : '${a['sub']} • ${a['xp']}',
                         textAlign: TextAlign.center,
                         style: GoogleFonts.nunito(
-                            fontSize: 10,
-                            color: isDeclinedTookIn
-                                ? Colors.red.shade300
-                                : (isVetPriorityTile
-                                    ? const Color(0xFF673AB7)
-                                    : _navy.withValues(alpha: 0.45)),
-                            fontWeight: FontWeight.w600,
-                            height: 1.2)),
-                  ],
-                ),
-              ),
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: isDeclinedTookIn
+                              ? Colors.red.shade300
+                              : (isTileLocked
+                                  ? _navy.withValues(alpha: 0.4)
+                                  : (isVetPriorityTile
+                                      ? const Color(0xFF673AB7)
+                                      : _navy.withValues(alpha: 0.6))),
+                          height: 1.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
-          );
-        }).toList(),
-      ),
-    ],
+          ),
+        ),
+      ],
   ]);
 }
 

@@ -42,6 +42,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
   final TextEditingController _descController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
   final TextEditingController _routineHoursController = TextEditingController();
+  final ScrollController _categoryScrollController = ScrollController();
   bool _isSearchingLocation = false;
 
   ll.LatLng _selectedLocation = const ll.LatLng(-6.2615, 106.8106);
@@ -61,6 +62,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
     _descController.dispose();
     _searchController.dispose();
     _routineHoursController.dispose();
+    _categoryScrollController.dispose();
     super.dispose();
   }
 
@@ -1011,42 +1013,48 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Title on top
+          // 1. Title on top
           Text(
             cat['label'] as String,
             textAlign: TextAlign.center,
             style: GoogleFonts.nunito(
-              fontSize: 13,
+              fontSize: 14.5,
               fontWeight: FontWeight.w800,
               color: isSelected ? col : _navy,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),
-          const SizedBox(height: 7),
-          // Big box with custom icon in the center
+          const SizedBox(height: 8),
+          // 2. Big box with custom icon in the center
           AnimatedContainer(
             duration: const Duration(milliseconds: 200),
-            width: 96,
-            height: 96,
+            width: 110,
+            height: 110,
             decoration: BoxDecoration(
               color: isSelected
-                  ? col.withValues(alpha: 0.10)
-                  : const Color(0xFFF0F2F5),
-              borderRadius: BorderRadius.circular(18),
+                  ? col.withValues(alpha: 0.12)
+                  : Colors.white,
+              borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: isSelected ? col : _navy.withValues(alpha: 0.12),
-                width: isSelected ? 2.2 : 1.2,
+                color: isSelected ? col : _navy.withValues(alpha: 0.14),
+                width: isSelected ? 2.5 : 1.2,
               ),
               boxShadow: isSelected
                   ? [
                       BoxShadow(
-                        color: col.withValues(alpha: 0.22),
-                        blurRadius: 10,
-                        offset: const Offset(0, 3),
+                        color: col.withValues(alpha: 0.25),
+                        blurRadius: 12,
+                        offset: const Offset(0, 4),
                       ),
                     ]
-                  : null,
+                  : [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
             ),
             child: Stack(
               alignment: Alignment.center,
@@ -1054,17 +1062,17 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
                 Center(
                   child: Image.asset(
                     cat['asset'] as String,
-                    width: 58,
-                    height: 58,
+                    width: 66,
+                    height: 66,
                     fit: BoxFit.contain,
                   ),
                 ),
                 if (isSelected)
                   Positioned(
-                    top: 6,
-                    right: 6,
+                    top: 8,
+                    right: 8,
                     child: Container(
-                      padding: const EdgeInsets.all(2),
+                      padding: const EdgeInsets.all(3),
                       decoration: BoxDecoration(
                         color: col,
                         shape: BoxShape.circle,
@@ -1079,15 +1087,15 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               ],
             ),
           ),
-          const SizedBox(height: 6),
-          // Short description at the bottom
+          const SizedBox(height: 7),
+          // 3. Short description at the bottom
           Text(
             cat['sublabel'] as String,
             textAlign: TextAlign.center,
             style: GoogleFonts.nunito(
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
-              color: isSelected ? col : _navy.withValues(alpha: 0.55),
+              color: isSelected ? col : _navy.withValues(alpha: 0.6),
               height: 1.2,
             ),
             maxLines: 2,
@@ -1144,35 +1152,39 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
           _buildSectionHeader(
             icon: Icons.category_outlined,
             title: '3. Cat Situation & Goal',
-            subtitle: 'Choose category to set permitted rescue actions.',
+            subtitle: 'Scroll to choose category to set permitted rescue actions.',
           ),
-          const SizedBox(height: 16),
-          // Top Row: Vulnerable & Injured/Sick
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _buildCategoryBoxItem(categories[0])),
-              const SizedBox(width: 12),
-              Expanded(child: _buildCategoryBoxItem(categories[1])),
-            ],
-          ),
-          const SizedBox(height: 16),
-          // Middle Row: Trapped (Centered)
-          Center(
-            child: SizedBox(
-              width: 130,
-              child: _buildCategoryBoxItem(categories[2]),
+          const SizedBox(height: 14),
+          Container(
+            height: 380,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF9F9FB),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: _navy.withValues(alpha: 0.08),
+                width: 1.2,
+              ),
             ),
-          ),
-          const SizedBox(height: 16),
-          // Bottom Row: Needs Home & Stray Community Care
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(child: _buildCategoryBoxItem(categories[3])),
-              const SizedBox(width: 12),
-              Expanded(child: _buildCategoryBoxItem(categories[4])),
-            ],
+            child: RawScrollbar(
+              thumbVisibility: true,
+              trackVisibility: true,
+              thickness: 6,
+              radius: const Radius.circular(8),
+              thumbColor: _navy.withValues(alpha: 0.3),
+              trackColor: _navy.withValues(alpha: 0.06),
+              trackRadius: const Radius.circular(8),
+              controller: _categoryScrollController,
+              child: ListView.separated(
+                controller: _categoryScrollController,
+                physics: const BouncingScrollPhysics(),
+                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+                itemCount: categories.length,
+                separatorBuilder: (context, index) => const SizedBox(height: 20),
+                itemBuilder: (context, index) {
+                  return _buildCategoryBoxItem(categories[index]);
+                },
+              ),
+            ),
           ),
         ],
       ),
