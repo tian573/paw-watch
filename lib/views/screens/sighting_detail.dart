@@ -614,15 +614,15 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   ListTile(
                     leading: const Icon(Icons.edit_note_rounded, color: _lavender),
                     title: Text(
-                        c['type'] != null && c['type'] != 'comment'
-                            ? 'Edit Custom Note'
-                            : 'Edit Message',
+                        isNormalComment
+                            ? 'Edit Message'
+                            : 'Edit Custom Note',
                         style: GoogleFonts.nunito(
                             fontWeight: FontWeight.w700, color: _navy)),
                     subtitle: Text(
-                        c['type'] != null && c['type'] != 'comment'
-                            ? 'Update your custom note details'
-                            : 'Edit your comment message',
+                        isNormalComment
+                            ? 'Edit your comment message'
+                            : 'Update your custom note details',
                         style: GoogleFonts.nunito(
                             fontSize: 12, color: _navy.withValues(alpha: 0.5))),
                     onTap: () {
@@ -630,7 +630,70 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       _showEditCommentSheet(c, s.id);
                     },
                   ),
+                  if (isNormalComment) ...[
+                    ListTile(
+                      leading: const Icon(Icons.delete_outline_rounded, color: _urgent),
+                      title: Text('Delete Comment',
+                          style: GoogleFonts.nunito(
+                              fontWeight: FontWeight.w700, color: _urgent)),
+                      subtitle: Text('Permanently remove your comment',
+                          style: GoogleFonts.nunito(
+                              fontSize: 12, color: _navy.withValues(alpha: 0.5))),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _confirmDeleteComment(c, s);
+                      },
+                    ),
+                  ] else ...[
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: _lavLight.withValues(alpha: 0.6),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _lavender.withValues(alpha: 0.2),
+                          ),
+                        ),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Icon(Icons.info_outline_rounded,
+                                size: 16, color: _lavender),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'Rescue action logs are permanently recorded in the kitten\'s care timeline to preserve verified rescue history and reputation points.',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11.5,
+                                  color: _navy.withValues(alpha: 0.7),
+                                  fontWeight: FontWeight.w600,
+                                  height: 1.35,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ] else ...[
+                  if (isPostReporter && isNormalComment) ...[
+                    ListTile(
+                      leading: const Icon(Icons.delete_outline_rounded, color: _urgent),
+                      title: Text('Remove Comment',
+                          style: GoogleFonts.nunito(
+                              fontWeight: FontWeight.w700, color: _urgent)),
+                      subtitle: Text('Remove this comment from your sighting report',
+                          style: GoogleFonts.nunito(
+                              fontSize: 12, color: _navy.withValues(alpha: 0.5))),
+                      onTap: () {
+                        Navigator.pop(context);
+                        _confirmDeleteComment(c, s);
+                      },
+                    ),
+                  ],
                   ListTile(
                     leading: Icon(
                         canBlock ? Icons.block_rounded : Icons.flag_outlined,
@@ -670,6 +733,90 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  void _confirmDeleteComment(Map<String, dynamic> c, Sighting s) {
+    if (!DoubleTapGuard.allow('delete_comment_${c['id'] ?? ''}', thresholdMs: 800)) return;
+    final commentId = c['id']?.toString() ?? '';
+    if (commentId.isEmpty) return;
+
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _urgent.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delete_outline_rounded, color: _urgent, size: 22),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Delete Comment?',
+              style: GoogleFonts.nunito(
+                fontWeight: FontWeight.w800,
+                color: _navy,
+                fontSize: 18,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to delete this comment? This action cannot be undone.',
+          style: GoogleFonts.nunito(
+            fontSize: 14,
+            color: _navy.withValues(alpha: 0.75),
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.nunito(
+                fontWeight: FontWeight.w700,
+                color: _navy.withValues(alpha: 0.6),
+              ),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _urgent,
+              foregroundColor: Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: () async {
+              Navigator.pop(dialogCtx);
+              try {
+                await FirebaseService.instance.deleteComment(
+                  sightingId: s.id,
+                  commentId: commentId,
+                );
+                if (mounted) {
+                  _snack('Comment deleted.');
+                }
+              } catch (e) {
+                if (mounted) {
+                  _snack('Failed to delete comment: $e');
+                }
+              }
+            },
+            child: Text(
+              'Delete',
+              style: GoogleFonts.nunito(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1649,8 +1796,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           children: [
                             Text(
                               isFeralCat
-                                  ? '🌿 Feral Cat TNR Mandate'
-                                  : '🩺 Vet Visit Verified!',
+                                  ? 'Feral Cat TNR Mandate'
+                                  : 'Vet Visit Verified!',
                               style: GoogleFonts.nunito(
                                 fontSize: 18,
                                 fontWeight: FontWeight.w900,
@@ -1672,7 +1819,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       ),
                     ],
                   ),
-                  const SizedBox(height: 18),
+                  const SizedBox(height: 20),
                   if (isFeralCat) ...[
                     Container(
                       padding: const EdgeInsets.all(12),
@@ -1703,12 +1850,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(height: 14),
-                    if (rescuerId.isNotEmpty && rescuerId != _uid)
+                    const SizedBox(height: 20),
+                    if (rescuerId.isNotEmpty && rescuerId != _uid) ...[
                       _buildPostVetOptionTile(
-                        icon: Icons.chat_bubble_rounded,
-                        iconColor: const Color(0xFF1E88E5),
-                        title: '💬 Discuss Release Spot with $rescuerName',
+                        assetPath: 'assets/images/cattalking.png',
+                        color: const Color(0xFF1E88E5),
+                        title: 'Discuss Release Spot with $rescuerName',
                         subtitle:
                             'Coordinate via chat on where and when to safely release the healed feral cat.',
                         badgeText: 'Coordinate Chat',
@@ -1728,11 +1875,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           );
                         },
                       ),
+                      const SizedBox(height: 16),
+                    ],
                     if (_isVetRescuer(s))
                       _buildPostVetOptionTile(
-                        icon: Icons.nature_people_rounded,
-                        iconColor: const Color(0xFF00897B),
-                        title: '🌿 Confirm Return to Colony / Spot',
+                        assetPath: 'assets/images/location.png',
+                        fallbackIcon: Icons.nature_people_rounded,
+                        color: const Color(0xFF00897B),
+                        title: 'Confirm Return to Colony / Spot',
                         subtitle:
                             'You have custody of this feral cat. Safely release the cat back to its territory.',
                         badgeText: 'Release Cat',
@@ -1745,12 +1895,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   ] else ...[
                     // 1. Rescuer in Charge (Delegate placement authority to Rescuer)
                     _buildPostVetOptionTile(
-                      icon: Icons.public_rounded,
-                      iconColor: const Color(0xFF1E88E5),
-                      title: '🐾 Delegate to $rescuerName (Rescuer in Charge)',
+                      assetPath: 'assets/images/rescuerincharge.png',
+                      color: const Color(0xFF1E88E5),
+                      title: 'Delegate to $rescuerName',
                       subtitle:
                           'Grants custody authority to $rescuerName to decide and log next steps (foster, shelter, or adoption).',
-                      badgeText: 'Delegate Power',
+                      badgeText: 'Rescuer in Charge',
                       badgeColor: const Color(0xFF1E88E5),
                       onTap: () async {
                         Navigator.pop(ctx);
@@ -1768,13 +1918,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         }
                       },
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 16),
 
                     // 2. Take In for Foster Care (Reporter Takes Cat)
                     _buildPostVetOptionTile(
-                      icon: Icons.volunteer_activism_rounded,
-                      iconColor: const Color(0xFF673AB7),
-                      title: '🏡 I Will Take In for Foster Care',
+                      assetPath: 'assets/images/needshome.png',
+                      color: const Color(0xFF673AB7),
+                      title: 'I Will Take In for Foster Care',
                       subtitle:
                           'Bring cat into your own care for quarantine & recovery. Sets up daily milestone journey.',
                       badgeText: '+150 XP',
@@ -1784,13 +1934,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         _showActionProofSheet('tookIn', s);
                       },
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 16),
 
                     // 3. Transfer to Shelter
                     _buildPostVetOptionTile(
-                      icon: Icons.house_rounded,
-                      iconColor: const Color(0xFFE65100),
-                      title: '🏛️ Transfer to Animal Shelter',
+                      assetPath: 'assets/images/shelter.png',
+                      color: const Color(0xFFE65100),
+                      title: 'Transfer to Animal Shelter',
                       subtitle:
                           'Direct admission to a verified rescue center or shelter.',
                       badgeText: '+120 XP',
@@ -1800,14 +1950,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         _showActionProofSheet('sheltered', s);
                       },
                     ),
-                    const SizedBox(height: 10),
-
-                    // 4. Discuss Next Steps with Rescuer (Coordinate before deciding)
-                    if (rescuerId.isNotEmpty && rescuerId != _uid)
+                    if (rescuerId.isNotEmpty && rescuerId != _uid) ...[
+                      const SizedBox(height: 16),
+                      // 4. Discuss Next Steps with Rescuer (Coordinate before deciding)
                       _buildPostVetOptionTile(
-                        icon: Icons.chat_bubble_rounded,
-                        iconColor: const Color(0xFF1E88E5),
-                        title: '💬 Discuss Next Steps with $rescuerName',
+                        assetPath: 'assets/images/cattalking.png',
+                        color: const Color(0xFF1E88E5),
+                        title: 'Discuss Next Steps with $rescuerName',
                         subtitle:
                             'Coordinate via chat before deciding between foster care, shelter, or rescuer custody.',
                         badgeText: 'Coordinate Chat',
@@ -1827,6 +1976,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           );
                         },
                       ),
+                    ],
                   ],
                 ],
               ),
@@ -2760,90 +2910,102 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   if (!isNeedsRehomed)
                     {
                       'key': 'feral',
-                      'label': '🌿 Feral / Colony Adult (Mandatory TNR)',
+                      'title': 'Feral / Colony Adult (Mandatory TNR)',
+                      'asset': 'assets/images/feral.png',
                       'desc':
                           'Unsocialized to humans. Cannot be adopted indoors; must be safely returned to colony.',
                       'color': const Color(0xFF00897B),
                     },
                   {
                     'key': 'shy',
-                    'label': '🐾 Shy / Timid Stray',
+                    'title': 'Shy / Timid Stray',
+                    'asset': 'assets/images/shycat.png',
                     'desc':
                         'Cautious but socializable indoors through quiet foster care.',
                     'color': const Color(0xFF1E88E5),
                   },
                   {
                     'key': 'friendly',
-                    'label': '💖 Friendly Pet (Adoptable)',
+                    'title': 'Friendly Pet (Adoptable)',
+                    'asset': 'assets/images/friendly.png',
                     'desc':
                         'Approachable and gentle. Suitable for indoor home adoption.',
                     'color': const Color(0xFF9C27B0),
                   },
                   {
                     'key': 'kitten',
-                    'label': '🍼 Kitten (Under 4 Months)',
+                    'title': 'Kitten (Under 4 Months)',
+                    'asset': 'assets/images/kittenwhisperer.png',
                     'desc':
                         'Young kitten. Highly socializable indoors, requires specialized foster care, nursing, or adoption.',
                     'color': const Color(0xFFE91E63),
                   },
                 ].map((opt) {
                   final key = opt['key'] as String;
-                  final label = opt['label'] as String;
+                  final title = opt['title'] as String;
+                  final asset = opt['asset'] as String;
                   final desc = opt['desc'] as String;
                   final color = opt['color'] as Color;
                   final isSelected = selectedTemp == key;
 
                   return Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.only(bottom: 10),
                     child: InkWell(
                       onTap: () => setDlgState(() => selectedTemp = key),
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(16),
                       child: Container(
-                        padding: const EdgeInsets.all(10),
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 12, horizontal: 12),
                         decoration: BoxDecoration(
                           color: isSelected
-                              ? color.withValues(alpha: 0.1)
-                              : _lavLight.withValues(alpha: 0.5),
-                          borderRadius: BorderRadius.circular(12),
+                              ? color.withValues(alpha: 0.08)
+                              : Colors.white,
+                          borderRadius: BorderRadius.circular(16),
                           border: Border.all(
                             color: isSelected
                                 ? color
-                                : _navy.withValues(alpha: 0.15),
-                            width: isSelected ? 1.5 : 1,
+                                : _navy.withValues(alpha: 0.14),
+                            width: isSelected ? 2 : 1,
                           ),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Icon(
-                              isSelected
-                                  ? Icons.radio_button_checked_rounded
-                                  : Icons.radio_button_unchecked_rounded,
-                              size: 18,
-                              color: isSelected ? color : Colors.grey,
+                          boxShadow: [
+                            BoxShadow(
+                              color: (isSelected ? color : _navy)
+                                  .withValues(alpha: 0.06),
+                              blurRadius: 6,
+                              offset: const Offset(0, 2),
                             ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    label,
-                                    style: GoogleFonts.nunito(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w800,
-                                      color: isSelected ? color : _navy,
-                                    ),
-                                  ),
-                                  Text(
-                                    desc,
-                                    style: GoogleFonts.nunito(
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.w600,
-                                      color: _navy.withValues(alpha: 0.65),
-                                    ),
-                                  ),
-                                ],
+                          ],
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Text(
+                              title,
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.nunito(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w800,
+                                color: isSelected ? color : _navy,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Image.asset(
+                              asset,
+                              width: 46,
+                              height: 46,
+                              fit: BoxFit.contain,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              desc,
+                              textAlign: TextAlign.center,
+                              style: GoogleFonts.nunito(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: _navy.withValues(alpha: 0.65),
+                                height: 1.25,
                               ),
                             ),
                           ],
@@ -2899,10 +3061,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   );
                   if (mounted) {
                     final label = selectedTemp == 'feral'
-                        ? '🌿 Feral / Colony Adult'
+                        ? 'Feral / Colony Adult'
                         : (selectedTemp == 'friendly'
-                            ? '💖 Friendly Pet'
-                            : '🐾 Shy Stray');
+                            ? 'Friendly Pet'
+                            : (selectedTemp == 'kitten'
+                                ? 'Kitten'
+                                : 'Shy Stray'));
                     _snack(
                         'Cat temperament updated to $label!${selectedTemp == "feral" ? " Mandatory TNR protocol active." : ""}');
                   }
@@ -2979,84 +3143,101 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   Widget _buildPostVetOptionTile({
-    required IconData icon,
-    required Color iconColor,
+    String? assetPath,
+    IconData? fallbackIcon,
+    required Color color,
     required String title,
     required String subtitle,
-    required String badgeText,
-    required Color badgeColor,
+    String? badgeText,
+    Color? badgeColor,
     required VoidCallback onTap,
   }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
+    return GestureDetector(
+      onTap: () {
+        if (!DoubleTapGuard.allow('post_vet_opt_$title', thresholdMs: 800)) return;
+        onTap();
+      },
+      behavior: HitTestBehavior.opaque,
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
         decoration: BoxDecoration(
-          color: _cardBg,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: iconColor.withValues(alpha: 0.2)),
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: color.withValues(alpha: 0.25),
+            width: 1.4,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: color.withValues(alpha: 0.08),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
         ),
-        child: Row(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: iconColor.withValues(alpha: 0.12),
-                shape: BoxShape.circle,
+            // 1. Action Name (Title on top)
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.nunito(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: _navy,
               ),
-              child: Icon(icon, color: iconColor, size: 22),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: GoogleFonts.nunito(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w800,
-                            color: _navy,
-                          ),
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 7, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: badgeColor.withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          badgeText,
-                          style: GoogleFonts.nunito(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w900,
-                            color: badgeColor,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    subtitle,
-                    style: GoogleFonts.nunito(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: _navy.withValues(alpha: 0.6),
+            const SizedBox(height: 12),
+
+            // 2. Custom icon in the middle
+            Center(
+              child: assetPath != null
+                  ? Image.asset(
+                      assetPath,
+                      width: 68,
+                      height: 68,
+                      fit: BoxFit.contain,
+                    )
+                  : Icon(
+                      fallbackIcon ?? Icons.pets,
+                      size: 46,
+                      color: color,
                     ),
-                  ),
-                ],
+            ),
+            const SizedBox(height: 12),
+
+            // 3. Short desc at bottom
+            Text(
+              subtitle,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.nunito(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: _navy.withValues(alpha: 0.65),
+                height: 1.3,
               ),
             ),
-            const SizedBox(width: 6),
-            Icon(Icons.chevron_right_rounded,
-                color: _navy.withValues(alpha: 0.35), size: 20),
+            if (badgeText != null && badgeText.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                decoration: BoxDecoration(
+                  color: (badgeColor ?? color).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  badgeText,
+                  style: GoogleFonts.nunito(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                    color: badgeColor ?? color,
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -6447,86 +6628,188 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   color: _navy,
                                   height: 1.2)),
                           const SizedBox(height: 10),
-                          _buildCategoryBadge(s),
-                          Builder(builder: (context) {
-                            final canEditTemperament = !s.isVetVisitVerified &&
-                                s.urgency != 'resolved' &&
-                                (_isOwner(s) ||
-                                    (_uid != null &&
-                                        (s.pendingVetRescuerId == _uid ||
-                                            s.careTakerId == _uid)));
-                            if (!canEditTemperament &&
-                                s.temperament == null &&
-                                !s.hasEarTip) {
-                              return const SizedBox.shrink();
-                            }
+                          IntrinsicWidth(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                _buildCategoryBadge(s),
+                                Builder(builder: (context) {
+                                  final canEditTemperament =
+                                      !s.isVetVisitVerified &&
+                                          s.urgency != 'resolved' &&
+                                          (_isOwner(s) ||
+                                              (_uid != null &&
+                                                  (s.pendingVetRescuerId ==
+                                                          _uid ||
+                                                      s.careTakerId == _uid)));
+                                  if (!canEditTemperament &&
+                                      s.temperament == null &&
+                                      !s.hasEarTip) {
+                                    return const SizedBox.shrink();
+                                  }
 
-                            return Padding(
-                              padding: const EdgeInsets.only(top: 8),
-                              child: Wrap(
-                                spacing: 6,
-                                runSpacing: 4,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: [
-                                  if (s.temperament == 'feral')
-                                    _traitChip('🌿 Feral / Colony Adult',
-                                        const Color(0xFF00897B)),
-                                  if (s.temperament == 'friendly')
-                                    _traitChip('😻 Friendly Pet (Adoptable)',
-                                        const Color(0xFF9C27B0)),
-                                  if (s.temperament == 'shy')
-                                    _traitChip('🙈 Shy / Timid Stray',
-                                        const Color(0xFF1E88E5)),
-                                  if (s.temperament == 'kitten')
-                                    _traitChip('🍼 Kitten (Under 4 Months)',
-                                        const Color(0xFFE91E63)),
-                                  if (s.hasEarTip)
-                                    _traitChip('✂️ Ear-Tipped (TNR Fixed)',
-                                        const Color(0xFF2E7D32)),
-                                  if (canEditTemperament)
-                                    InkWell(
-                                      onTap: () =>
-                                          _showUpdateCatTemperamentDialog(s),
-                                      borderRadius: BorderRadius.circular(20),
-                                      child: Container(
-                                        padding: const EdgeInsets.symmetric(
-                                            horizontal: 8, vertical: 3),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFF673AB7)
-                                              .withValues(alpha: 0.08),
-                                          borderRadius:
-                                              BorderRadius.circular(20),
-                                          border: Border.all(
-                                            color: const Color(0xFF673AB7)
-                                                .withValues(alpha: 0.3),
-                                            width: 0.8,
+                                  return Padding(
+                                    padding: const EdgeInsets.only(top: 8),
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.stretch,
+                                      children: [
+                                        if (s.temperament == 'feral')
+                                          _buildCatTypeBox(
+                                            title: 'Feral / Colony Adult',
+                                            assetPath: 'assets/images/feral.png',
+                                            color: const Color(0xFF00897B),
+                                            canEdit: canEditTemperament,
+                                            onTap: canEditTemperament
+                                                ? () => _showUpdateCatTemperamentDialog(s)
+                                                : null,
                                           ),
-                                        ),
-                                        child: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            const Icon(Icons.edit_rounded,
-                                                size: 11,
-                                                color: Color(0xFF673AB7)),
-                                            const SizedBox(width: 3),
-                                            Text(
-                                              s.temperament != null
-                                                  ? 'Change Diagnosis'
-                                                  : '+ Add Vet Diagnosis',
-                                              style: GoogleFonts.nunito(
-                                                fontSize: 10,
-                                                fontWeight: FontWeight.w800,
-                                                color: const Color(0xFF673AB7),
+                                        if (s.temperament == 'friendly')
+                                          _buildCatTypeBox(
+                                            title: 'Friendly Pet (Adoptable)',
+                                            assetPath: 'assets/images/friendly.png',
+                                            color: const Color(0xFF9C27B0),
+                                            canEdit: canEditTemperament,
+                                            onTap: canEditTemperament
+                                                ? () => _showUpdateCatTemperamentDialog(s)
+                                                : null,
+                                          ),
+                                        if (s.temperament == 'shy')
+                                          _buildCatTypeBox(
+                                            title: 'Shy / Timid Stray',
+                                            assetPath: 'assets/images/shycat.png',
+                                            color: const Color(0xFF1E88E5),
+                                            canEdit: canEditTemperament,
+                                            onTap: canEditTemperament
+                                                ? () => _showUpdateCatTemperamentDialog(s)
+                                                : null,
+                                          ),
+                                        if (s.temperament == 'kitten')
+                                          _buildCatTypeBox(
+                                            title: 'Kitten (Under 4 Mo)',
+                                            assetPath: 'assets/images/kittenwhisperer.png',
+                                            color: const Color(0xFFE91E63),
+                                            canEdit: canEditTemperament,
+                                            onTap: canEditTemperament
+                                                ? () => _showUpdateCatTemperamentDialog(s)
+                                                : null,
+                                          ),
+                                        if (s.hasEarTip) ...[
+                                          if (s.temperament != null)
+                                            const SizedBox(height: 6),
+                                          _buildCatTypeBox(
+                                            title: 'Ear-Tipped (TNR Fixed)',
+                                            assetPath: 'assets/images/location.png',
+                                            color: const Color(0xFF2E7D32),
+                                          ),
+                                        ],
+                                        if (s.temperament == null && canEditTemperament)
+                                          InkWell(
+                                            onTap: () =>
+                                                _showUpdateCatTemperamentDialog(s),
+                                            borderRadius:
+                                                BorderRadius.circular(14),
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 14,
+                                                      vertical: 10),
+                                              decoration: BoxDecoration(
+                                                color: Colors.white,
+                                                borderRadius:
+                                                    BorderRadius.circular(14),
+                                                border: Border.all(
+                                                  color: const Color(0xFF673AB7)
+                                                      .withValues(alpha: 0.28),
+                                                  width: 1.2,
+                                                ),
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: const Color(0xFF673AB7)
+                                                        .withValues(alpha: 0.08),
+                                                    blurRadius: 6,
+                                                    offset: const Offset(0, 2),
+                                                  ),
+                                                ],
+                                              ),
+                                              child: Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  const Icon(
+                                                    Icons.add_circle_outline_rounded,
+                                                    size: 16,
+                                                    color: Color(0xFF673AB7),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Text(
+                                                    'Add Diagnosis',
+                                                    style: GoogleFonts.nunito(
+                                                      fontSize: 12,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color: const Color(
+                                                          0xFF673AB7),
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
-                                          ],
-                                        ),
-                                      ),
+                                          ),
+                                        if (s.temperament != null && canEditTemperament) ...[
+                                          const SizedBox(height: 6),
+                                          InkWell(
+                                            onTap: () =>
+                                                _showUpdateCatTemperamentDialog(s),
+                                            borderRadius:
+                                                BorderRadius.circular(10),
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                      horizontal: 10,
+                                                      vertical: 6),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFF673AB7)
+                                                    .withValues(alpha: 0.06),
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
+                                                border: Border.all(
+                                                  color: const Color(0xFF673AB7)
+                                                      .withValues(alpha: 0.22),
+                                                  width: 1,
+                                                ),
+                                              ),
+                                              child: Row(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  const Icon(
+                                                      Icons.edit_note_rounded,
+                                                      size: 15,
+                                                      color: Color(0xFF673AB7)),
+                                                  const SizedBox(width: 6),
+                                                  Text(
+                                                    'Edit Diagnosis',
+                                                    style: GoogleFonts.nunito(
+                                                      fontSize: 11,
+                                                      fontWeight:
+                                                          FontWeight.w800,
+                                                      color: const Color(
+                                                          0xFF673AB7),
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
                                     ),
-                                ],
-                              ),
-                            );
-                          }),
+                                  );
+                                }),
+                              ],
+                            ),
+                          ),
                           const SizedBox(height: 12),
                           _buildReporter(s),
                           const SizedBox(height: 12),
@@ -6918,149 +7201,202 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     );
   }
 
-  Widget _traitChip(String text, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+  Widget _buildCatTypeBox({
+    required String title,
+    required String assetPath,
+    required Color color,
+    VoidCallback? onTap,
+    bool canEdit = false,
+  }) {
+    final box = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.28), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.08),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
-      child: Text(
-        text,
-        style: GoogleFonts.nunito(
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-          color: color,
-        ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Title on top
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.nunito(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                ),
+              ),
+              if (canEdit) ...[
+                const SizedBox(width: 4),
+                Icon(Icons.edit_note_rounded, size: 14, color: color),
+              ],
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Custom logo on the bottom
+          Image.asset(
+            assetPath,
+            width: 38,
+            height: 38,
+            fit: BoxFit.contain,
+          ),
+        ],
       ),
     );
+
+    if (onTap != null) {
+      return InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: box,
+      );
+    }
+    return box;
   }
 
   Widget _buildCategoryBadge(Sighting s) {
     Color col;
-    IconData icon;
+    String asset;
     String label;
     String subtitle;
 
     final cat = s.category;
     if (cat == 'Feral / Colony Cat') {
       col = const Color(0xFF00897B);
-      icon = Icons.nature_people_rounded;
+      asset = 'assets/images/feral.png';
       label = 'Feral / Colony Cat (TNR)';
-      subtitle = '🌿 Wild Adult • Outdoor Colony Care';
+      subtitle = 'Wild Adult • Outdoor Colony Care';
     } else if (s.isTnrCommunityCat || cat == 'Community Cat' || cat == 'Community Care') {
       col = const Color(0xFF00897B);
-      icon = Icons.pets;
+      asset = 'assets/images/colonyfeeder.png';
       label = 'Community Cat (TNR)';
-      subtitle = '🌿 Sterilized & Under Community Care';
+      subtitle = 'Sterilized & Under Community Care';
     } else if (cat == 'Urgent Rescue' || cat == 'Trapped') {
       col = const Color(0xFFFF5722);
-      icon = Icons.warning_amber_rounded;
+      asset = 'assets/images/trapped.png';
       label = 'Trapped / In Danger';
-      subtitle = '🎯 One-Time Extraction Task';
+      subtitle = 'One-Time Extraction Task';
     } else if (cat == 'Injured') {
       col = _urgent;
-      icon = Icons.healing_outlined;
+      asset = 'assets/images/injuredsick.png';
       label = 'Injured / Sick';
-      subtitle = '🩺 Medical & Vet Attention Needed';
+      subtitle = 'Medical & Vet Attention Needed';
     } else if (cat == 'Kitten') {
       col = const Color(0xFFE91E63);
-      icon = Icons.pets;
+      asset = 'assets/images/kittenwhisperer.png';
       label = 'Vulnerable Kitten(s)';
-      subtitle = '🍼 Needs Safe Foster or Care';
+      subtitle = 'Needs Safe Foster or Care';
     } else if (cat == 'Needs Foster' || cat == 'Needs Home' || cat == 'Rehomed') {
       col = const Color(0xFF9C27B0);
-      icon = Icons.home_outlined;
+      asset = 'assets/images/needshome.png';
       label = 'Needs Foster / Adopter';
-      subtitle = '🏡 Looking for Temporary/Permanent Home';
+      subtitle = 'Looking for Temporary/Permanent Home';
     } else if (cat == 'Feeding Spot' || cat == 'Stray' || cat == 'Stray Cat') {
       col = _lavender;
-      icon = Icons.restaurant_outlined;
+      asset = 'assets/images/straycare.png';
       label = 'Stray / Feeding Spot';
-      subtitle = '🍲 Ongoing Community Care & Food';
+      subtitle = 'Ongoing Community Care & Food';
     } else if (cat == 'Needs Vet' || cat == 'Vet Visit') {
       col = _urgent;
-      icon = Icons.medical_services_outlined;
+      asset = 'assets/images/review.png';
       label = 'Vet Treatment Required';
-      subtitle = '🩺 Needs Clinic Visit';
+      subtitle = 'Needs Clinic Visit';
     } else if (cat == 'Resolved') {
       col = _resolved;
-      icon = Icons.check_circle_outline;
+      asset = 'assets/images/guardianangel.png';
       label = 'Rescue Resolved';
-      subtitle = '🎉 Cat is safe and accounted for';
+      subtitle = 'Cat is safe and accounted for';
     } else {
       col = _lavender;
-      icon = Icons.remove_red_eye_outlined;
+      asset = 'assets/images/streetscout.png';
       label = cat.isNotEmpty ? cat : 'Spotted Stray';
       subtitle = 'Community Cat Sighting';
     }
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      constraints: const BoxConstraints(minWidth: 230),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: col.withValues(alpha: 0.08),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: col.withValues(alpha: 0.25), width: 1.2),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: col.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: col, size: 16),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: col.withValues(alpha: 0.28), width: 1.3),
+        boxShadow: [
+          BoxShadow(
+            color: col.withValues(alpha: 0.08),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
-          const SizedBox(width: 10),
-          Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      label,
-                      style: GoogleFonts.nunito(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w800,
-                        color: col,
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 1.5),
-                      decoration: BoxDecoration(
-                        color: col.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        s.isOneTimeTask ? 'ONE-TIME' : 'ONGOING',
-                        style: GoogleFonts.nunito(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w900,
-                          color: col,
-                          letterSpacing: 0.5,
-                        ),
-                      ),
-                    ),
-                  ],
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          // Title on top
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                label,
+                style: GoogleFonts.nunito(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  color: col,
                 ),
-                Text(
-                  subtitle,
+              ),
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 6, vertical: 1.5),
+                decoration: BoxDecoration(
+                  color: col.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  s.isOneTimeTask ? 'ONE-TIME' : 'ONGOING',
                   style: GoogleFonts.nunito(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w600,
-                    color: _navy.withValues(alpha: 0.6),
+                    fontSize: 9,
+                    fontWeight: FontWeight.w900,
+                    color: col,
+                    letterSpacing: 0.5,
                   ),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+
+          // Custom logo in the middle
+          Image.asset(
+            asset,
+            width: 44,
+            height: 44,
+            fit: BoxFit.contain,
+          ),
+          const SizedBox(height: 6),
+
+          // Short desc at the bottom
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: GoogleFonts.nunito(
+              fontSize: 11,
+              fontWeight: FontWeight.w600,
+              color: _navy.withValues(alpha: 0.65),
             ),
           ),
         ],
@@ -8505,35 +8841,37 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            decoration: BoxDecoration(
-              color: const Color(0xFFE65100).withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(
-                color: const Color(0xFFE65100).withValues(alpha: 0.35),
-                width: 1,
+          if (!s.isAwaitingPostVetDecision) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE65100).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: const Color(0xFFE65100).withValues(alpha: 0.35),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.priority_high_rounded,
+                      size: 14, color: Color(0xFFE65100)),
+                  const SizedBox(width: 5),
+                  Text(
+                    'PRIORITY • AWAITING YOUR RESPONSE',
+                    style: GoogleFonts.nunito(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      color: const Color(0xFFE65100),
+                      letterSpacing: 0.3,
+                    ),
+                  ),
+                ],
               ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.priority_high_rounded,
-                    size: 14, color: Color(0xFFE65100)),
-                const SizedBox(width: 5),
-                Text(
-                  'PRIORITY • AWAITING YOUR RESPONSE',
-                  style: GoogleFonts.nunito(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w900,
-                    color: const Color(0xFFE65100),
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ],
-            ),
-          ),
+          ],
           if (s.isVetVisitPending) ...[
             _buildVetVisitRequestBanner(s),
           ] else if (s.pendingHandoverRescuerId != null &&
@@ -8883,142 +9221,72 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       }
 
       return Container(
-        padding: const EdgeInsets.all(14),
+        padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFFF57C00).withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(16),
+          color: _lavLight.withValues(alpha: 0.65),
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(
-              color: const Color(0xFFF57C00).withValues(alpha: 0.3)),
+            color: _lavender.withValues(alpha: 0.25),
+            width: 1.2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: _lavender.withValues(alpha: 0.08),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            Text(
+              _isOwner(s)
+                  ? 'Your Vet Visit Was Verified! (+100 XP)'
+                  : 'Placement Delegated to You (+100 XP)',
+              style: GoogleFonts.nunito(
+                fontSize: 15,
+                fontWeight: FontWeight.w900,
+                color: _navy,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _isOwner(s)
+                  ? 'Since you have physical custody of the cat, select your next action:'
+                  : '${s.reporterName.isNotEmpty ? s.reporterName : "The reporter"} placed you in charge of placement. Select your next action:',
+              style: GoogleFonts.nunito(
+                fontSize: 12,
+                color: _navy.withValues(alpha: 0.65),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 14),
             Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF57C00).withValues(alpha: 0.15),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.celebration_rounded,
-                      color: Color(0xFFF57C00), size: 20),
+                _buildPostVetActionBox(
+                  title: 'Foster',
+                  asset: 'assets/images/needshome.png',
+                  sub: '+150 XP',
+                  color: const Color(0xFF673AB7),
+                  onTap: () => _showActionProofSheet('tookIn', s),
                 ),
                 const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _isOwner(s)
-                            ? '🎉 Your Vet Visit Was Verified! (+100 XP)'
-                            : '🎉 Placement Delegated to You (+100 XP)',
-                        style: GoogleFonts.nunito(
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w900,
-                          color: const Color(0xFFE65100),
-                        ),
-                      ),
-                      Text(
-                        _isOwner(s)
-                            ? 'Since you have physical custody of the cat, select your next action:'
-                            : '${s.reporterName.isNotEmpty ? s.reporterName : "The reporter"} placed you in charge of placement. Select your next action:',
-                        style: GoogleFonts.nunito(
-                          fontSize: 11,
-                          color: _navy.withValues(alpha: 0.7),
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                InkWell(
-                  onTap: () => _showActionProofSheet('tookIn', s),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF673AB7),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.volunteer_activism_rounded,
-                            size: 13, color: Colors.white),
-                        const SizedBox(width: 4),
-                        Text(
-                          '🏡 Foster at My Place (+150 XP)',
-                          style: GoogleFonts.nunito(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                InkWell(
+                _buildPostVetActionBox(
+                  title: 'Shelter',
+                  asset: 'assets/images/shelter.png',
+                  sub: '+120 XP',
+                  color: const Color(0xFFE65100),
                   onTap: () => _showActionProofSheet('sheltered', s),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFE65100),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.house_rounded,
-                            size: 13, color: Colors.white),
-                        const SizedBox(width: 4),
-                        Text(
-                          '🏛️ Transfer to Shelter (+120 XP)',
-                          style: GoogleFonts.nunito(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
-                InkWell(
+                const SizedBox(width: 10),
+                _buildPostVetActionBox(
+                  title: 'Open for Adoption',
+                  asset: 'assets/images/review.png',
+                  sub: '+100 XP',
+                  color: const Color(0xFF2E7D32),
                   onTap: () => _showOpenForAdoptionSheet(s),
-                  borderRadius: BorderRadius.circular(8),
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2E7D32),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.volunteer_activism_rounded,
-                            size: 13, color: Colors.white),
-                        const SizedBox(width: 4),
-                        Text(
-                          '🐾 Open for Adoption (+100 XP)',
-                          style: GoogleFonts.nunito(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white),
-                        ),
-                      ],
-                    ),
-                  ),
                 ),
               ],
             ),
@@ -9316,6 +9584,95 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         ),
       );
     }
+  }
+
+  Widget _buildPostVetActionBox({
+    required String title,
+    required String asset,
+    required String sub,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: () {
+          if (!DoubleTapGuard.allow('post_vet_action_$title', thresholdMs: 800)) return;
+          onTap();
+        },
+        behavior: HitTestBehavior.opaque,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            // 1. Action Name (Title on top)
+            SizedBox(
+              height: 32,
+              child: Center(
+                child: Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.nunito(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    color: _navy,
+                    height: 1.15,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            // 2. Center box with custom logo
+            Container(
+              width: double.infinity,
+              height: 84,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(
+                  color: _navy.withValues(alpha: 0.12),
+                  width: 1.2,
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.12),
+                    blurRadius: 8,
+                    offset: const Offset(0, 3),
+                  ),
+                ],
+              ),
+              child: Center(
+                child: Image.asset(
+                  asset,
+                  width: 52,
+                  height: 52,
+                  fit: BoxFit.contain,
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            // 3. Short desc at bottom
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                sub,
+                textAlign: TextAlign.center,
+                style: GoogleFonts.nunito(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: color,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _buildVetVisitRequestBanner(Sighting s) {
@@ -12200,142 +12557,181 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
     return Container(
       margin: const EdgeInsets.only(top: 10),
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF2E7D32).withValues(alpha: 0.06),
-        borderRadius: BorderRadius.circular(14),
-        border:
-            Border.all(color: const Color(0xFF2E7D32).withValues(alpha: 0.25)),
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFF2E7D32).withValues(alpha: 0.25),
+          width: 1.4,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
+          // 1. Title on top
+          Text(
+            'Adoption Showcase Profile',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.nunito(
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              color: const Color(0xFF2E7D32),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // 2. Custom logo in the middle
+          Center(
+            child: Image.asset(
+              'assets/images/review.png',
+              height: 76,
+              fit: BoxFit.contain,
+            ),
+          ),
+          if (isCaretaker) ...[
+            const SizedBox(height: 8),
+            GestureDetector(
+              onTap: () => _showEditHealthTagsSheet(s),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF2E7D32).withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
+                  color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: const Color(0xFF2E7D32).withValues(alpha: 0.25),
+                  ),
                 ),
-                child: const Icon(Icons.volunteer_activism_rounded,
-                    size: 16, color: Color(0xFF2E7D32)),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
+                    const Icon(Icons.edit_note_rounded,
+                        size: 14, color: Color(0xFF2E7D32)),
+                    const SizedBox(width: 4),
                     Text(
-                      'Adoption Showcase Profile',
-                      style: GoogleFonts.nunito(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w900,
-                        color: const Color(0xFF2E7D32),
-                      ),
-                    ),
-                    Text(
-                      'Facility: $facilityName',
+                      'Edit Badges',
                       style: GoogleFonts.nunito(
                         fontSize: 11,
-                        color: _navy.withValues(alpha: 0.7),
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF2E7D32),
                       ),
                     ),
                   ],
                 ),
               ),
-              if (isCaretaker)
-                GestureDetector(
-                  onTap: () => _showEditHealthTagsSheet(s),
-                  child: Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                          color: const Color(0xFF2E7D32).withValues(alpha: 0.3)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.edit_note_rounded,
-                            size: 14, color: Color(0xFF2E7D32)),
-                        const SizedBox(width: 3),
-                        Text(
-                          'Edit Badges',
-                          style: GoogleFonts.nunito(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFF2E7D32),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-            ],
+            ),
+          ],
+          const SizedBox(height: 12),
+
+          // 3. Short desc at the bottom
+          Text(
+            'Facility: $facilityName • Health verified under care supervision',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.nunito(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+              color: _navy.withValues(alpha: 0.7),
+              height: 1.3,
+            ),
           ),
-          const SizedBox(height: 8),
-          if (s.healthTags.isNotEmpty)
+          if (s.healthTags.isNotEmpty) ...[
+            const SizedBox(height: 10),
             Wrap(
               spacing: 6,
-              runSpacing: 4,
+              runSpacing: 5,
+              alignment: WrapAlignment.center,
               children: s.healthTags.map((tag) {
                 return Container(
                   padding:
-                      const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(
-                        color: const Color(0xFF2E7D32).withValues(alpha: 0.3)),
+                      color: const Color(0xFF2E7D32).withValues(alpha: 0.25),
+                    ),
                   ),
                   child: Text(
                     tag,
                     style: GoogleFonts.nunito(
-                      fontSize: 10.5,
+                      fontSize: 11,
                       fontWeight: FontWeight.w800,
                       color: const Color(0xFF2E7D32),
                     ),
                   ),
                 );
               }).toList(),
-            )
-          else
-            Text(
-              'Health Check: Verified under care supervision',
-              style: GoogleFonts.nunito(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-                color: _navy.withValues(alpha: 0.6),
-              ),
             ),
+          ],
           if (isCaretaker) ...[
-            const SizedBox(height: 10),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFE65100),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12)),
-                  elevation: 0,
+            const SizedBox(height: 16),
+            InkWell(
+              onTap: () => _showActionProofSheet('sheltered', s),
+              borderRadius: BorderRadius.circular(16),
+              child: Container(
+                width: 170,
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+                decoration: BoxDecoration(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: const Color(0xFFE65100).withValues(alpha: 0.35),
+                    width: 1.4,
+                  ),
                 ),
-                onPressed: () => _showActionProofSheet('sheltered', s),
-                icon: const Icon(Icons.house_rounded, size: 15),
-                label: Text(
-                  '🏛️ Transfer to Shelter Instead (+120 XP)',
-                  style: GoogleFonts.nunito(
-                      fontWeight: FontWeight.w800, fontSize: 12),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Text(
+                      'Transfer to Shelter Instead',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.nunito(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFFE65100),
+                        height: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Image.asset(
+                      'assets/images/shelter.png',
+                      width: 52,
+                      height: 52,
+                      fit: BoxFit.contain,
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFE65100).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: Text(
+                        '+120 XP',
+                        style: GoogleFonts.nunito(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          color: const Color(0xFFE65100),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ),
           ] else ...[
-            const SizedBox(height: 10),
+            const SizedBox(height: 16),
             Row(
               children: [
                 Expanded(
@@ -12350,7 +12746,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     icon: const Icon(Icons.chat_bubble_outline_rounded,
                         size: 14, color: Color(0xFF2E7D32)),
                     label: Text(
-                      '💬 Chat Caretaker',
+                      'Chat Caretaker',
                       style: GoogleFonts.nunito(
                           fontWeight: FontWeight.w800,
                           fontSize: 12,
@@ -12372,7 +12768,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     onPressed: () => _showSubmitAdoptionApplicationSheet(s),
                     icon: const Icon(Icons.home_rounded, size: 14),
                     label: Text(
-                      '🏡 Request to Adopt',
+                      'Request to Adopt',
                       style: GoogleFonts.nunito(
                           fontWeight: FontWeight.w800, fontSize: 12),
                     ),
@@ -13097,11 +13493,15 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.volunteer_activism_rounded,
-                                    size: 13, color: Colors.white),
-                                const SizedBox(width: 4),
+                                Image.asset(
+                                  'assets/images/needshome.png',
+                                  width: 16,
+                                  height: 16,
+                                  fit: BoxFit.contain,
+                                ),
+                                const SizedBox(width: 6),
                                 Text(
-                                  '🏡 Offer Foster Care (+150 XP)',
+                                  'Offer Foster Care (+150 XP)',
                                   style: GoogleFonts.nunito(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w800,
@@ -13124,11 +13524,15 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.house_rounded,
-                                    size: 13, color: Colors.white),
-                                const SizedBox(width: 4),
+                                Image.asset(
+                                  'assets/images/shelter.png',
+                                  width: 16,
+                                  height: 16,
+                                  fit: BoxFit.contain,
+                                ),
+                                const SizedBox(width: 6),
                                 Text(
-                                  '🏛️ Transfer to Shelter (+120 XP)',
+                                  'Transfer to Shelter (+120 XP)',
                                   style: GoogleFonts.nunito(
                                       fontSize: 11,
                                       fontWeight: FontWeight.w800,
@@ -13564,31 +13968,54 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 }
 
   Widget _buildThanks() => Container(
-        padding: const EdgeInsets.all(14),
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 16),
         decoration: BoxDecoration(
           color: _lavLight,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: _lavender.withValues(alpha: 0.3)),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: _lavender.withValues(alpha: 0.25),
+            width: 1.2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: _lavender.withValues(alpha: 0.08),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
         ),
-        child: Row(children: [
-          Icon(Icons.shield_outlined, color: _lavender, size: 28),
-          const SizedBox(width: 12),
-          Expanded(
-              child:
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('Thank you for helping!',
-                style: GoogleFonts.nunito(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w800,
-                    color: _lavender)),
-            Text('Your action makes a big difference.',
-                style: GoogleFonts.nunito(
-                    fontSize: 12,
-                    color: _navy.withValues(alpha: 0.6),
-                    fontWeight: FontWeight.w600)),
-          ])),
-          const Text('\ud83d\udc31', style: TextStyle(fontSize: 28)),
-        ]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Text(
+              'Thank you for helping!',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.nunito(
+                fontSize: 16,
+                fontWeight: FontWeight.w900,
+                color: _navy,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Image.asset(
+              'assets/images/signoutpop.png',
+              height: 80,
+              fit: BoxFit.contain,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Your action makes a big difference.',
+              textAlign: TextAlign.center,
+              style: GoogleFonts.nunito(
+                fontSize: 13,
+                color: _navy.withValues(alpha: 0.65),
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
       );
 
   Widget _buildResolvedBanner(Sighting s) {
@@ -14068,6 +14495,19 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     fontWeight: FontWeight.w600,
                   ),
                 )
+              else if (type == 'comment')
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: SelectableText(
+                    (u['text'] ?? '').toString(),
+                    style: GoogleFonts.nunito(
+                      fontSize: 13,
+                      color: _navy.withValues(alpha: 0.85),
+                      fontWeight: FontWeight.w600,
+                      height: 1.35,
+                    ),
+                  ),
+                )
               else ...[
                 InkWell(
                   onTap: () => _showUpdateDetailsModal(u, s),
@@ -14089,11 +14529,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                 fontWeight: FontWeight.w600,
                                 height: 1.4),
                             children: [
-                              if (type != 'comment')
-                                TextSpan(
-                                    text: '$dName ',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.w800)),
+                              TextSpan(
+                                  text: '$dName ',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w800)),
                               TextSpan(
                                 text: _getCleanSummaryText(u),
                               ),
@@ -14112,110 +14551,20 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               width: 1,
                             ),
                           ),
-                          child: Wrap(
-                            spacing: 5,
-                            runSpacing: 4,
-                            crossAxisAlignment: WrapCrossAlignment.center,
+                          child: Row(
                             children: [
-                              Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.info_outline_rounded,
-                                      size: 13, color: _lavender),
-                                  const SizedBox(width: 5),
-                                  Text(
-                                    'Tap to view full details',
-                                    style: GoogleFonts.nunito(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w800,
-                                      color: _navy,
-                                    ),
-                                  ),
-                                ],
+                              Icon(Icons.info_outline_rounded,
+                                  size: 13, color: _lavender),
+                              const SizedBox(width: 5),
+                              Text(
+                                'Tap to view action details',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: _navy,
+                                ),
                               ),
-                              if (_getCustomNote(u) != null &&
-                                  _getCustomNote(u)!.isNotEmpty) ...[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 5, vertical: 1.5),
-                                  decoration: BoxDecoration(
-                                    color: _lavender.withValues(alpha: 0.15),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(Icons.edit_note_rounded,
-                                          size: 11, color: _lavender),
-                                      const SizedBox(width: 2),
-                                      Text(
-                                        'Note',
-                                        style: GoogleFonts.nunito(
-                                          fontSize: 9.5,
-                                          fontWeight: FontWeight.w800,
-                                          color: _lavender,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              if (u['proofPhotoUrl'] != null &&
-                                  u['proofPhotoUrl'].toString().isNotEmpty) ...[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 5, vertical: 1.5),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF2E7D32)
-                                        .withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.photo_camera_rounded,
-                                          size: 10, color: Color(0xFF2E7D32)),
-                                      const SizedBox(width: 2),
-                                      Text(
-                                        'Photo',
-                                        style: GoogleFonts.nunito(
-                                          fontSize: 9.5,
-                                          fontWeight: FontWeight.w800,
-                                          color: const Color(0xFF2E7D32),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                              if (u['proofVideoUrl'] != null &&
-                                  u['proofVideoUrl'].toString().isNotEmpty) ...[
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 5, vertical: 1.5),
-                                  decoration: BoxDecoration(
-                                    color: const Color(0xFF673AB7)
-                                        .withValues(alpha: 0.12),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.videocam_rounded,
-                                          size: 11, color: Color(0xFF673AB7)),
-                                      const SizedBox(width: 2),
-                                      Text(
-                                        'Video',
-                                        style: GoogleFonts.nunito(
-                                          fontSize: 9.5,
-                                          fontWeight: FontWeight.w800,
-                                          color: const Color(0xFF673AB7),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
+                              const Spacer(),
                               Icon(Icons.chevron_right_rounded,
                                   size: 14,
                                   color: _navy.withValues(alpha: 0.4)),
