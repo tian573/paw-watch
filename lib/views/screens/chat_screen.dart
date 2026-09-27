@@ -342,6 +342,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
 
   Future<void> _showReportPhotoDialog(ChatMessage msg) async {
     String selectedReason = 'Inappropriate or unwanted content';
+    final customController = TextEditingController();
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -444,6 +445,44 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                     ),
                   );
                 }),
+                const SizedBox(height: 10),
+                Text(
+                  'Additional explanation (optional):',
+                  style: GoogleFonts.nunito(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: _navy,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: customController,
+                  maxLines: 2,
+                  maxLength: 250,
+                  style: GoogleFonts.nunito(fontSize: 12.5, color: _navy),
+                  decoration: InputDecoration(
+                    hintText: 'Explain why you are reporting this photo/message...',
+                    hintStyle: GoogleFonts.nunito(
+                      fontSize: 12,
+                      color: _navy.withValues(alpha: 0.4),
+                    ),
+                    filled: true,
+                    fillColor: Colors.grey.withValues(alpha: 0.06),
+                    contentPadding: const EdgeInsets.all(10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: _navy.withValues(alpha: 0.12)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: _navy.withValues(alpha: 0.12)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Colors.red, width: 1.5),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
@@ -476,10 +515,12 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
       });
 
       try {
+        final extra = customController.text.trim();
+        final fullReason = extra.isNotEmpty ? '$selectedReason: $extra' : selectedReason;
         await FirebaseService.instance.reportChatMessage(
           chatId: _chatId,
           messageId: msg.id,
-          reason: selectedReason,
+          reason: fullReason,
           photoUrl: msg.photoUrl,
         );
         if (mounted) {

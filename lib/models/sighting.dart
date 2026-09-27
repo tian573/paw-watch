@@ -579,6 +579,21 @@ class Sighting {
       careStatus == 'inCare_shelter' ||
       category == 'Sheltered';
 
+  bool get isRehomed =>
+      resolvedByAction == 'rehomed' ||
+      pendingOutcomeAction == 'rehomed' ||
+      lastSeenStatus == 'rehomed' ||
+      category == 'Rehomed';
+
+  bool get isFinishedOrResolved =>
+      isResolved ||
+      isSheltered ||
+      isRehomed ||
+      isTnrReturned ||
+      category == 'Resolved' ||
+      careStatus == 'resolved' ||
+      (resolvedByAction != null && resolvedByAction!.isNotEmpty);
+
   bool get isTnrReturned =>
       resolvedByAction == 'returnedToSpot' ||
       pendingOutcomeAction == 'returnedToSpot' ||
@@ -673,6 +688,35 @@ class Sighting {
       return Sighting.extractCityOnly(effectiveLocationAddress);
     }
     return effectiveLocationAddress;
+  }
+
+  /// Only active roaming street cats (community stray care, feeding spots, and active street emergency rescues)
+  /// need the Last Seen freshness indicator. Once a cat is safely taken in (foster care, shelter, adoption, or resolved),
+  /// the street roaming freshness indicator is no longer relevant.
+  bool get shouldShowLastSeenFreshness {
+    if (isAutoArchived || isResolved || urgency == 'resolved') return false;
+    if (isInCare || isSheltered || isOpenForAdoption || isNeedsHome) return false;
+    if (careStatus == 'inCare_foster' ||
+        careStatus == 'inCare_shelter' ||
+        careStatus == 'inCare_vet' ||
+        careStatus == 'resolved') {
+      return false;
+    }
+
+    return isTnrCommunityCat ||
+        category == 'Community Cat' ||
+        category == 'Community Care' ||
+        category == 'Feral / Colony Cat' ||
+        category == 'Feeding Spot' ||
+        category == 'Stray' ||
+        category == 'Stray Cat' ||
+        isMedicalOrTriagePriority ||
+        urgency == 'urgent' ||
+        category == 'Injured' ||
+        category == 'Needs Vet' ||
+        category == 'Trapped' ||
+        category == 'Urgent Rescue' ||
+        category == 'Kitten';
   }
 
   String get lastSeenFreshness {
