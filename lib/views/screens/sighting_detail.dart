@@ -15,6 +15,7 @@ import '../../services/text_moderation_service.dart';
 import 'chat_screen.dart';
 import '../widgets/paw_image.dart';
 import '../widgets/reel_video_player.dart';
+import '../widgets/shelter_picker_view.dart';
 import '../../utils/double_tap_guard.dart';
 
 class SightingDetailScreen extends StatefulWidget {
@@ -925,14 +926,66 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         contentPadding: const EdgeInsets.symmetric(
                             horizontal: 14, vertical: 12),
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(14),
-                            borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: validationError != null
+                                ? const Color(0xFFE53935)
+                                : BorderSide.none.color,
+                            width: validationError != null ? 1.5 : 0,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: validationError != null
+                                ? const Color(0xFFE53935)
+                                : Colors.transparent,
+                            width: validationError != null ? 1.5 : 0,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide(
+                            color: validationError != null
+                                ? const Color(0xFFE53935)
+                                : _lavender,
+                            width: 1.5,
+                          ),
+                        ),
                         counterStyle: GoogleFonts.nunito(
                             fontSize: 11,
                             color: _navy.withValues(alpha: 0.4)),
                       ),
                     ),
                     const SizedBox(height: 12),
+                    if (validationError != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFEBEE),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFEF5350)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD32F2F)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                validationError!,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFFB71C1C),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
                     SizedBox(
                       width: double.infinity,
                       height: 48,
@@ -2088,6 +2141,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     bool isSubmitting = false;
     bool isScanningProof = false;
     CatValidationResult? proofScanResult;
+    bool hasAttemptedSubmit = false;
+    String? formValidationError;
 
     await showModalBottomSheet<void>(
       context: context,
@@ -2691,6 +2746,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         Expanded(
                           child: OutlinedButton.icon(
                             onPressed: () => pickProof(ImageSource.camera),
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(
+                                color: (hasAttemptedSubmit && (proofFile == null || proofScanResult?.isCat == false))
+                                    ? const Color(0xFFE53935)
+                                    : const Color(0xFF00897B),
+                                width: (hasAttemptedSubmit && (proofFile == null || proofScanResult?.isCat == false)) ? 1.5 : 1,
+                              ),
+                            ),
                             icon: const Icon(Icons.camera_alt_rounded,
                                 size: 16, color: Color(0xFF00897B)),
                             label: Text(
@@ -2707,6 +2770,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         Expanded(
                           child: OutlinedButton.icon(
                             onPressed: () => pickProof(ImageSource.gallery),
+                            style: OutlinedButton.styleFrom(
+                              side: BorderSide(
+                                color: (hasAttemptedSubmit && (proofFile == null || proofScanResult?.isCat == false))
+                                    ? const Color(0xFFE53935)
+                                    : const Color(0xFF1E88E5),
+                                width: (hasAttemptedSubmit && (proofFile == null || proofScanResult?.isCat == false)) ? 1.5 : 1,
+                              ),
+                            ),
                             icon: const Icon(Icons.photo_library_rounded,
                                 size: 16, color: Color(0xFF1E88E5)),
                             label: Text(
@@ -2721,6 +2792,26 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ),
                       ],
                     ),
+                  if (hasAttemptedSubmit && proofFile == null) ...[
+                    const SizedBox(height: 6),
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFEBEE),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFEF5350)),
+                      ),
+                      child: Text(
+                        '⚠️ Cat photo proof is required to confirm release back to colony.',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFD32F2F),
+                        ),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
 
                   // Release Notes
@@ -2735,6 +2826,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   const SizedBox(height: 6),
                   TextField(
                     controller: noteCtrl,
+                    onChanged: (_) => setSheetState(() {}),
                     maxLines: 2,
                     style: GoogleFonts.nunito(fontSize: 13, color: _navy),
                     decoration: InputDecoration(
@@ -2744,35 +2836,69 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           horizontal: 14, vertical: 10),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
+                        borderSide: BorderSide(
+                          color: (hasAttemptedSubmit && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Release note') != null)
+                              ? const Color(0xFFE53935)
+                              : BorderSide.none.color,
+                          width: (hasAttemptedSubmit && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Release note') != null) ? 1.5 : 0,
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: (hasAttemptedSubmit && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Release note') != null)
+                              ? const Color(0xFFE53935)
+                              : Colors.transparent,
+                          width: (hasAttemptedSubmit && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Release note') != null) ? 1.5 : 0,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: (hasAttemptedSubmit && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Release note') != null)
+                              ? const Color(0xFFE53935)
+                              : const Color(0xFF00897B),
+                          width: 1.5,
+                        ),
                       ),
                     ),
                   ),
+                  if (hasAttemptedSubmit && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Release note') != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '⚠️ ${TextModerationService.validateDescription(noteCtrl.text, fieldName: "Release note")!}',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFFE53935),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 20),
 
-                  // Submit Button Guidance (when photo is missing)
-                  if (proofFile == null) ...[
+                  // Warning Banner
+                  if (formValidationError != null) ...[
                     Container(
                       width: double.infinity,
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 9),
                       decoration: BoxDecoration(
-                        color: Colors.amber.shade50,
+                        color: const Color(0xFFFFEBEE),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.amber.shade300),
+                        border: Border.all(color: const Color(0xFFEF5350)),
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.lock_rounded,
-                              size: 16, color: Colors.amber.shade900),
+                          const Icon(Icons.warning_amber_rounded,
+                              size: 18, color: Color(0xFFD32F2F)),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Release photo proof is required above to enable this button.',
+                              formValidationError!,
                               style: GoogleFonts.nunito(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
-                                color: const Color(0xFFE65100),
+                                color: const Color(0xFFB71C1C),
                               ),
                             ),
                           ),
@@ -2801,26 +2927,33 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           ? null
                           : () async {
                               if (isSubmitting || !DoubleTapGuard.allow('action_proof_${s.id}')) return;
-                              setSheetState(() => isSubmitting = true);
                               if (proofFile == null) {
-                                setSheetState(() => isSubmitting = false);
+                                setSheetState(() {
+                                  hasAttemptedSubmit = true;
+                                  isSubmitting = false;
+                                  formValidationError =
+                                      '⚠️ Cat photo proof is required to confirm release back to colony.';
+                                });
                                 DoubleTapGuard.reset('action_proof_${s.id}');
-                                _snack(
-                                    '⚠️ Please upload or take a release proof photo showing the cat.');
                                 return;
                               }
                               if (isScanningProof) {
-                                setSheetState(() => isSubmitting = false);
+                                setSheetState(() {
+                                  isSubmitting = false;
+                                  formValidationError =
+                                      '⏳ AI is verifying the photo, please wait a moment...';
+                                });
                                 DoubleTapGuard.reset('action_proof_${s.id}');
-                                _snack(
-                                    '⏳ AI is verifying the photo, please wait a moment...');
                                 return;
                               }
                               if (proofScanResult?.isCat != true) {
-                                setSheetState(() => isSubmitting = false);
+                                setSheetState(() {
+                                  hasAttemptedSubmit = true;
+                                  isSubmitting = false;
+                                  formValidationError =
+                                      '⚠️ Photo verification failed: ${proofScanResult?.message ?? "Please upload a clear photo of the cat."}';
+                                });
                                 DoubleTapGuard.reset('action_proof_${s.id}');
-                                _snack(
-                                    '⚠️ Photo verification failed: ${proofScanResult?.message ?? "Please upload a clear photo of the cat."}');
                                 return;
                               }
                               if (isCustomLocationMarked) {
@@ -2829,9 +2962,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                         addressCtrl.text,
                                         label: 'Release address');
                                 if (addrErr != null) {
-                                  setSheetState(() => isSubmitting = false);
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    isSubmitting = false;
+                                    formValidationError = '⚠️ $addrErr';
+                                  });
                                   DoubleTapGuard.reset('action_proof_${s.id}');
-                                  _snack('⚠️ $addrErr');
                                   return;
                                 }
                               }
@@ -2840,11 +2976,18 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                       noteCtrl.text,
                                       fieldName: 'Release note');
                               if (noteErr != null) {
-                                setSheetState(() => isSubmitting = false);
+                                setSheetState(() {
+                                  hasAttemptedSubmit = true;
+                                  isSubmitting = false;
+                                  formValidationError = '⚠️ $noteErr';
+                                });
                                 DoubleTapGuard.reset('action_proof_${s.id}');
-                                _snack('⚠️ $noteErr');
                                 return;
                               }
+                              setSheetState(() {
+                                isSubmitting = true;
+                                formValidationError = null;
+                              });
                               try {
                                 await FirebaseService.instance.logRescueAction(
                                   sightingId: s.id,
@@ -3593,6 +3736,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     final isShelteredAction = action == 'sheltered';
     final isTookInAction = action == 'tookIn' || action == 'holding';
     final isOwner = _isOwner(s);
+    bool hasAttemptedSubmit = false;
+    String? formValidationError;
     String? selectedDiagnosedTemperament = s.temperament;
     int planDurationDays = 7;
     String selectedCareGoal = '🍼 Kitten Care & Weaning';
@@ -3612,13 +3757,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     }
     double shelterLat = s.effectiveLatitude;
     double shelterLng = s.effectiveLongitude;
-    bool isLocatingShelter = false;
-    bool isGpsAutoFilledShelter = false;
-    bool isSearchingShelter = false;
-    final shelterSearchCtrl = TextEditingController();
-    final shelterMapCtrl = MapController();
     final shelterNameCtrl = TextEditingController();
     final shelterAddressCtrl = TextEditingController(text: isShelteredAction ? s.effectiveLocationAddress : '');
+    bool isOnRegisterNewTab = false;
     final noteCtrl = TextEditingController();
 
     if (!mounted) return;
@@ -4113,7 +4254,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 12),
                                 side: BorderSide(
-                                    color: _navy.withValues(alpha: 0.2)),
+                                    color: (hasAttemptedSubmit && proofFile == null)
+                                        ? const Color(0xFFE53935)
+                                        : _navy.withValues(alpha: 0.2),
+                                    width: (hasAttemptedSubmit && proofFile == null) ? 1.6 : 1.0),
                                 shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12)),
                               ),
@@ -4133,7 +4277,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 12),
                                 side: BorderSide(
-                                    color: _navy.withValues(alpha: 0.2)),
+                                    color: (hasAttemptedSubmit && proofFile == null)
+                                        ? const Color(0xFFE53935)
+                                        : _navy.withValues(alpha: 0.2),
+                                    width: (hasAttemptedSubmit && proofFile == null) ? 1.6 : 1.0),
                                 shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12)),
                               ),
@@ -4149,6 +4296,42 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           ),
                         ],
                       ),
+                      if (hasAttemptedSubmit && proofFile == null) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.red.shade300),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.error_outline_rounded, size: 14, color: Colors.red.shade700),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  isShelteredAction
+                                      ? '⚠️ Cat photo proof inside the shelter is required to proceed.'
+                                      : (action == 'vet'
+                                          ? '⚠️ Photo proof of the cat at the vet clinic is required to proceed.'
+                                          : (isTookInAction
+                                              ? '⚠️ Photo proof of the cat in your foster setup is required to proceed.'
+                                              : (action == 'fed'
+                                                  ? '⚠️ Photo proof of the cat eating or with food is required.'
+                                                  : '⚠️ Cat photo proof is required to proceed.'))),
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.red.shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ] else ...[
                       Stack(
                         children: [
@@ -4258,249 +4441,60 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ],
                     const SizedBox(height: 14),
                     if (isShelteredAction) ...[
-                      Text(
-                        'Shelter / Organization Name *',
-                        style: GoogleFonts.nunito(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: _navy,
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      TextField(
-                        controller: shelterNameCtrl,
-                        onChanged: (_) => setSheetState(() {}),
-                        style: GoogleFonts.nunito(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: _navy),
-                        decoration: InputDecoration(
-                          hintText:
-                              'e.g. Pejaten Animal Shelter, ASPERA, etc.',
-                          filled: true,
-                          fillColor: _lavLight,
-                          contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
-                          ),
-                        ),
-                      ),
-                      if (shelterNameCtrl.text.isNotEmpty && shelterNameError != null) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          shelterNameError,
-                          style: GoogleFonts.nunito(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w700,
-                            color: const Color(0xFFE53935),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      Text(
-                        'Shelter Address (Required)',
-                        style: GoogleFonts.nunito(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: _navy,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      _buildLocationSearchBar(
-                        controller: shelterSearchCtrl,
-                        isSearching: isSearchingShelter,
+                      ShelterPickerView(
+                        referenceLat: s.effectiveLatitude,
+                        referenceLng: s.effectiveLongitude,
+                        initialShelterName: shelterNameCtrl.text,
+                        initialShelterAddress: shelterAddressCtrl.text,
                         themeColor: const Color(0xFF673AB7),
-                        hintText: 'Search shelter address, landmark, or city...',
-                        onSearch: (query) async {
-                          if (query.trim().isEmpty) return;
-                          setSheetState(() => isSearchingShelter = true);
-                          final locResult = await LocationService()
-                              .searchLocation(query.trim());
-                          if (locResult != null) {
-                            shelterLat = locResult.latitude;
-                            shelterLng = locResult.longitude;
-                            shelterAddressCtrl.text = locResult.formattedAddress;
-                            isGpsAutoFilledShelter = false;
-                            try {
-                              shelterMapCtrl.move(
-                                  ll.LatLng(shelterLat, shelterLng), 16.0);
-                            } catch (_) {}
-                          } else {
-                            _snack(
-                                'Location not found. Try a different search term.');
-                          }
-                          setSheetState(() => isSearchingShelter = false);
+                        onShelterSelected: (chosenShelter) {
+                          setSheetState(() {
+                            shelterNameCtrl.text = chosenShelter.name;
+                            shelterAddressCtrl.text = chosenShelter.address;
+                            shelterLat = chosenShelter.latitude;
+                            shelterLng = chosenShelter.longitude;
+                          });
                         },
-                        onClear: () =>
-                            setSheetState(() => shelterSearchCtrl.clear()),
+                        onClearSelection: () {
+                          setSheetState(() {
+                            shelterNameCtrl.clear();
+                            shelterAddressCtrl.clear();
+                          });
+                        },
+                        onRegisterTabActiveChanged: (isRegTab) {
+                          isOnRegisterNewTab = isRegTab;
+                        },
                       ),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: Container(
-                          height: 180,
-                          width: double.infinity,
+                      if (hasAttemptedSubmit && shelterNameCtrl.text.trim().isEmpty) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFE8EAF0),
-                            borderRadius: BorderRadius.circular(14),
-                            border:
-                                Border.all(color: _navy.withValues(alpha: 0.1)),
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.red.shade300),
                           ),
-                          child: Stack(
+                          child: Row(
                             children: [
-                              FlutterMap(
-                                mapController: shelterMapCtrl,
-                                options: MapOptions(
-                                  initialCenter:
-                                      ll.LatLng(shelterLat, shelterLng),
-                                  initialZoom: 16.0,
-                                  onTap: (tapPos, point) async {
-                                    shelterLat = point.latitude;
-                                    shelterLng = point.longitude;
-                                    isGpsAutoFilledShelter = false;
-                                    setSheetState(
-                                        () => isLocatingShelter = true);
-                                    final addr = await LocationService()
-                                        .getAddressFromCoordinates(
-                                            point.latitude, point.longitude);
-                                    shelterAddressCtrl.text = addr;
-                                    setSheetState(
-                                        () => isLocatingShelter = false);
-                                  },
-                                ),
-                                children: [
-                                  TileLayer(
-                                    urlTemplate:
-                                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                    userAgentPackageName:
-                                        'com.pawwatch.app',
-                                  ),
-                                  MarkerLayer(
-                                    markers: [
-                                      Marker(
-                                        point:
-                                            ll.LatLng(shelterLat, shelterLng),
-                                        width: 46,
-                                        height: 46,
-                                        child: _buildMapPinMarker(
-                                          color: const Color(0xFF673AB7),
-                                          icon: Icons.apartment,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              Positioned(
-                                right: 10,
-                                top: 10,
-                                child: Column(
-                                  children: [
-                                    _buildMapButton(
-                                      Icons.my_location,
-                                      onTap: () async {
-                                        setSheetState(
-                                            () => isLocatingShelter = true);
-                                        final res = await LocationService()
-                                            .getCurrentUserLocation();
-                                        shelterLat = res.latitude;
-                                        shelterLng = res.longitude;
-                                        shelterAddressCtrl.text =
-                                            res.formattedAddress;
-                                        isGpsAutoFilledShelter =
-                                            res.isGpsAutoFilled;
-                                        setSheetState(
-                                            () => isLocatingShelter = false);
-                                        try {
-                                          shelterMapCtrl.move(
-                                              ll.LatLng(
-                                                  shelterLat, shelterLng),
-                                              16.0);
-                                        } catch (_) {}
-                                      },
-                                    ),
-                                    const SizedBox(height: 6),
-                                    _buildMapButton(
-                                      Icons.add,
-                                      onTap: () {
-                                        try {
-                                          final z =
-                                              shelterMapCtrl.camera.zoom + 1;
-                                          shelterMapCtrl.move(
-                                              ll.LatLng(
-                                                  shelterLat, shelterLng),
-                                              z);
-                                        } catch (_) {}
-                                      },
-                                    ),
-                                    const SizedBox(height: 4),
-                                    _buildMapButton(
-                                      Icons.remove,
-                                      onTap: () {
-                                        try {
-                                          final z =
-                                              shelterMapCtrl.camera.zoom - 1;
-                                          shelterMapCtrl.move(
-                                              ll.LatLng(
-                                                  shelterLat, shelterLng),
-                                              z);
-                                        } catch (_) {}
-                                      },
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              Positioned(
-                                bottom: 8,
-                                left: 8,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.92),
-                                    borderRadius: BorderRadius.circular(8),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(alpha: 0.1),
-                                        blurRadius: 4,
-                                      ),
-                                    ],
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      const Icon(Icons.touch_app_outlined,
-                                          size: 12,
-                                          color: Color(0xFF673AB7)),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        'Tap map to set shelter location',
-                                        style: GoogleFonts.nunito(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w700,
-                                          color: _navy,
-                                        ),
-                                      ),
-                                    ],
+                              const Icon(Icons.error_outline, size: 14, color: Color(0xFFE53935)),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  isOnRegisterNewTab
+                                      ? 'You have an unregistered shelter draft. Please press "Register your suggested Shelter" first, or switch to Nearby Shelters to pick an existing one.'
+                                      : 'Please choose a nearby shelter or register a new one.',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: const Color(0xFFE53935),
                                   ),
                                 ),
                               ),
                             ],
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      _buildLocationAddressDisplay(
-                        addressText: shelterAddressCtrl.text,
-                        isLocating: isLocatingShelter,
-                        isGpsAutoFilled: isGpsAutoFilledShelter,
-                        themeColor: const Color(0xFF673AB7),
-                        errorText: shelterAddressCtrl.text.isNotEmpty
-                            ? shelterAddressError
-                            : null,
-                      ),
-                      const SizedBox(height: 12),
+                      ],
+                      const SizedBox(height: 14),
                     ],
                     if (action == 'vet') ...[
                       Container(
@@ -4666,14 +4660,38 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             horizontal: 14, vertical: 10),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
+                          borderSide: BorderSide(
+                            color: ((hasAttemptedSubmit && isNoteMandatory && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && noteError != null))
+                                ? const Color(0xFFE53935)
+                                : BorderSide.none.color,
+                            width: ((hasAttemptedSubmit && isNoteMandatory && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && noteError != null)) ? 1.5 : 0,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: ((hasAttemptedSubmit && isNoteMandatory && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && noteError != null))
+                                ? const Color(0xFFE53935)
+                                : BorderSide.none.color,
+                            width: ((hasAttemptedSubmit && isNoteMandatory && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && noteError != null)) ? 1.5 : 0,
+                          ),
                         ),
                         counterStyle: GoogleFonts.nunito(
                             fontSize: 10,
                             color: _navy.withValues(alpha: 0.4)),
                       ),
                     ),
-                    if (noteCtrl.text.isNotEmpty && noteError != null) ...[
+                    if (hasAttemptedSubmit && isNoteMandatory && noteCtrl.text.trim().isEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚠️ Custom note/details are required for this action.',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ] else if (noteCtrl.text.isNotEmpty && noteError != null) ...[
                       const SizedBox(height: 4),
                       Text(
                         noteError,
@@ -4719,6 +4737,34 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       ),
                     ],
                     const SizedBox(height: 18),
+                    if (formValidationError != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.red.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded, size: 16, color: Colors.red.shade700),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                formValidationError!,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.red.shade900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -4735,27 +4781,37 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         onPressed: isSubmitting
                             ? null
                             : () async {
-                                if (isSubmitting || !DoubleTapGuard.allow('action_form_${s.id}')) return;
-                                setSheetState(() => isSubmitting = true);
+                                if (isSubmitting) return;
                                 if (proofFile == null) {
-                                  setSheetState(() => isSubmitting = false);
-                                  DoubleTapGuard.reset('action_form_${s.id}');
-                                  _snack(
-                                      '⚠️ Please upload or take a verification photo.');
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = isShelteredAction
+                                        ? 'Cat photo proof inside the shelter is required to proceed.'
+                                        : (action == 'vet'
+                                            ? 'Photo proof of the cat at the vet clinic is required to proceed.'
+                                            : (isTookInAction
+                                                ? 'Photo proof of the cat in your foster setup is required to proceed.'
+                                                : (action == 'fed'
+                                                    ? 'Photo proof of the cat eating or with food is required.'
+                                                    : 'Cat photo proof is required to proceed.')));
+                                  });
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 if (isScanning) {
-                                  setSheetState(() => isSubmitting = false);
-                                  DoubleTapGuard.reset('action_form_${s.id}');
-                                  _snack(
-                                      '⏳ AI is verifying the photo, please wait a moment...');
+                                  setSheetState(() {
+                                    formValidationError = 'AI is validating the cat photo, please wait a moment...';
+                                  });
+                                  _snack('⏳ AI is verifying the photo, please wait a moment...');
                                   return;
                                 }
                                 if (scanResult == null || !scanResult!.isValid) {
-                                  setSheetState(() => isSubmitting = false);
-                                  DoubleTapGuard.reset('action_form_${s.id}');
-                                  _snack(
-                                      '⚠️ Photo verification failed: ${scanResult?.message ?? "Please upload a clear photo of the cat."}');
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = scanResult?.message ??
+                                        'Photo verification failed: please upload a clear cat photo.';
+                                  });
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 if (isShelteredAction) {
@@ -4763,20 +4819,27 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                       TextModerationService.validateFacilityName(
                                           shelterNameCtrl.text,
                                           label: 'Shelter');
-                                  if (sNameErr != null) {
-                                    setSheetState(() => isSubmitting = false);
-                                    DoubleTapGuard.reset('action_form_${s.id}');
-                                    _snack('⚠️ $sNameErr');
+                                  if (sNameErr != null || shelterNameCtrl.text.trim().isEmpty) {
+                                    final msg = isOnRegisterNewTab
+                                        ? 'You have an unregistered shelter draft. Please press "Register your suggested Shelter" first, or pick from Nearby Shelters.'
+                                        : (sNameErr ?? 'Please select a shelter or register a new one first.');
+                                    setSheetState(() {
+                                      hasAttemptedSubmit = true;
+                                      formValidationError = msg;
+                                    });
+                                    _snack('⚠️ $msg');
                                     return;
                                   }
                                   final sAddrErr =
                                       TextModerationService.validateAddress(
                                           shelterAddressCtrl.text,
                                           label: 'Shelter address');
-                                  if (sAddrErr != null) {
-                                    setSheetState(() => isSubmitting = false);
-                                    DoubleTapGuard.reset('action_form_${s.id}');
-                                    _snack('⚠️ $sAddrErr');
+                                  if (sAddrErr != null || shelterAddressCtrl.text.trim().isEmpty) {
+                                    setSheetState(() {
+                                      hasAttemptedSubmit = true;
+                                      formValidationError = sAddrErr ?? 'Shelter location address is required.';
+                                    });
+                                    _snack('⚠️ ${formValidationError!}');
                                     return;
                                   }
                                 }
@@ -4787,10 +4850,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                             customGoalCtrl.text,
                                             label: 'Custom goal',
                                             minLength: 4);
-                                    if (goalErr != null) {
-                                      setSheetState(() => isSubmitting = false);
-                                      DoubleTapGuard.reset('action_form_${s.id}');
-                                      _snack('⚠️ $goalErr');
+                                    if (goalErr != null || customGoalCtrl.text.trim().isEmpty) {
+                                      setSheetState(() {
+                                        hasAttemptedSubmit = true;
+                                        formValidationError = goalErr ?? 'Custom goal is required.';
+                                      });
+                                      _snack('⚠️ ${formValidationError!}');
                                       return;
                                     }
                                   }
@@ -4803,10 +4868,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                             t,
                                             label: 'Day $d theme',
                                             minLength: 4);
-                                    if (mErr != null) {
-                                      setSheetState(() => isSubmitting = false);
-                                      DoubleTapGuard.reset('action_form_${s.id}');
-                                      _snack('⚠️ $mErr');
+                                    if (mErr != null || t.isEmpty) {
+                                      setSheetState(() {
+                                        hasAttemptedSubmit = true;
+                                        formValidationError = mErr ?? 'Day $d theme is required.';
+                                      });
+                                      _snack('⚠️ ${formValidationError!}');
                                       return;
                                     }
                                   }
@@ -4816,13 +4883,21 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                       TextModerationService.validateDescription(
                                           noteCtrl.text,
                                           fieldName: 'Note');
-                                  if (noteErr != null) {
-                                    setSheetState(() => isSubmitting = false);
-                                    DoubleTapGuard.reset('action_form_${s.id}');
-                                    _snack('⚠️ $noteErr');
+                                  if (noteErr != null || noteCtrl.text.trim().isEmpty) {
+                                    setSheetState(() {
+                                      hasAttemptedSubmit = true;
+                                      formValidationError = noteErr ?? 'Details note is required.';
+                                    });
+                                    _snack('⚠️ ${formValidationError!}');
                                     return;
                                   }
                                 }
+
+                                if (!DoubleTapGuard.allow('action_form_${s.id}')) return;
+                                setSheetState(() {
+                                  formValidationError = null;
+                                  isSubmitting = true;
+                                });
                                 try {
                                   String finalNote = noteCtrl.text.trim();
                                   if (isShelteredAction &&
@@ -5583,6 +5658,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     bool isScanning = false;
     CatValidationResult? scanResult;
     bool isSubmitting = false;
+    bool hasAttemptedSubmit = false;
+    String? formValidationError;
     bool isLocating = false;
     bool isGpsAutoFilled = false;
     bool isSearchingLocation = false;
@@ -5872,7 +5949,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               addressCtrl.text,
                               label: 'Location address',
                             )
-                          : null,
+                          : (hasAttemptedSubmit && addressCtrl.text.trim().isEmpty
+                              ? '⚠️ Location address is required.'
+                              : null),
                     ),
                     const SizedBox(height: 12),
                     Text(
@@ -5884,7 +5963,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       ),
                     ),
                     const SizedBox(height: 8),
-                    if (proofFile == null)
+                    if (proofFile == null) ...[
                       Row(
                         children: [
                           Expanded(
@@ -5892,7 +5971,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               style: OutlinedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(vertical: 12),
                                 side: BorderSide(
-                                    color: _navy.withValues(alpha: 0.2)),
+                                    color: (hasAttemptedSubmit && proofFile == null)
+                                        ? const Color(0xFFE53935)
+                                        : _navy.withValues(alpha: 0.2),
+                                    width: (hasAttemptedSubmit && proofFile == null) ? 1.5 : 1),
                                 shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12)),
                               ),
@@ -5912,7 +5994,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               style: OutlinedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(vertical: 12),
                                 side: BorderSide(
-                                    color: _navy.withValues(alpha: 0.2)),
+                                    color: (hasAttemptedSubmit && proofFile == null)
+                                        ? const Color(0xFFE53935)
+                                        : _navy.withValues(alpha: 0.2),
+                                    width: (hasAttemptedSubmit && proofFile == null) ? 1.5 : 1),
                                 shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12)),
                               ),
@@ -5927,8 +6012,36 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             ),
                           ),
                         ],
-                      )
-                    else
+                      ),
+                      if (hasAttemptedSubmit && proofFile == null) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.red.shade300),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.error_outline_rounded, size: 14, color: Colors.red.shade700),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  '⚠️ Live cat photo at the new spot is required to update location.',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.red.shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ] else
                       Container(
                         height: 140,
                         width: double.infinity,
@@ -6011,13 +6124,37 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             horizontal: 12, vertical: 8),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
+                          borderSide: BorderSide(
+                            color: ((hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Roam note') != null))
+                                ? const Color(0xFFE53935)
+                                : BorderSide.none.color,
+                            width: ((hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Roam note') != null)) ? 1.5 : 0,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: ((hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Roam note') != null))
+                                ? const Color(0xFFE53935)
+                                : BorderSide.none.color,
+                            width: ((hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Roam note') != null)) ? 1.5 : 0,
+                          ),
                         ),
                         counterStyle: GoogleFonts.nunito(
                             fontSize: 10, color: _navy.withValues(alpha: 0.4)),
                       ),
                     ),
-                    if (noteCtrl.text.isNotEmpty &&
+                    if (hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚠️ Roam note / details are required.',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ] else if (noteCtrl.text.isNotEmpty &&
                         TextModerationService.validateDescription(
                                 noteCtrl.text,
                                 fieldName: 'Roam note') !=
@@ -6035,6 +6172,34 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       ),
                     ],
                     const SizedBox(height: 12),
+                    if (formValidationError != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.red.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded, size: 16, color: Colors.red.shade700),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                formValidationError!,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.red.shade900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -6052,48 +6217,59 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             ? null
                             : () async {
                                 if (isSubmitting || !DoubleTapGuard.allow('roam_spot_${s.id}')) return;
-                                setSheetState(() => isSubmitting = true);
                                 if (proofFile == null) {
-                                  setSheetState(() => isSubmitting = false);
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = 'Live cat photo at the new spot is required to proceed.';
+                                  });
                                   DoubleTapGuard.reset('roam_spot_${s.id}');
-                                  _snack(
-                                      '⚠️ Please take or upload a cat photo at the new location.');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 if (isScanning) {
-                                  setSheetState(() => isSubmitting = false);
+                                  setSheetState(() {
+                                    formValidationError = 'AI is validating the photo, please wait a moment...';
+                                  });
                                   DoubleTapGuard.reset('roam_spot_${s.id}');
-                                  _snack(
-                                      '⏳ AI is verifying the photo, please wait a moment...');
+                                  _snack('⏳ AI is verifying the photo, please wait a moment...');
                                   return;
                                 }
                                 if (scanResult?.isCat != true) {
-                                  setSheetState(() => isSubmitting = false);
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = scanResult?.message ?? 'Photo verification failed: please upload a clear cat photo.';
+                                  });
                                   DoubleTapGuard.reset('roam_spot_${s.id}');
-                                  _snack(
-                                      '⚠️ Photo verification failed: ${scanResult?.message ?? "Please upload a clear cat photo."}');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 final addrErr =
                                     TextModerationService.validateAddress(
                                         addressCtrl.text,
                                         label: 'Location address');
-                                if (addrErr != null) {
-                                  setSheetState(() => isSubmitting = false);
+                                if (addrErr != null || addressCtrl.text.trim().isEmpty) {
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = addrErr ?? 'Location address is required.';
+                                  });
                                   DoubleTapGuard.reset('roam_spot_${s.id}');
-                                  _snack('⚠️ $addrErr');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 final noteErr =
                                     TextModerationService.validateDescription(
                                         noteCtrl.text,
                                         fieldName: 'Roam note');
-                                if (noteErr != null) {
-                                  setSheetState(() => isSubmitting = false);
+                                if (noteErr != null || noteCtrl.text.trim().isEmpty) {
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = noteErr ?? 'Roam note / details are required.';
+                                  });
                                   DoubleTapGuard.reset('roam_spot_${s.id}');
-                                  _snack('⚠️ $noteErr');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
+                                setSheetState(() => isSubmitting = true);
                                 try {
                                   final awardedXp = await FirebaseService.instance.logRescueAction(
                                     sightingId: s.id,
@@ -7807,6 +7983,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     double selectedRating = 5.0;
     final commentCtrl = TextEditingController();
     bool isSubmitting = false;
+    bool hasAttemptedSubmit = false;
+    String? formValidationError;
 
     showModalBottomSheet(
       context: context,
@@ -7814,6 +7992,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => StatefulBuilder(
         builder: (ctx, setSheetState) {
+          final commentErr = commentCtrl.text.trim().isNotEmpty
+              ? TextModerationService.validateComment(commentCtrl.text)
+              : null;
+
           return Padding(
             padding: EdgeInsets.only(
                 bottom: MediaQuery.viewInsetsOf(ctx).bottom),
@@ -7890,7 +8072,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   ),
                   const SizedBox(height: 14),
                   Text(
-                    'Feedback / Endorsement Note',
+                    'Feedback / Endorsement Note (Optional)',
                     style: GoogleFonts.nunito(
                       fontSize: 13,
                       fontWeight: FontWeight.w800,
@@ -7900,6 +8082,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   const SizedBox(height: 6),
                   TextField(
                     controller: commentCtrl,
+                    onChanged: (_) => setSheetState(() {}),
                     maxLines: 2,
                     style:
                         GoogleFonts.nunito(fontSize: 13, color: _navy),
@@ -7911,11 +8094,73 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       contentPadding: const EdgeInsets.all(12),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none,
+                        borderSide: BorderSide(
+                          color: (hasAttemptedSubmit && commentErr != null)
+                              ? const Color(0xFFE53935)
+                              : BorderSide.none.color,
+                          width: (hasAttemptedSubmit && commentErr != null) ? 1.5 : 0,
+                        ),
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: (hasAttemptedSubmit && commentErr != null)
+                              ? const Color(0xFFE53935)
+                              : Colors.transparent,
+                          width: (hasAttemptedSubmit && commentErr != null) ? 1.5 : 0,
+                        ),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(
+                          color: (hasAttemptedSubmit && commentErr != null)
+                              ? const Color(0xFFE53935)
+                              : _lavender,
+                          width: 1.5,
+                        ),
                       ),
                     ),
                   ),
+                  if (hasAttemptedSubmit && commentErr != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '⚠️ $commentErr',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFFE53935),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 16),
+                  if (formValidationError != null) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFEBEE),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFEF5350)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD32F2F)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              formValidationError!,
+                              style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFFB71C1C),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -7929,7 +8174,20 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       onPressed: isSubmitting
                           ? null
                           : () async {
-                              setSheetState(() => isSubmitting = true);
+                              if (commentCtrl.text.trim().isNotEmpty) {
+                                final err = TextModerationService.validateComment(commentCtrl.text);
+                                if (err != null) {
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = '⚠️ $err';
+                                  });
+                                  return;
+                                }
+                              }
+                              setSheetState(() {
+                                isSubmitting = true;
+                                formValidationError = null;
+                              });
                               try {
                                 await FirebaseService.instance
                                     .submitRescuerReview(
@@ -7947,8 +8205,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                     'Thank you! Review & endorsement submitted 🐾');
                               } catch (e) {
                                 setSheetState(
-                                    () => isSubmitting = false);
-                                _snack('Error submitting review: $e');
+                                    () {
+                                      isSubmitting = false;
+                                      formValidationError = 'Error submitting review: $e';
+                                    });
                               }
                             },
                       child: isSubmitting
@@ -8221,6 +8481,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     File? proofFile;
     File? proofVideoFile;
     bool isSubmitting = false;
+    bool hasAttemptedSubmit = false;
+    String? formValidationError;
     bool isScanningPhoto = false;
     CatValidationResult? scanResult;
     String selectedCondition = 'Recovering & Eating Well';
@@ -8444,10 +8706,35 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               horizontal: 12, vertical: 10),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
+                            borderSide: BorderSide(
+                              color: (hasAttemptedSubmit && isCustomCondition && customConditionCtrl.text.trim().isEmpty)
+                                  ? const Color(0xFFE53935)
+                                  : BorderSide.none.color,
+                              width: (hasAttemptedSubmit && isCustomCondition && customConditionCtrl.text.trim().isEmpty) ? 1.5 : 0,
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: (hasAttemptedSubmit && isCustomCondition && customConditionCtrl.text.trim().isEmpty)
+                                  ? const Color(0xFFE53935)
+                                  : BorderSide.none.color,
+                              width: (hasAttemptedSubmit && isCustomCondition && customConditionCtrl.text.trim().isEmpty) ? 1.5 : 0,
+                            ),
                           ),
                         ),
                       ),
+                      if (hasAttemptedSubmit && isCustomCondition && customConditionCtrl.text.trim().isEmpty) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '⚠️ Custom condition description is required.',
+                          style: GoogleFonts.nunito(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFFE53935),
+                          ),
+                        ),
+                      ],
                     ],
                     const SizedBox(height: 16),
                     Text(
@@ -8473,11 +8760,35 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         contentPadding: const EdgeInsets.all(12),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide.none,
+                          borderSide: BorderSide(
+                            color: ((hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Care note') != null))
+                                ? const Color(0xFFE53935)
+                                : BorderSide.none.color,
+                            width: ((hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Care note') != null)) ? 1.5 : 0,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: ((hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Care note') != null))
+                                ? const Color(0xFFE53935)
+                                : BorderSide.none.color,
+                            width: ((hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Care note') != null)) ? 1.5 : 0,
+                          ),
                         ),
                       ),
                     ),
-                    if (noteCtrl.text.isNotEmpty &&
+                    if (hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚠️ Care notes / medical update are required.',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ] else if (noteCtrl.text.isNotEmpty &&
                         TextModerationService.validateDescription(
                                 noteCtrl.text,
                                 fieldName: 'Care note') !=
@@ -8611,15 +8922,17 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             ],
                           ),
                         ),
-                    ] else
+                    ] else ...[
                       Row(
                         children: [
                           OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(
                               foregroundColor: _lavender,
                               side: BorderSide(
-                                  color:
-                                      _lavender.withValues(alpha: 0.5)),
+                                  color: (hasAttemptedSubmit && proofFile == null)
+                                      ? const Color(0xFFE53935)
+                                      : _lavender.withValues(alpha: 0.5),
+                                  width: (hasAttemptedSubmit && proofFile == null) ? 1.5 : 1),
                               shape: RoundedRectangleBorder(
                                   borderRadius:
                                       BorderRadius.circular(12)),
@@ -8637,7 +8950,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             style: OutlinedButton.styleFrom(
                               foregroundColor: _navy,
                               side: BorderSide(
-                                  color: _navy.withValues(alpha: 0.2)),
+                                  color: (hasAttemptedSubmit && proofFile == null)
+                                      ? const Color(0xFFE53935)
+                                      : _navy.withValues(alpha: 0.2),
+                                  width: (hasAttemptedSubmit && proofFile == null) ? 1.5 : 1),
                               shape: RoundedRectangleBorder(
                                   borderRadius:
                                       BorderRadius.circular(12)),
@@ -8653,6 +8969,35 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           ),
                         ],
                       ),
+                      if (hasAttemptedSubmit && proofFile == null) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.red.shade300),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.error_outline_rounded, size: 14, color: Colors.red.shade700),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  '⚠️ Cat photo proof is mandatory for milestone check-in.',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.red.shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                     const SizedBox(height: 16),
 
                     // Optional Video Section
@@ -8759,6 +9104,34 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ],
                       ),
                     const SizedBox(height: 20),
+                    if (formValidationError != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.red.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded, size: 16, color: Colors.red.shade700),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                formValidationError!,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.red.shade900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -8776,46 +9149,56 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             ? null
                             : () async {
                                 if (isSubmitting || !DoubleTapGuard.allow('milestone_${s.id}_$milestoneDay')) return;
-                                setSheetState(() => isSubmitting = true);
                                 if (proofFile == null) {
-                                  setSheetState(() => isSubmitting = false);
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = 'Cat photo proof is required to verify milestone check-in.';
+                                  });
                                   DoubleTapGuard.reset('milestone_${s.id}_$milestoneDay');
-                                  _snack(
-                                      '⚠️ Please upload or take a milestone proof photo.');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 if (isScanningPhoto) {
-                                  setSheetState(() => isSubmitting = false);
+                                  setSheetState(() {
+                                    formValidationError = 'AI is validating the photo, please wait a moment...';
+                                  });
                                   DoubleTapGuard.reset('milestone_${s.id}_$milestoneDay');
-                                  _snack(
-                                      '⏳ AI is verifying the photo, please wait a moment...');
+                                  _snack('⏳ AI is verifying the photo, please wait a moment...');
                                   return;
                                 }
                                 if (scanResult?.isCat != true) {
-                                  setSheetState(() => isSubmitting = false);
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = scanResult?.message ?? 'Photo verification failed: please upload a clear cat photo.';
+                                  });
                                   DoubleTapGuard.reset('milestone_${s.id}_$milestoneDay');
-                                  _snack(
-                                      '⚠️ Photo verification failed: ${scanResult?.message ?? "Please upload a clear cat photo."}');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 if (isCustomCondition &&
                                     customConditionCtrl.text.trim().isEmpty) {
-                                  setSheetState(() => isSubmitting = false);
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = 'Please enter a description for the custom condition.';
+                                  });
                                   DoubleTapGuard.reset('milestone_${s.id}_$milestoneDay');
-                                  _snack(
-                                      '⚠️ Please specify the custom condition for this milestone.');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 final noteErr =
                                     TextModerationService.validateDescription(
                                         noteCtrl.text,
                                         fieldName: 'Care note');
-                                if (noteErr != null) {
-                                  setSheetState(() => isSubmitting = false);
+                                if (noteErr != null || noteCtrl.text.trim().isEmpty) {
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = noteErr ?? 'Care notes / medical update are required.';
+                                  });
                                   DoubleTapGuard.reset('milestone_${s.id}_$milestoneDay');
-                                  _snack('⚠️ $noteErr');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
+                                setSheetState(() => isSubmitting = true);
                                 try {
                                   final finalCondition = isCustomCondition &&
                                           customConditionCtrl.text
@@ -10195,6 +10578,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     }
     File? showcaseFile;
     bool isSubmitting = false;
+    bool hasAttemptedSubmit = false;
+    String? formValidationError;
     bool isScanningPhoto = false;
     CatValidationResult? scanResult;
 
@@ -10340,6 +10725,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     const SizedBox(height: 6),
                     TextField(
                       controller: facilityCtrl,
+                      onChanged: (_) => setSheetState(() {}),
                       style: GoogleFonts.nunito(fontSize: 13, color: _navy),
                       decoration: InputDecoration(
                         hintText: 'e.g. Miaw Foster Home, Pejaten Animal Shelter',
@@ -10353,11 +10739,21 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         contentPadding: const EdgeInsets.all(12),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: _navy.withValues(alpha: 0.15)),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && (facilityCtrl.text.trim().isEmpty || TextModerationService.validateFacilityName(facilityCtrl.text, label: 'Foster home name') != null))
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && (facilityCtrl.text.trim().isEmpty || TextModerationService.validateFacilityName(facilityCtrl.text, label: 'Foster home name') != null)) ? 1.5 : 1,
+                          ),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: _navy.withValues(alpha: 0.15)),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && (facilityCtrl.text.trim().isEmpty || TextModerationService.validateFacilityName(facilityCtrl.text, label: 'Foster home name') != null))
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && (facilityCtrl.text.trim().isEmpty || TextModerationService.validateFacilityName(facilityCtrl.text, label: 'Foster home name') != null)) ? 1.5 : 1,
+                          ),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -10365,6 +10761,27 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ),
                       ),
                     ),
+                    if (hasAttemptedSubmit && facilityCtrl.text.trim().isEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚠️ Facility / foster home name is required.',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ] else if (hasAttemptedSubmit && TextModerationService.validateFacilityName(facilityCtrl.text, label: 'Foster home name') != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        TextModerationService.validateFacilityName(facilityCtrl.text, label: 'Foster home name')!,
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     Text(
                       'Adoption Contact Phone Number (Phone only)',
@@ -10377,6 +10794,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     const SizedBox(height: 6),
                     TextField(
                       controller: contactCtrl,
+                      onChanged: (_) => setSheetState(() {}),
                       keyboardType: TextInputType.phone,
                       style: GoogleFonts.nunito(fontSize: 13, color: _navy),
                       decoration: InputDecoration(
@@ -10391,11 +10809,21 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         contentPadding: const EdgeInsets.all(12),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: _navy.withValues(alpha: 0.15)),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && (contactCtrl.text.trim().isEmpty || TextModerationService.validatePhoneNumber(contactCtrl.text, label: 'Adoption contact phone number') != null))
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && (contactCtrl.text.trim().isEmpty || TextModerationService.validatePhoneNumber(contactCtrl.text, label: 'Adoption contact phone number') != null)) ? 1.5 : 1,
+                          ),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: _navy.withValues(alpha: 0.15)),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && (contactCtrl.text.trim().isEmpty || TextModerationService.validatePhoneNumber(contactCtrl.text, label: 'Adoption contact phone number') != null))
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && (contactCtrl.text.trim().isEmpty || TextModerationService.validatePhoneNumber(contactCtrl.text, label: 'Adoption contact phone number') != null)) ? 1.5 : 1,
+                          ),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -10403,6 +10831,27 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ),
                       ),
                     ),
+                    if (hasAttemptedSubmit && contactCtrl.text.trim().isEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚠️ Contact phone number is required.',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ] else if (hasAttemptedSubmit && TextModerationService.validatePhoneNumber(contactCtrl.text, label: 'Adoption contact phone number') != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        TextModerationService.validatePhoneNumber(contactCtrl.text, label: 'Adoption contact phone number')!,
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     Text(
                       'Verified Health Clearance Badges',
@@ -10477,6 +10926,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     const SizedBox(height: 6),
                     TextField(
                       controller: noteCtrl,
+                      onChanged: (_) => setSheetState(() {}),
                       maxLines: 3,
                       style: GoogleFonts.nunito(fontSize: 13, color: _navy),
                       decoration: InputDecoration(
@@ -10490,11 +10940,21 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         contentPadding: const EdgeInsets.all(12),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: _navy.withValues(alpha: 0.15)),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && (noteCtrl.text.trim().isEmpty || TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Adoption story') != null))
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && (noteCtrl.text.trim().isEmpty || TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Adoption story') != null)) ? 1.5 : 1,
+                          ),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: _navy.withValues(alpha: 0.15)),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && (noteCtrl.text.trim().isEmpty || TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Adoption story') != null))
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && (noteCtrl.text.trim().isEmpty || TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Adoption story') != null)) ? 1.5 : 1,
+                          ),
                         ),
                         focusedBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
@@ -10502,6 +10962,27 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ),
                       ),
                     ),
+                    if (hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚠️ Adoption story and personality notes are required.',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ] else if (hasAttemptedSubmit && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Adoption story') != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Adoption story')!,
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ],
                     const SizedBox(height: 14),
                     Row(
                       children: [
@@ -10641,8 +11122,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             child: OutlinedButton.icon(
                               style: OutlinedButton.styleFrom(
                                 side: BorderSide(
-                                  color: const Color(0xFF2E7D32).withValues(alpha: 0.5),
-                                  width: 1.2,
+                                  color: (hasAttemptedSubmit && showcaseFile == null)
+                                      ? const Color(0xFFE53935)
+                                      : const Color(0xFF2E7D32).withValues(alpha: 0.5),
+                                  width: (hasAttemptedSubmit && showcaseFile == null) ? 1.5 : 1.2,
                                 ),
                                 padding: const EdgeInsets.symmetric(vertical: 10),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -10653,7 +11136,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   style: GoogleFonts.nunito(
                                     fontWeight: FontWeight.w800,
                                     fontSize: 12,
-                                    color: const Color(0xFF2E7D32),
+                                    color: (hasAttemptedSubmit && showcaseFile == null)
+                                        ? const Color(0xFFE53935)
+                                        : const Color(0xFF2E7D32),
                                   )),
                             ),
                           ),
@@ -10662,8 +11147,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             child: OutlinedButton.icon(
                               style: OutlinedButton.styleFrom(
                                 side: BorderSide(
-                                  color: const Color(0xFF2E7D32).withValues(alpha: 0.5),
-                                  width: 1.2,
+                                  color: (hasAttemptedSubmit && showcaseFile == null)
+                                      ? const Color(0xFFE53935)
+                                      : const Color(0xFF2E7D32).withValues(alpha: 0.5),
+                                  width: (hasAttemptedSubmit && showcaseFile == null) ? 1.5 : 1.2,
                                 ),
                                 padding: const EdgeInsets.symmetric(vertical: 10),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -10674,14 +11161,72 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   style: GoogleFonts.nunito(
                                     fontWeight: FontWeight.w800,
                                     fontSize: 12,
-                                    color: const Color(0xFF2E7D32),
+                                    color: (hasAttemptedSubmit && showcaseFile == null)
+                                        ? const Color(0xFFE53935)
+                                        : const Color(0xFF2E7D32),
                                   )),
                             ),
                           ),
                         ],
                       ),
+                      if (hasAttemptedSubmit && showcaseFile == null) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.red.shade300),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.error_outline_rounded, size: 14, color: Colors.red.shade700),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  '⚠️ Showcase cat photo is mandatory for the Adoption Showcase profile.',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.red.shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ],
                     const SizedBox(height: 20),
+                    if (formValidationError != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.red.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded, size: 16, color: Colors.red.shade700),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                formValidationError!,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.red.shade900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -10700,42 +11245,65 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                     TextModerationService.validateFacilityName(
                                         facilityCtrl.text,
                                         label: 'Foster home name');
-                                if (facilityErr != null) {
+                                if (facilityErr != null || facilityCtrl.text.trim().isEmpty) {
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = facilityErr ?? 'Facility or foster home name is required.';
+                                  });
                                   DoubleTapGuard.reset('open_adoption_${s.id}');
-                                  _snack('⚠️ $facilityErr');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 final contactErr =
                                     TextModerationService.validatePhoneNumber(
                                         contactCtrl.text,
                                         label: 'Adoption contact phone number');
-                                if (contactErr != null) {
+                                if (contactErr != null || contactCtrl.text.trim().isEmpty) {
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = contactErr ?? 'Adoption contact phone number is required.';
+                                  });
                                   DoubleTapGuard.reset('open_adoption_${s.id}');
-                                  _snack('⚠️ $contactErr');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 final storyErr =
                                     TextModerationService.validateDescription(
                                         noteCtrl.text,
                                         fieldName: 'Adoption story');
-                                if (storyErr != null) {
+                                if (storyErr != null || noteCtrl.text.trim().isEmpty) {
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = storyErr ?? 'Adoption story and personality notes are required.';
+                                  });
                                   DoubleTapGuard.reset('open_adoption_${s.id}');
-                                  _snack('⚠️ $storyErr');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 if (showcaseFile == null) {
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = 'Showcase cat photo is mandatory for the Adoption Showcase profile.';
+                                  });
                                   DoubleTapGuard.reset('open_adoption_${s.id}');
-                                  _snack('Please take or upload a showcase photo. It is mandatory for the Adoption Showcase profile.');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 if (isScanningPhoto) {
+                                  setSheetState(() {
+                                    formValidationError = 'AI is still scanning the cat photo. Please wait a moment.';
+                                  });
                                   DoubleTapGuard.reset('open_adoption_${s.id}');
-                                  _snack('AI is still scanning the cat photo. Please wait a moment.');
+                                  _snack('⏳ AI is verifying the photo, please wait a moment...');
                                   return;
                                 }
                                 if (scanResult?.isCat != true) {
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = scanResult?.message ?? 'Please upload a photo of a real cat.';
+                                  });
                                   DoubleTapGuard.reset('open_adoption_${s.id}');
-                                  _snack(scanResult?.message ?? 'Please upload a photo of a real cat.');
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 setSheetState(() => isSubmitting = true);
@@ -10825,6 +11393,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     bool isSearchingShelter = false;
     final shelterSearchCtrl = TextEditingController();
     final shelterMapCtrl = MapController();
+    bool isOnRegisterNewTab = false;
+    bool hasAttemptedSubmit = false;
+    String? formValidationError;
 
     showModalBottomSheet(
       context: context,
@@ -10902,6 +11473,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               TextModerationService.validateDescription(noteCtrl.text,
                       fieldName: 'Outcome note') ==
                   null;
+          final shelterAddressError = shelterAddressCtrl.text.isNotEmpty
+              ? TextModerationService.validateAddress(
+                  shelterAddressCtrl.text,
+                  label: outcomeAction == 'returnedToSpot'
+                      ? 'Release colony address'
+                      : 'Facility address',
+                )
+              : null;
           final canSubmit = !isSubmitting &&
               proofFile != null &&
               scanResult?.isCat == true &&
@@ -11003,252 +11582,271 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ],
                     if (isSheltered || outcomeAction == 'returnedToSpot') ...[
                       if (isSheltered) ...[
+                        ShelterPickerView(
+                          referenceLat: s.effectiveLatitude,
+                          referenceLng: s.effectiveLongitude,
+                          initialShelterName: shelterNameCtrl.text,
+                          initialShelterAddress: shelterAddressCtrl.text,
+                          themeColor: const Color(0xFF673AB7),
+                          onShelterSelected: (chosenShelter) {
+                            setSheetState(() {
+                              shelterNameCtrl.text = chosenShelter.name;
+                              shelterAddressCtrl.text = chosenShelter.address;
+                              shelterLat = chosenShelter.latitude;
+                              shelterLng = chosenShelter.longitude;
+                              isGpsAutoFilledShelter = false;
+                              try {
+                                shelterMapCtrl.move(ll.LatLng(shelterLat, shelterLng), 16.0);
+                              } catch (_) {}
+                            });
+                          },
+                          onClearSelection: () {
+                            setSheetState(() {
+                              shelterNameCtrl.clear();
+                              shelterAddressCtrl.clear();
+                            });
+                          },
+                          onRegisterTabActiveChanged: (isRegTab) {
+                            isOnRegisterNewTab = isRegTab;
+                          },
+                        ),
+                        if (hasAttemptedSubmit && shelterNameCtrl.text.trim().isEmpty) ...[
+                          const SizedBox(height: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.red.shade300),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.error_outline, size: 14, color: Color(0xFFE53935)),
+                                const SizedBox(width: 6),
+                                Expanded(
+                                  child: Text(
+                                    isOnRegisterNewTab
+                                        ? 'You have an unregistered shelter draft. Please press "Register your suggested Shelter" first, or switch to Nearby Shelters to pick an existing one.'
+                                        : 'Please choose a nearby shelter or register a new one.',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11.5,
+                                      fontWeight: FontWeight.w700,
+                                      color: const Color(0xFFE53935),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 14),
+                      ],
+                      if (outcomeAction == 'returnedToSpot') ...[
                         Text(
-                          'Shelter / Organization Name *',
+                          'Colony Release Spot / Feeding Station Address *',
                           style: GoogleFonts.nunito(
                             fontSize: 13,
                             fontWeight: FontWeight.w800,
                             color: _navy,
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        TextField(
-                          controller: shelterNameCtrl,
-                          onChanged: (_) => setSheetState(() {}),
-                          style: GoogleFonts.nunito(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: _navy),
-                          decoration: InputDecoration(
-                            hintText:
-                                'e.g. Pejaten Animal Shelter, ASPERA, etc.',
-                            filled: true,
-                            fillColor: _lavLight,
-                            contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 14, vertical: 10),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(12),
-                              borderSide: BorderSide.none,
+                        const SizedBox(height: 8),
+                        _buildLocationSearchBar(
+                          controller: shelterSearchCtrl,
+                          isSearching: isSearchingShelter,
+                          themeColor: const Color(0xFF00897B),
+                          hintText: 'Search release spot, landmark, or street...',
+                          onSearch: (query) async {
+                            if (query.trim().isEmpty) return;
+                            setSheetState(() => isSearchingShelter = true);
+                            final locResult = await LocationService()
+                                .searchLocation(query.trim());
+                            if (locResult != null) {
+                              shelterLat = locResult.latitude;
+                              shelterLng = locResult.longitude;
+                              shelterAddressCtrl.text = locResult.formattedAddress;
+                              isGpsAutoFilledShelter = false;
+                              try {
+                                shelterMapCtrl.move(
+                                    ll.LatLng(shelterLat, shelterLng), 16.0);
+                              } catch (_) {}
+                            } else {
+                              _snack(
+                                  'Location not found. Try a different search term.');
+                            }
+                            setSheetState(() => isSearchingShelter = false);
+                          },
+                          onClear: () =>
+                              setSheetState(() => shelterSearchCtrl.clear()),
+                        ),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Container(
+                            height: 180,
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE8EAF0),
+                              borderRadius: BorderRadius.circular(14),
+                              border:
+                                  Border.all(color: _navy.withValues(alpha: 0.1)),
                             ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                      Text(
-                        outcomeAction == 'returnedToSpot'
-                            ? 'Colony Release Spot / Feeding Station Address *'
-                            : 'Shelter Address / Contact (Optional)',
-                        style: GoogleFonts.nunito(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: _navy,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      _buildLocationSearchBar(
-                        controller: shelterSearchCtrl,
-                        isSearching: isSearchingShelter,
-                        themeColor: outcomeAction == 'returnedToSpot'
-                            ? const Color(0xFF00897B)
-                            : const Color(0xFF673AB7),
-                        hintText: outcomeAction == 'returnedToSpot'
-                            ? 'Search release spot, landmark, or street...'
-                            : 'Search shelter address, landmark, or city...',
-                        onSearch: (query) async {
-                          if (query.trim().isEmpty) return;
-                          setSheetState(() => isSearchingShelter = true);
-                          final locResult = await LocationService()
-                              .searchLocation(query.trim());
-                          if (locResult != null) {
-                            shelterLat = locResult.latitude;
-                            shelterLng = locResult.longitude;
-                            shelterAddressCtrl.text = locResult.formattedAddress;
-                            isGpsAutoFilledShelter = false;
-                            try {
-                              shelterMapCtrl.move(
-                                  ll.LatLng(shelterLat, shelterLng), 16.0);
-                            } catch (_) {}
-                          } else {
-                            _snack(
-                                'Location not found. Try a different search term.');
-                          }
-                          setSheetState(() => isSearchingShelter = false);
-                        },
-                        onClear: () =>
-                            setSheetState(() => shelterSearchCtrl.clear()),
-                      ),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: Container(
-                          height: 180,
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFE8EAF0),
-                            borderRadius: BorderRadius.circular(14),
-                            border:
-                                Border.all(color: _navy.withValues(alpha: 0.1)),
-                          ),
-                          child: Stack(
-                            children: [
-                              FlutterMap(
-                                mapController: shelterMapCtrl,
-                                options: MapOptions(
-                                  initialCenter:
-                                      ll.LatLng(shelterLat, shelterLng),
-                                  initialZoom: 16.0,
-                                  onTap: (tapPos, point) async {
-                                    shelterLat = point.latitude;
-                                    shelterLng = point.longitude;
-                                    isGpsAutoFilledShelter = false;
-                                    setSheetState(
-                                        () => isLocatingShelter = true);
-                                    final addr = await LocationService()
-                                        .getAddressFromCoordinates(
-                                            point.latitude, point.longitude);
-                                    shelterAddressCtrl.text = addr;
-                                    setSheetState(
-                                        () => isLocatingShelter = false);
-                                  },
-                                ),
-                                children: [
-                                  TileLayer(
-                                    urlTemplate:
-                                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                                    userAgentPackageName:
-                                        'com.pawwatch.app',
+                            child: Stack(
+                              children: [
+                                FlutterMap(
+                                  mapController: shelterMapCtrl,
+                                  options: MapOptions(
+                                    initialCenter:
+                                        ll.LatLng(shelterLat, shelterLng),
+                                    initialZoom: 16.0,
+                                    onTap: (tapPos, point) async {
+                                      shelterLat = point.latitude;
+                                      shelterLng = point.longitude;
+                                      isGpsAutoFilledShelter = false;
+                                      setSheetState(
+                                          () => isLocatingShelter = true);
+                                      final addr = await LocationService()
+                                          .getAddressFromCoordinates(
+                                              point.latitude, point.longitude);
+                                      shelterAddressCtrl.text = addr;
+                                      setSheetState(
+                                          () => isLocatingShelter = false);
+                                    },
                                   ),
-                                  MarkerLayer(
-                                    markers: [
-                                      Marker(
-                                        point:
-                                            ll.LatLng(shelterLat, shelterLng),
-                                        width: 46,
-                                        height: 46,
-                                        child: _buildMapPinMarker(
-                                          color: outcomeAction == 'returnedToSpot'
-                                              ? const Color(0xFF00897B)
-                                              : const Color(0xFF673AB7),
-                                          icon: outcomeAction == 'returnedToSpot'
-                                              ? Icons.park_rounded
-                                              : Icons.apartment,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              ),
-                              Positioned(
-                                right: 10,
-                                top: 10,
-                                child: Column(
                                   children: [
-                                    _buildMapButton(
-                                      Icons.my_location,
-                                      onTap: () async {
-                                        setSheetState(
-                                            () => isLocatingShelter = true);
-                                        final res = await LocationService()
-                                            .getCurrentUserLocation();
-                                        shelterLat = res.latitude;
-                                        shelterLng = res.longitude;
-                                        shelterAddressCtrl.text =
-                                            res.formattedAddress;
-                                        isGpsAutoFilledShelter =
-                                            res.isGpsAutoFilled;
-                                        setSheetState(
-                                            () => isLocatingShelter = false);
-                                        try {
-                                          shelterMapCtrl.move(
-                                              ll.LatLng(
-                                                  shelterLat, shelterLng),
-                                              16.0);
-                                        } catch (_) {}
-                                      },
+                                    TileLayer(
+                                      urlTemplate:
+                                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                      userAgentPackageName:
+                                          'com.pawwatch.app',
                                     ),
-                                    const SizedBox(height: 6),
-                                    _buildMapButton(
-                                      Icons.add,
-                                      onTap: () {
-                                        try {
-                                          final z =
-                                              shelterMapCtrl.camera.zoom + 1;
-                                          shelterMapCtrl.move(
-                                              ll.LatLng(
-                                                  shelterLat, shelterLng),
-                                              z);
-                                        } catch (_) {}
-                                      },
-                                    ),
-                                    const SizedBox(height: 4),
-                                    _buildMapButton(
-                                      Icons.remove,
-                                      onTap: () {
-                                        try {
-                                          final z =
-                                              shelterMapCtrl.camera.zoom - 1;
-                                          shelterMapCtrl.move(
-                                              ll.LatLng(
-                                                  shelterLat, shelterLng),
-                                              z);
-                                        } catch (_) {}
-                                      },
+                                    MarkerLayer(
+                                      markers: [
+                                        Marker(
+                                          point:
+                                              ll.LatLng(shelterLat, shelterLng),
+                                          width: 46,
+                                          height: 46,
+                                          child: _buildMapPinMarker(
+                                            color: const Color(0xFF00897B),
+                                            icon: Icons.park_rounded,
+                                          ),
+                                        ),
+                                      ],
                                     ),
                                   ],
                                 ),
-                              ),
-                              Positioned(
-                                bottom: 8,
-                                left: 8,
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.92),
-                                    borderRadius: BorderRadius.circular(8),
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: Colors.black.withValues(alpha: 0.1),
-                                        blurRadius: 4,
-                                      ),
-                                    ],
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
+                                Positioned(
+                                  right: 10,
+                                  top: 10,
+                                  child: Column(
                                     children: [
-                                      Icon(Icons.touch_app_outlined,
-                                          size: 12,
-                                          color: outcomeAction == 'returnedToSpot'
-                                              ? const Color(0xFF00897B)
-                                              : const Color(0xFF673AB7)),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        outcomeAction == 'returnedToSpot'
-                                            ? 'Tap map to place colony release pin'
-                                            : 'Tap map to set shelter location',
-                                        style: GoogleFonts.nunito(
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.w700,
-                                          color: _navy,
-                                        ),
+                                      _buildMapButton(
+                                        Icons.my_location,
+                                        onTap: () async {
+                                          setSheetState(
+                                              () => isLocatingShelter = true);
+                                          final res = await LocationService()
+                                              .getCurrentUserLocation();
+                                          shelterLat = res.latitude;
+                                          shelterLng = res.longitude;
+                                          shelterAddressCtrl.text =
+                                              res.formattedAddress;
+                                          isGpsAutoFilledShelter =
+                                              res.isGpsAutoFilled;
+                                          setSheetState(
+                                              () => isLocatingShelter = false);
+                                          try {
+                                            shelterMapCtrl.move(
+                                                ll.LatLng(
+                                                    shelterLat, shelterLng),
+                                                16.0);
+                                          } catch (_) {}
+                                        },
+                                      ),
+                                      const SizedBox(height: 6),
+                                      _buildMapButton(
+                                        Icons.add,
+                                        onTap: () {
+                                          try {
+                                            final z =
+                                                shelterMapCtrl.camera.zoom + 1;
+                                            shelterMapCtrl.move(
+                                                ll.LatLng(
+                                                    shelterLat, shelterLng),
+                                                z);
+                                          } catch (_) {}
+                                        },
+                                      ),
+                                      const SizedBox(height: 4),
+                                      _buildMapButton(
+                                        Icons.remove,
+                                        onTap: () {
+                                          try {
+                                            final z =
+                                                shelterMapCtrl.camera.zoom - 1;
+                                            shelterMapCtrl.move(
+                                                ll.LatLng(
+                                                    shelterLat, shelterLng),
+                                                z);
+                                          } catch (_) {}
+                                        },
                                       ),
                                     ],
                                   ),
                                 ),
-                              ),
-                            ],
+                                Positioned(
+                                  bottom: 8,
+                                  left: 8,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.92),
+                                      borderRadius: BorderRadius.circular(8),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.1),
+                                          blurRadius: 4,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        const Icon(Icons.touch_app_outlined,
+                                            size: 12,
+                                            color: Color(0xFF00897B)),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          'Tap map to place colony release pin',
+                                          style: GoogleFonts.nunito(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w700,
+                                            color: _navy,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
-                      const SizedBox(height: 10),
-                      _buildLocationAddressDisplay(
-                        addressText: shelterAddressCtrl.text,
-                        isLocating: isLocatingShelter,
-                        isGpsAutoFilled: isGpsAutoFilledShelter,
-                        themeColor: outcomeAction == 'returnedToSpot'
-                            ? const Color(0xFF00897B)
-                            : const Color(0xFF673AB7),
-                      ),
-                      const SizedBox(height: 14),
+                        const SizedBox(height: 10),
+                        _buildLocationAddressDisplay(
+                          addressText: shelterAddressCtrl.text,
+                          isLocating: isLocatingShelter,
+                          isGpsAutoFilled: isGpsAutoFilledShelter,
+                          themeColor: const Color(0xFF00897B),
+                          errorText: shelterAddressCtrl.text.isNotEmpty
+                              ? shelterAddressError
+                              : (hasAttemptedSubmit && shelterAddressCtrl.text.trim().isEmpty
+                                  ? '⚠️ Release colony location address is required.'
+                                  : null),
+                        ),
+                        const SizedBox(height: 14),
+                      ],
                     ],
                     Text(
                       isRehome
@@ -11268,11 +11866,36 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         filled: true,
                         fillColor: _lavLight,
                         border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none),
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (isRehome && ((hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Outcome note') != null)))
+                                ? const Color(0xFFE53935)
+                                : BorderSide.none.color,
+                            width: (isRehome && ((hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Outcome note') != null))) ? 1.5 : 0,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (isRehome && ((hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Outcome note') != null)))
+                                ? const Color(0xFFE53935)
+                                : BorderSide.none.color,
+                            width: (isRehome && ((hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) || (noteCtrl.text.isNotEmpty && TextModerationService.validateDescription(noteCtrl.text, fieldName: 'Outcome note') != null))) ? 1.5 : 0,
+                          ),
+                        ),
                       ),
                     ),
-                    if (isRehome &&
+                    if (isRehome && hasAttemptedSubmit && noteCtrl.text.trim().isEmpty) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚠️ Outcome note / adoption story is required to confirm adoption.',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ] else if (isRehome &&
                         noteCtrl.text.isNotEmpty &&
                         TextModerationService.validateDescription(noteCtrl.text,
                                 fieldName: 'Outcome note') !=
@@ -11387,13 +12010,23 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             ],
                           ),
                         ),
-                    ] else
+                    ] else ...[
                       Row(
                         children: [
                           Expanded(
                             child: OutlinedButton.icon(
                               onPressed: () => pickPhoto(ImageSource.camera),
                               icon: Icon(Icons.camera_alt, size: 16, color: primaryCol),
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(
+                                  color: (hasAttemptedSubmit && proofFile == null)
+                                      ? const Color(0xFFE53935)
+                                      : _navy.withValues(alpha: 0.2),
+                                  width: (hasAttemptedSubmit && proofFile == null) ? 1.6 : 1.0,
+                                ),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
                               label: Text('Camera', style: GoogleFonts.nunito(fontWeight: FontWeight.w800, color: _navy, fontSize: 12)),
                             ),
                           ),
@@ -11402,11 +12035,54 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             child: OutlinedButton.icon(
                               onPressed: () => pickPhoto(ImageSource.gallery),
                               icon: const Icon(Icons.photo_library, size: 16, color: _lavender),
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(
+                                  color: (hasAttemptedSubmit && proofFile == null)
+                                      ? const Color(0xFFE53935)
+                                      : _navy.withValues(alpha: 0.2),
+                                  width: (hasAttemptedSubmit && proofFile == null) ? 1.6 : 1.0,
+                                ),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                              ),
                               label: Text('Gallery', style: GoogleFonts.nunito(fontWeight: FontWeight.w800, color: _navy, fontSize: 12)),
                             ),
                           ),
                         ],
                       ),
+                      if (hasAttemptedSubmit && proofFile == null) ...[
+                        const SizedBox(height: 6),
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: Colors.red.shade300),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(Icons.error_outline_rounded, size: 14, color: Colors.red.shade700),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  isSheltered
+                                      ? '⚠️ Cat photo proof is required to confirm shelter admission.'
+                                      : (isRehome
+                                          ? '⚠️ Celebration photo with the cat is required to confirm adoption.'
+                                          : '⚠️ Cat photo proof at the release spot is required.'),
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 11.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.red.shade800,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                     const SizedBox(height: 16),
 
                     // Optional Video Section
@@ -11507,6 +12183,34 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ],
                       ),
                     const SizedBox(height: 18),
+                    if (formValidationError != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.red.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded, size: 16, color: Colors.red.shade700),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                formValidationError!,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: Colors.red.shade900,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
@@ -11523,23 +12227,33 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         onPressed: isSubmitting
                             ? null
                             : () async {
-                                if (isSubmitting || !DoubleTapGuard.allow('outcome_proof_${s.id}')) return;
+                                if (isSubmitting) return;
                                 if (proofFile == null) {
-                                  DoubleTapGuard.reset('outcome_proof_${s.id}');
-                                  _snack(
-                                      '⚠️ Please upload or take a celebration photo with the cat.');
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = isSheltered
+                                        ? 'Cat photo proof is required to confirm shelter transfer.'
+                                        : (isRehome
+                                            ? 'Celebration photo of the cat with adopter is required.'
+                                            : 'Photo proof of the cat at the release spot is required.');
+                                  });
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 if (isScanningPhoto) {
-                                  DoubleTapGuard.reset('outcome_proof_${s.id}');
-                                  _snack(
-                                      '⏳ AI is verifying the photo, please wait a moment...');
+                                  setSheetState(() {
+                                    formValidationError = 'AI is verifying the photo, please wait a moment...';
+                                  });
+                                  _snack('⏳ AI is verifying the photo, please wait a moment...');
                                   return;
                                 }
                                 if (scanResult?.isCat != true) {
-                                  DoubleTapGuard.reset('outcome_proof_${s.id}');
-                                  _snack(
-                                      '⚠️ Photo verification failed: ${scanResult?.message ?? "Please upload a clear cat photo."}');
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = scanResult?.message ??
+                                        'Photo verification failed: image was not recognized as a cat.';
+                                  });
+                                  _snack('⚠️ ${formValidationError!}');
                                   return;
                                 }
                                 if (isSheltered) {
@@ -11547,9 +12261,34 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                       TextModerationService.validateFacilityName(
                                           shelterNameCtrl.text,
                                           label: 'Shelter name');
-                                  if (sErr != null) {
-                                    DoubleTapGuard.reset('outcome_proof_${s.id}');
-                                    _snack('⚠️ $sErr');
+                                  if (sErr != null || shelterNameCtrl.text.trim().isEmpty) {
+                                    final msg = isOnRegisterNewTab
+                                        ? 'You have an unregistered shelter draft. Please press "Register your suggested Shelter" first, or pick from Nearby Shelters.'
+                                        : (sErr ?? 'Please select a shelter or register a new one first.');
+                                    setSheetState(() {
+                                      hasAttemptedSubmit = true;
+                                      formValidationError = msg;
+                                    });
+                                    _snack('⚠️ $msg');
+                                    return;
+                                  }
+                                }
+                                if (isSheltered || outcomeAction == 'returnedToSpot') {
+                                  final addrErr = TextModerationService.validateAddress(
+                                    shelterAddressCtrl.text,
+                                    label: outcomeAction == 'returnedToSpot'
+                                        ? 'Release colony address'
+                                        : 'Facility address',
+                                  );
+                                  if (addrErr != null || shelterAddressCtrl.text.trim().isEmpty) {
+                                    setSheetState(() {
+                                      hasAttemptedSubmit = true;
+                                      formValidationError = addrErr ??
+                                          (outcomeAction == 'returnedToSpot'
+                                              ? 'Release colony location address is required.'
+                                              : 'Facility location address is required.');
+                                    });
+                                    _snack('⚠️ ${formValidationError!}');
                                     return;
                                   }
                                 }
@@ -11558,9 +12297,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                       TextModerationService.validateDescription(
                                           noteCtrl.text,
                                           fieldName: 'Outcome note');
-                                  if (nErr != null) {
-                                    DoubleTapGuard.reset('outcome_proof_${s.id}');
-                                    _snack('⚠️ $nErr');
+                                  if (nErr != null || noteCtrl.text.trim().isEmpty) {
+                                    setSheetState(() {
+                                      hasAttemptedSubmit = true;
+                                      formValidationError = nErr ?? 'Outcome note is required for rehomed cat.';
+                                    });
+                                    _snack('⚠️ ${formValidationError!}');
                                     return;
                                   }
                                 } else if (noteCtrl.text.trim().isNotEmpty) {
@@ -11569,11 +12311,20 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                           noteCtrl.text,
                                           fieldName: 'Outcome note');
                                   if (nErr != null) {
-                                    DoubleTapGuard.reset('outcome_proof_${s.id}');
+                                    setSheetState(() {
+                                      hasAttemptedSubmit = true;
+                                      formValidationError = nErr;
+                                    });
                                     _snack('⚠️ $nErr');
                                     return;
                                   }
                                 }
+
+                                if (!DoubleTapGuard.allow('outcome_proof_${s.id}')) return;
+                                setSheetState(() {
+                                  formValidationError = null;
+                                  isSubmitting = true;
+                                });
                                 setSheetState(() => isSubmitting = true);
                                 try {
                                   String finalNote = noteCtrl.text.trim();
@@ -12122,14 +12873,30 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     final noteCtrl = TextEditingController();
     final contactCtrl = TextEditingController();
     bool isSubmitting = false;
+    bool hasAttemptedSubmit = false;
+    String? formValidationError;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: Colors.transparent,
       builder: (sheetContext) => StatefulBuilder(
         builder: (ctx, setSheetState) {
-          final bottomPadding = MediaQuery.viewInsetsOf(ctx).bottom;
+          final keyboardInset = MediaQuery.viewInsetsOf(ctx).bottom;
+          final systemBottomNav = MediaQuery.paddingOf(ctx).bottom;
+          final effectiveBottomPadding = keyboardInset > 0
+              ? keyboardInset + 16
+              : (systemBottomNav > 0 ? systemBottomNav + 24 : 36.0);
+
+          final noteErr = TextModerationService.validateDescription(
+            noteCtrl.text,
+            fieldName: 'Adoption intro/note',
+          );
+          final phoneErr = TextModerationService.validatePhoneNumber(
+            contactCtrl.text,
+            label: 'Adoption contact phone number',
+          );
 
           return Container(
             decoration: const BoxDecoration(
@@ -12137,8 +12904,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
             padding: EdgeInsets.fromLTRB(
-                20, 16, 20, bottomPadding > 0 ? bottomPadding + 16 : 28),
+                20, 16, 20, effectiveBottomPadding),
             child: SingleChildScrollView(
+              physics: const BouncingScrollPhysics(),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -12172,7 +12940,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              'Adoption Application 🏡🐾',
+                              'Adoption Application',
                               style: GoogleFonts.nunito(
                                 fontSize: 17,
                                 fontWeight: FontWeight.w900,
@@ -12204,6 +12972,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   const SizedBox(height: 6),
                   TextField(
                     controller: noteCtrl,
+                    onChanged: (_) => setSheetState(() {}),
                     maxLines: 3,
                     style: GoogleFonts.nunito(fontSize: 13, color: _navy),
                     decoration: InputDecoration(
@@ -12218,21 +12987,43 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       contentPadding: const EdgeInsets.all(12),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            BorderSide(color: _navy.withValues(alpha: 0.15)),
+                        borderSide: BorderSide(
+                          color: (hasAttemptedSubmit && noteErr != null)
+                              ? const Color(0xFFE53935)
+                              : _navy.withValues(alpha: 0.15),
+                          width: (hasAttemptedSubmit && noteErr != null) ? 1.5 : 1,
+                        ),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            BorderSide(color: _navy.withValues(alpha: 0.15)),
+                        borderSide: BorderSide(
+                          color: (hasAttemptedSubmit && noteErr != null)
+                              ? const Color(0xFFE53935)
+                              : _navy.withValues(alpha: 0.15),
+                          width: (hasAttemptedSubmit && noteErr != null) ? 1.5 : 1,
+                        ),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            const BorderSide(color: Color(0xFF2E7D32)),
+                        borderSide: BorderSide(
+                          color: (hasAttemptedSubmit && noteErr != null)
+                              ? const Color(0xFFE53935)
+                              : const Color(0xFF2E7D32),
+                        ),
                       ),
                     ),
                   ),
+                  if (hasAttemptedSubmit && noteErr != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '⚠️ $noteErr',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFFE53935),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 14),
                   Text(
                     'Your Phone / WhatsApp Number',
@@ -12245,6 +13036,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   const SizedBox(height: 6),
                   TextField(
                     controller: contactCtrl,
+                    onChanged: (_) => setSheetState(() {}),
                     keyboardType: TextInputType.phone,
                     style: GoogleFonts.nunito(fontSize: 13, color: _navy),
                     decoration: InputDecoration(
@@ -12260,22 +13052,72 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       contentPadding: const EdgeInsets.all(12),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            BorderSide(color: _navy.withValues(alpha: 0.15)),
+                        borderSide: BorderSide(
+                          color: (hasAttemptedSubmit && phoneErr != null)
+                              ? const Color(0xFFE53935)
+                              : _navy.withValues(alpha: 0.15),
+                          width: (hasAttemptedSubmit && phoneErr != null) ? 1.5 : 1,
+                        ),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            BorderSide(color: _navy.withValues(alpha: 0.15)),
+                        borderSide: BorderSide(
+                          color: (hasAttemptedSubmit && phoneErr != null)
+                              ? const Color(0xFFE53935)
+                              : _navy.withValues(alpha: 0.15),
+                          width: (hasAttemptedSubmit && phoneErr != null) ? 1.5 : 1,
+                        ),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide:
-                            const BorderSide(color: Color(0xFF2E7D32)),
+                        borderSide: BorderSide(
+                          color: (hasAttemptedSubmit && phoneErr != null)
+                              ? const Color(0xFFE53935)
+                              : const Color(0xFF2E7D32),
+                        ),
                       ),
                     ),
                   ),
+                  if (hasAttemptedSubmit && phoneErr != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '⚠️ $phoneErr',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFFE53935),
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 20),
+                  if (formValidationError != null) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFEBEE),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFEF5350)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD32F2F)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              formValidationError!,
+                              style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFFB71C1C),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
@@ -12290,26 +13132,49 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       onPressed: isSubmitting
                           ? null
                           : () async {
-                              final msg = noteCtrl.text.trim();
-                              if (msg.isEmpty) {
-                                _snack(
-                                    'Please share a brief note about your interest in adopting.');
+                              final currentNoteErr = TextModerationService.validateDescription(
+                                noteCtrl.text,
+                                fieldName: 'Adoption intro/note',
+                              );
+                              if (currentNoteErr != null) {
+                                setSheetState(() {
+                                  hasAttemptedSubmit = true;
+                                  formValidationError = '⚠️ $currentNoteErr';
+                                });
                                 return;
                               }
-                              setSheetState(() => isSubmitting = true);
+
+                              final currentPhoneErr = TextModerationService.validatePhoneNumber(
+                                contactCtrl.text,
+                                label: 'Adoption contact phone number',
+                              );
+                              if (currentPhoneErr != null) {
+                                setSheetState(() {
+                                  hasAttemptedSubmit = true;
+                                  formValidationError = '⚠️ $currentPhoneErr';
+                                });
+                                return;
+                              }
+
+                              setSheetState(() {
+                                isSubmitting = true;
+                                formValidationError = null;
+                              });
                               try {
                                 await FirebaseService.instance
                                     .submitAdoptionApplication(
                                   sightingId: s.id,
-                                  message: msg,
+                                  message: noteCtrl.text.trim(),
                                   contactPhone: contactCtrl.text.trim(),
                                 );
                                 if (ctx.mounted) Navigator.pop(ctx);
                                 _snack(
-                                    '🏡 Adoption application submitted! Awaiting confirmation from $otherName.');
+                                    'Adoption application submitted! Awaiting confirmation from $otherName.');
                               } catch (e) {
-                                setSheetState(() => isSubmitting = false);
-                                _snack('Failed to submit application: $e');
+                                setSheetState(() {
+                                  isSubmitting = false;
+                                  formValidationError = 'Failed to submit application: $e';
+                                });
                               }
                             },
                       child: isSubmitting
@@ -12319,13 +13184,22 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               child: CircularProgressIndicator(
                                   color: Colors.white, strokeWidth: 2),
                             )
-                          : Text(
-                              'Send Adoption Request 🏡',
-                              style: GoogleFonts.nunito(
-                                  fontWeight: FontWeight.w900, fontSize: 13.5),
+                          : Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.volunteer_activism_rounded,
+                                    size: 18, color: Colors.white),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Send Adoption Request',
+                                  style: GoogleFonts.nunito(
+                                      fontWeight: FontWeight.w900, fontSize: 14),
+                                ),
+                              ],
                             ),
                     ),
                   ),
+                  const SizedBox(height: 12),
                 ],
               ),
             ),
@@ -15271,131 +16145,273 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   Widget _editSheet(Sighting s, TextEditingController tc,
-          TextEditingController dc) {
+      TextEditingController dc) {
     final bottomPadding = MediaQuery.paddingOf(context).bottom;
-    return Container(
-      decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius:
-              BorderRadius.vertical(top: Radius.circular(24))),
-      padding: EdgeInsets.fromLTRB(
-          16, 16, 16, bottomPadding > 0 ? bottomPadding + 16 : 24),
-      child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                  child: Container(
-                      width: 36,
-                      height: 4,
-                      margin: const EdgeInsets.only(bottom: 16),
+    bool hasAttemptedSubmit = false;
+    String? formValidationError;
+    bool isSaving = false;
+
+    return StatefulBuilder(
+      builder: (sheetCtx, setSheetState) {
+        final titleErr = TextModerationService.validateReportTitle(tc.text);
+        final descErr = TextModerationService.validateDescription(
+          dc.text,
+          fieldName: 'Description',
+        );
+
+        return Container(
+          decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius:
+                  BorderRadius.vertical(top: Radius.circular(24))),
+          padding: EdgeInsets.fromLTRB(
+              16, 16, 16, bottomPadding > 0 ? bottomPadding + 16 : 24),
+          child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                      child: Container(
+                          width: 36,
+                          height: 4,
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                              color: _navy.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(2)))),
+                  Text('Edit Report',
+                      style: GoogleFonts.nunito(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w800,
+                          color: _navy)),
+                  const SizedBox(height: 16),
+                  Text('Title',
+                      style: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w700,
+                          color: _navy,
+                          fontSize: 13)),
+                  const SizedBox(height: 6),
+                  TextField(
+                      controller: tc,
+                      onChanged: (_) => setSheetState(() {}),
+                      maxLength: 70,
+                      style: GoogleFonts.nunito(
+                          fontSize: 14,
+                          color: _navy,
+                          fontWeight: FontWeight.w600),
+                      decoration: InputDecoration(
+                        hintText: 'Report title...',
+                        hintStyle: GoogleFonts.nunito(
+                            color: _navy.withValues(alpha: 0.35)),
+                        filled: true,
+                        fillColor: _lavLight,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && titleErr != null)
+                                ? const Color(0xFFE53935)
+                                : BorderSide.none.color,
+                            width: (hasAttemptedSubmit && titleErr != null) ? 1.5 : 0,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && titleErr != null)
+                                ? const Color(0xFFE53935)
+                                : Colors.transparent,
+                            width: (hasAttemptedSubmit && titleErr != null) ? 1.5 : 0,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && titleErr != null)
+                                ? const Color(0xFFE53935)
+                                : _lavender,
+                            width: 1.5,
+                          ),
+                        ),
+                        counterStyle: GoogleFonts.nunito(
+                            fontSize: 11,
+                            color: _navy.withValues(alpha: 0.4)),
+                      )),
+                  if (hasAttemptedSubmit && titleErr != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '⚠️ $titleErr',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFFE53935),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                  const SizedBox(height: 12),
+                  Text('Description',
+                      style: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w700,
+                          color: _navy,
+                          fontSize: 13)),
+                  const SizedBox(height: 6),
+                  TextField(
+                      controller: dc,
+                      onChanged: (_) => setSheetState(() {}),
+                      maxLines: 4,
+                      maxLength: 500,
+                      style: GoogleFonts.nunito(
+                          fontSize: 13,
+                          color: _navy,
+                          fontWeight: FontWeight.w600),
+                      decoration: InputDecoration(
+                        hintText: 'Describe what you saw...',
+                        hintStyle: GoogleFonts.nunito(
+                            color: _navy.withValues(alpha: 0.35)),
+                        filled: true,
+                        fillColor: _lavLight,
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && descErr != null)
+                                ? const Color(0xFFE53935)
+                                : BorderSide.none.color,
+                            width: (hasAttemptedSubmit && descErr != null) ? 1.5 : 0,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && descErr != null)
+                                ? const Color(0xFFE53935)
+                                : Colors.transparent,
+                            width: (hasAttemptedSubmit && descErr != null) ? 1.5 : 0,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && descErr != null)
+                                ? const Color(0xFFE53935)
+                                : _lavender,
+                            width: 1.5,
+                          ),
+                        ),
+                        counterStyle: GoogleFonts.nunito(
+                            fontSize: 11,
+                            color: _navy.withValues(alpha: 0.4)),
+                      )),
+                  if (hasAttemptedSubmit && descErr != null) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      '⚠️ $descErr',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFFE53935),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                  ],
+                  const SizedBox(height: 16),
+                  if (formValidationError != null) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                       decoration: BoxDecoration(
-                          color: _navy.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(2)))),
-              Text('Edit Report',
-                  style: GoogleFonts.nunito(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      color: _navy)),
-              const SizedBox(height: 16),
-              Text('Title',
-                  style: GoogleFonts.nunito(
-                      fontWeight: FontWeight.w700,
-                      color: _navy,
-                      fontSize: 13)),
-              const SizedBox(height: 6),
-              TextField(
-                  controller: tc,
-                  maxLength: 70,
-                  style: GoogleFonts.nunito(
-                      fontSize: 14,
-                      color: _navy,
-                      fontWeight: FontWeight.w600),
-                  decoration: InputDecoration(
-                    hintText: 'Report title...',
-                    hintStyle: GoogleFonts.nunito(
-                        color: _navy.withValues(alpha: 0.35)),
-                    filled: true,
-                    fillColor: _lavLight,
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                    border: OutlineInputBorder(
+                        color: const Color(0xFFFFEBEE),
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none),
-                    counterStyle: GoogleFonts.nunito(
-                        fontSize: 11,
-                        color: _navy.withValues(alpha: 0.4)),
-                  )),
-              const SizedBox(height: 12),
-              Text('Description',
-                  style: GoogleFonts.nunito(
-                      fontWeight: FontWeight.w700,
-                      color: _navy,
-                      fontSize: 13)),
-              const SizedBox(height: 6),
-              TextField(
-                  controller: dc,
-                  maxLines: 4,
-                  maxLength: 500,
-                  style: GoogleFonts.nunito(
-                      fontSize: 13,
-                      color: _navy,
-                      fontWeight: FontWeight.w600),
-                  decoration: InputDecoration(
-                    hintText: 'Describe what you saw...',
-                    hintStyle: GoogleFonts.nunito(
-                        color: _navy.withValues(alpha: 0.35)),
-                    filled: true,
-                    fillColor: _lavLight,
-                    contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 14, vertical: 12),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide.none),
-                    counterStyle: GoogleFonts.nunito(
-                        fontSize: 11,
-                        color: _navy.withValues(alpha: 0.4)),
-                  )),
-              const SizedBox(height: 16),
-              SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    style: ElevatedButton.styleFrom(
-                        backgroundColor: _lavender,
-                        foregroundColor: Colors.white,
-                        padding:
-                            const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14))),
-                    onPressed: () async {
-                      final titleErr =
-                          TextModerationService.validateReportTitle(tc.text);
-                      if (titleErr != null) {
-                        _snack('⚠️ $titleErr');
-                        return;
-                      }
-                      final descErr =
-                          TextModerationService.validateDescription(dc.text,
-                              fieldName: 'Description');
-                      if (descErr != null) {
-                        _snack('⚠️ $descErr');
-                        return;
-                      }
-                      await FirebaseService.instance.updateSighting(
-                          s.id,
-                          title: tc.text.trim(),
-                          description: dc.text.trim());
-                      if (mounted) {
-                        Navigator.pop(context);
-                        _snack('Report updated!');
-                      }
-                    },
-                    child: Text('Save Changes',
-                        style: GoogleFonts.nunito(
-                            fontWeight: FontWeight.w800, fontSize: 15)),
-                  )),
-            ]),
-      );
+                        border: Border.all(color: const Color(0xFFEF5350)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD32F2F)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              formValidationError!,
+                              style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                color: const Color(0xFFB71C1C),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                            backgroundColor: _lavender,
+                            foregroundColor: Colors.white,
+                            padding:
+                                const EdgeInsets.symmetric(vertical: 14),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(14))),
+                        onPressed: isSaving
+                            ? null
+                            : () async {
+                                final currentTitleErr =
+                                    TextModerationService.validateReportTitle(tc.text);
+                                if (currentTitleErr != null) {
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = '⚠️ $currentTitleErr';
+                                  });
+                                  return;
+                                }
+                                final currentDescErr =
+                                    TextModerationService.validateDescription(dc.text,
+                                        fieldName: 'Description');
+                                if (currentDescErr != null) {
+                                  setSheetState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = '⚠️ $currentDescErr';
+                                  });
+                                  return;
+                                }
+                                setSheetState(() {
+                                  isSaving = true;
+                                  formValidationError = null;
+                                });
+                                try {
+                                  await FirebaseService.instance.updateSighting(
+                                      s.id,
+                                      title: tc.text.trim(),
+                                      description: dc.text.trim());
+                                  if (mounted) {
+                                    Navigator.pop(context);
+                                    _snack('Report updated!');
+                                  }
+                                } catch (e) {
+                                  setSheetState(() {
+                                    isSaving = false;
+                                    formValidationError = 'Failed to update report: $e';
+                                  });
+                                }
+                              },
+                        child: isSaving
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                    color: Colors.white, strokeWidth: 2),
+                              )
+                            : Text('Save Changes',
+                                style: GoogleFonts.nunito(
+                                    fontWeight: FontWeight.w800, fontSize: 15)),
+                      )),
+                ]),
+        );
+      },
+    );
   }
 
   Widget _buildRescueBtn(Sighting s) {

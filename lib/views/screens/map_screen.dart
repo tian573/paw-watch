@@ -12,6 +12,7 @@ import '../../models/user_profile.dart';
 import '../../models/shelter_clinic.dart';
 import '../../services/firebase_service.dart';
 import '../../services/location_service.dart';
+import '../../services/text_moderation_service.dart';
 import '../widgets/paw_image.dart';
 import 'sighting_detail.dart';
 
@@ -199,11 +200,26 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     return Geolocator.distanceBetween(refLat, refLng, targetLat, targetLng) / 1000.0;
   }
 
+  void _checkSelectedWithinRadius(double radius) {
+    if (_selectedSighting != null) {
+      final lat = _selectedSighting!.updatedLatitude ?? _selectedSighting!.latitude;
+      final lng = _selectedSighting!.updatedLongitude ?? _selectedSighting!.longitude;
+      if (_getDistanceKm(lat, lng) > radius) {
+        _selectedSighting = null;
+      }
+    }
+  }
+
   List<Sighting> _filterSightings(List<Sighting> sightings) {
     return sightings.where((s) {
       final lat = s.updatedLatitude ?? s.latitude;
       final lng = s.updatedLongitude ?? s.longitude;
       final distKm = _getDistanceKm(lat, lng);
+
+      // Distance / Search Radius filter applies specifically to Cat Reports
+      if (distKm > _radiusFilterKm) {
+        return false;
+      }
 
       switch (_activeFilter) {
         case 'Needs Home':
@@ -211,7 +227,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         case 'Needs Help':
           return (s.urgency == 'urgent' || s.urgency == 'needsHelp') && !s.isNeedsHome;
         case 'Nearby':
-          return distKm <= 3.0 && s.urgency != 'resolved';
+          return distKm <= min(_radiusFilterKm, 3.0) && s.urgency != 'resolved';
         case 'Resolved':
           return s.urgency == 'resolved';
         case 'Shelters & Vets':
@@ -229,11 +245,21 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     if (_activeFilter == 'Needs Home') return [];
     if (!_includeShelters && _activeFilter != 'Shelters & Vets') return [];
 
+    // Shelters & clinics remain visible as landmarks, controlled by their toggle switch
     return ShelterClinic.partnerDirectory;
   }
 
   @override
   Widget build(BuildContext context) {
+    final isSelectedSightingVisible = _selectedSighting != null &&
+        _getDistanceKm(
+              _selectedSighting!.updatedLatitude ?? _selectedSighting!.latitude,
+              _selectedSighting!.updatedLongitude ?? _selectedSighting!.longitude,
+            ) <=
+            _radiusFilterKm;
+    final isSelectedShelterVisible = _selectedShelter != null &&
+        (_includeShelters || _activeFilter == 'Shelters & Vets');
+
     return Scaffold(
       backgroundColor: _bgWhite,
       body: SafeArea(
@@ -253,19 +279,19 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
             // Floating Map Controls (Recenter, Zoom)
             Positioned(
               right: 16,
-              bottom: _selectedSighting != null || _selectedShelter != null ? 220 : 100,
+              bottom: isSelectedSightingVisible || isSelectedShelterVisible ? 220 : 100,
               child: _buildMapActionButtons(),
             ),
 
             // Callout Preview Card
-            if (_selectedSighting != null)
+            if (isSelectedSightingVisible)
               Positioned(
                 left: 16,
                 right: 16,
                 bottom: 16,
                 child: _buildSightingCalloutCard(_selectedSighting!),
               )
-            else if (_selectedShelter != null)
+            else if (isSelectedShelterVisible)
               Positioned(
                 left: 16,
                 right: 16,
@@ -311,7 +337,100 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
 
           // Horizontal Filter Chips
           _buildFilterPills(),
+          if (_activeFilter == 'Shelters & Vets') ...[
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _buildSuggestClinicBanner(),
+            ),
+          ],
           const SizedBox(height: 8),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSuggestClinicBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: _navy.withValues(alpha: 0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: _navy.withValues(alpha: 0.06),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00897B).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(
+              Icons.add_location_alt_rounded,
+              color: Color(0xFF00897B),
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Know a partner vet or shelter?',
+                  style: GoogleFonts.nunito(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w800,
+                    color: _navy,
+                  ),
+                ),
+                Text(
+                  'Suggest it for community verification',
+                  style: GoogleFonts.nunito(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: _navy.withValues(alpha: 0.6),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          InkWell(
+            onTap: _showSuggestClinicModal,
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: _navy,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.add_rounded, size: 14, color: Colors.white),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Suggest',
+                    style: GoogleFonts.nunito(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: Colors.white,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -509,7 +628,13 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                   },
                 ),
               IconButton(
-                icon: const Icon(Icons.tune_rounded, color: _lavender, size: 22),
+                icon: Icon(
+                  Icons.tune_rounded,
+                  color: (_radiusFilterKm != 5.0 || !_includeShelters)
+                      ? _coral
+                      : _lavender,
+                  size: 22,
+                ),
                 tooltip: 'Filters',
                 onPressed: _showAdvancedFilterModal,
               ),
@@ -538,9 +663,53 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       child: ListView.separated(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         scrollDirection: Axis.horizontal,
-        itemCount: filters.length,
+        itemCount: filters.length + 1,
         separatorBuilder: (_, index) => const SizedBox(width: 8),
         itemBuilder: (context, i) {
+          if (i == filters.length) {
+            // Standalone action pill to suggest a clinic/shelter outside filters
+            return GestureDetector(
+              onTap: _showSuggestClinicModal,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF00897B).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF00897B).withValues(alpha: 0.08),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                  border: Border.all(
+                    color: const Color(0xFF00897B).withValues(alpha: 0.35),
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.add_business_rounded,
+                      size: 16,
+                      color: Color(0xFF00897B),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Suggest Facility',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF00897B),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
           final item = filters[i];
           final label = item['label'] as String;
           final icon = item['icon'] as IconData;
@@ -843,6 +1012,9 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
             initialZoom: _currentZoom,
             onPositionChanged: (pos, hasGesture) {
               _currentZoom = pos.zoom;
+              if (_userLocation == null) {
+                _centerLocation = pos.center;
+              }
             },
             onTap: (tapPosition, point) {
               if (_selectedSighting != null || _selectedShelter != null) {
@@ -1135,6 +1307,18 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
+        // Suggest Clinic / Shelter Button (standalone on map)
+        _buildCircleButton(
+          icon: const Icon(
+            Icons.add_business_rounded,
+            color: Color(0xFF00897B),
+            size: 22,
+          ),
+          tooltip: 'Suggest Vet or Shelter',
+          onTap: _showSuggestClinicModal,
+        ),
+        const SizedBox(height: 10),
+
         // GPS Recenter Button
         _buildCircleButton(
           icon: _isLoadingGps
@@ -1637,140 +1821,1200 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
+      useSafeArea: true,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (context, setModalState) {
+            final systemBottomNav = MediaQuery.paddingOf(ctx).bottom;
+            final keyboardInset = MediaQuery.viewInsetsOf(ctx).bottom;
+            final effectiveBottomPadding = keyboardInset > 0
+                ? keyboardInset + 16
+                : (systemBottomNav > 0 ? systemBottomNav + 24 : 36.0);
+
             return Container(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+              padding: EdgeInsets.fromLTRB(20, 16, 20, effectiveBottomPadding),
               decoration: const BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: _lavender.withValues(alpha: 0.3),
-                        borderRadius: BorderRadius.circular(2),
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: _lavender.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(height: 16),
+                    const SizedBox(height: 16),
 
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Map Filters',
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Map Filters',
+                          style: GoogleFonts.nunito(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w900,
+                            color: _navy,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () {
+                            setModalState(() {
+                              _radiusFilterKm = 5.0;
+                              _includeShelters = true;
+                            });
+                            setState(() {
+                              _radiusFilterKm = 5.0;
+                              _includeShelters = true;
+                              _checkSelectedWithinRadius(5.0);
+                            });
+                          },
+                          child: Text(
+                            'Reset',
+                            style: GoogleFonts.nunito(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w700,
+                              color: _coral,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const Divider(),
+                    const SizedBox(height: 10),
+
+                    // Radius Slider
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Cat Report Radius: ${_radiusFilterKm.round()} km',
+                          style: GoogleFonts.nunito(
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                            color: _navy,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: _lavLight,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text(
+                            '≤ ${_radiusFilterKm.round()} km',
+                            style: GoogleFonts.nunito(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w800,
+                              color: _navy,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    Slider(
+                      value: _radiusFilterKm,
+                      min: 1.0,
+                      max: 20.0,
+                      divisions: 19,
+                      activeColor: _navy,
+                      inactiveColor: _lavLight,
+                      onChanged: (v) {
+                        setModalState(() => _radiusFilterKm = v);
+                        setState(() {
+                          _radiusFilterKm = v;
+                          _checkSelectedWithinRadius(v);
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 10),
+
+                    // Toggle Partner Shelters & Clinics
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        'Show Partner Shelters & Vet Clinics',
                         style: GoogleFonts.nunito(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w900,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
                           color: _navy,
                         ),
                       ),
-                      TextButton(
+                      subtitle: Text(
+                        'Display verified rescue shelters, clinic drop-offs, and TNR points',
+                        style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          color: _navy.withValues(alpha: 0.6),
+                        ),
+                      ),
+                      activeThumbColor: _accentBlue,
+                      value: _includeShelters,
+                      onChanged: (val) {
+                        setModalState(() => _includeShelters = val);
+                        setState(() => _includeShelters = val);
+                      },
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Apply Button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _navy,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                        ),
                         onPressed: () {
-                          setModalState(() {
-                            _radiusFilterKm = 5.0;
-                            _includeShelters = true;
-                          });
                           setState(() {
-                            _radiusFilterKm = 5.0;
-                            _includeShelters = true;
+                            _checkSelectedWithinRadius(_radiusFilterKm);
                           });
+                          Navigator.pop(ctx);
                         },
                         child: Text(
-                          'Reset',
+                          'Apply Filters',
                           style: GoogleFonts.nunito(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w700,
-                            color: _coral,
+                            fontSize: 14.5,
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
                       ),
-                    ],
-                  ),
-                  const Divider(),
-                  const SizedBox(height: 10),
-
-                  // Radius Slider
-                  Text(
-                    'Search Radius: ${_radiusFilterKm.round()} km',
-                    style: GoogleFonts.nunito(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: _navy,
                     ),
-                  ),
-                  Slider(
-                    value: _radiusFilterKm,
-                    min: 1.0,
-                    max: 20.0,
-                    divisions: 19,
-                    activeColor: _navy,
-                    inactiveColor: _lavLight,
-                    onChanged: (v) {
-                      setModalState(() => _radiusFilterKm = v);
-                      setState(() => _radiusFilterKm = v);
-                    },
-                  ),
-                  const SizedBox(height: 10),
+                    const SizedBox(height: 8),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
 
-                  // Toggle Partner Shelters & Clinics
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: Text(
-                      'Show Partner Shelters & Vet Clinics',
+  // ---------------------------------------------------------------------------
+  // Suggest Vet Clinic or Shelter Modal Bottom Sheet (User Use Case)
+  // ---------------------------------------------------------------------------
+  void _showSuggestClinicModal() {
+    String type = 'clinic'; // 'clinic' or 'shelter'
+    final nameCtrl = TextEditingController();
+    final addressCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final hoursCtrl = TextEditingController();
+    final notesCtrl = TextEditingController();
+    final miniMapCtrl = MapController();
+
+    bool is24Hours = false;
+    double selectedLat = _userLocation?.latitude ?? _centerLocation.latitude;
+    double selectedLng = _userLocation?.longitude ?? _centerLocation.longitude;
+    bool isFetchingGps = false;
+    bool isLocatingAddress = false;
+    bool isSubmitting = false;
+    bool hasAttemptedSubmit = false;
+    String? formValidationError;
+    final selectedServices = <String>{};
+
+    const clinicServices = [
+      'TNR Discount',
+      'Stray Friendly',
+      'Emergency 24h',
+      'Vaccination/Spay',
+      'Quarantine Facility',
+      'Pet Hotel/Foster',
+    ];
+
+    const shelterServices = [
+      'Open Adoption',
+      'Foster Care Intake',
+      'TNR Recovery Spot',
+      'Quarantine Facility',
+      'Donation Drop-off',
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            final systemBottomNav = MediaQuery.paddingOf(ctx).bottom;
+            final keyboardInset = MediaQuery.viewInsetsOf(ctx).bottom;
+            final effectiveBottomPadding = keyboardInset > 0
+                ? keyboardInset + 16
+                : (systemBottomNav > 0 ? systemBottomNav + 24 : 36.0);
+
+            final currentServices = type == 'clinic' ? clinicServices : shelterServices;
+            final themeColor = type == 'clinic' ? const Color(0xFF1E88E5) : const Color(0xFF00897B);
+            final activeAsset = type == 'clinic' ? 'assets/images/guardianangel.png' : 'assets/images/shelter.png';
+
+            final nameErr = TextModerationService.validateFacilityName(
+              nameCtrl.text,
+              label: type == 'clinic' ? 'Vet Clinic' : 'Animal Shelter',
+            );
+            final phoneErr = TextModerationService.validatePhoneNumber(
+              phoneCtrl.text,
+              label: 'Emergency contact phone',
+            );
+            final addressErr = TextModerationService.validateAddress(
+              addressCtrl.text,
+              label: 'Facility address',
+            );
+            final notesErr = notesCtrl.text.trim().isNotEmpty
+                ? TextModerationService.validateDescription(notesCtrl.text, fieldName: 'Notes')
+                : null;
+
+            return Container(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, effectiveBottomPadding),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: SingleChildScrollView(
+                physics: const BouncingScrollPhysics(),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: _lavender.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: BoxDecoration(
+                            color: themeColor.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Image.asset(
+                            activeAsset,
+                            width: 28,
+                            height: 28,
+                            fit: BoxFit.contain,
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Suggest ${type == 'clinic' ? 'Vet Clinic' : 'Animal Shelter'}',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w900,
+                                  color: _navy,
+                                ),
+                              ),
+                              Text(
+                                'Community recommendations reviewed by Admins',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: _navy.withValues(alpha: 0.6),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, size: 20, color: _navy),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const Divider(height: 24),
+
+                    // Facility Type Selector: 2 cards matching report outcome/action design
+                    Text(
+                      'Facility Category *',
                       style: GoogleFonts.nunito(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
                         color: _navy,
                       ),
                     ),
-                    subtitle: Text(
-                      'Display verified rescue shelters, clinic drop-offs, and TNR points',
-                      style: GoogleFonts.nunito(
-                        fontSize: 12,
-                        color: _navy.withValues(alpha: 0.6),
-                      ),
-                    ),
-                    activeThumbColor: _accentBlue,
-                    value: _includeShelters,
-                    onChanged: (val) {
-                      setModalState(() => _includeShelters = val);
-                      setState(() => _includeShelters = val);
-                    },
-                  ),
-                  const SizedBox(height: 20),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        // Vet Clinic Card (matching report action box design)
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              setModalState(() {
+                                type = 'clinic';
+                                selectedServices.clear();
+                              });
+                            },
+                            behavior: HitTestBehavior.opaque,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                // 1. Title on top
+                                SizedBox(
+                                  height: 28,
+                                  child: Center(
+                                    child: Text(
+                                      'Vet Clinic',
+                                      textAlign: TextAlign.center,
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: type == 'clinic'
+                                            ? const Color(0xFF1E88E5)
+                                            : _navy,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                // 2. Center box with custom logo
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  width: double.infinity,
+                                  height: 86,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: type == 'clinic'
+                                          ? const Color(0xFF1E88E5)
+                                          : _navy.withValues(alpha: 0.12),
+                                      width: type == 'clinic' ? 2.2 : 1.2,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: (type == 'clinic'
+                                                ? const Color(0xFF1E88E5)
+                                                : _navy)
+                                            .withValues(alpha: type == 'clinic' ? 0.22 : 0.08),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 3),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Center(
+                                    child: Image.asset(
+                                      'assets/images/guardianangel.png',
+                                      width: 52,
+                                      height: 52,
+                                      fit: BoxFit.contain,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                // 3. Subtitle / description pill at bottom
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                                  decoration: BoxDecoration(
+                                    color: (type == 'clinic'
+                                            ? const Color(0xFF1E88E5)
+                                            : _navy)
+                                        .withValues(alpha: type == 'clinic' ? 0.12 : 0.06),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Medical Care & TNR',
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: type == 'clinic'
+                                          ? const Color(0xFF1E88E5)
+                                          : _navy.withValues(alpha: 0.7),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 14),
 
-                  // Apply Button
-                  SizedBox(
-                    width: double.infinity,
-                    height: 46,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: _navy,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14),
+                        // Rescue Shelter Card (matching report action box design)
+                        Expanded(
+                          child: GestureDetector(
+                            onTap: () {
+                              setModalState(() {
+                                type = 'shelter';
+                                selectedServices.clear();
+                              });
+                            },
+                            behavior: HitTestBehavior.opaque,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                // 1. Title on top
+                                SizedBox(
+                                  height: 28,
+                                  child: Center(
+                                    child: Text(
+                                      'Rescue Shelter',
+                                      textAlign: TextAlign.center,
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 13.5,
+                                        fontWeight: FontWeight.w800,
+                                        color: type == 'shelter'
+                                            ? const Color(0xFF00897B)
+                                            : _navy,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                // 2. Center box with custom logo
+                                AnimatedContainer(
+                                  duration: const Duration(milliseconds: 200),
+                                  width: double.infinity,
+                                  height: 86,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(
+                                      color: type == 'shelter'
+                                          ? const Color(0xFF00897B)
+                                          : _navy.withValues(alpha: 0.12),
+                                      width: type == 'shelter' ? 2.2 : 1.2,
+                                    ),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: (type == 'shelter'
+                                                ? const Color(0xFF00897B)
+                                                : _navy)
+                                            .withValues(alpha: type == 'shelter' ? 0.22 : 0.08),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 3),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Center(
+                                    child: Image.asset(
+                                      'assets/images/shelter.png',
+                                      width: 52,
+                                      height: 52,
+                                      fit: BoxFit.contain,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                // 3. Subtitle / description pill at bottom
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
+                                  decoration: BoxDecoration(
+                                    color: (type == 'shelter'
+                                            ? const Color(0xFF00897B)
+                                            : _navy)
+                                        .withValues(alpha: type == 'shelter' ? 0.12 : 0.06),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Text(
+                                    'Intake & Adoption',
+                                    textAlign: TextAlign.center,
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w800,
+                                      color: type == 'shelter'
+                                          ? const Color(0xFF00897B)
+                                          : _navy.withValues(alpha: 0.7),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
                         ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+
+                    // Name Field
+                    Text(
+                      type == 'clinic' ? 'Vet Clinic / Hospital Name *' : 'Shelter / Rescue Center Name *',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: _navy,
                       ),
-                      onPressed: () => Navigator.pop(ctx),
-                      child: Text(
-                        'Apply Filters',
-                        style: GoogleFonts.nunito(
-                          fontSize: 14.5,
-                          fontWeight: FontWeight.w800,
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: nameCtrl,
+                      onChanged: (_) => setModalState(() {}),
+                      style: GoogleFonts.nunito(fontSize: 13, color: _navy, fontWeight: FontWeight.w600),
+                      decoration: InputDecoration(
+                        hintText: type == 'clinic'
+                            ? 'e.g. Sahabat Satwa Pet Clinic, Pejaten Vet'
+                            : 'e.g. Pejaten Animal Shelter, ASPERA Sanctuary',
+                        hintStyle: GoogleFonts.nunito(fontSize: 12, color: _navy.withValues(alpha: 0.4)),
+                        prefixIcon: Icon(Icons.home_work_outlined, size: 18, color: themeColor),
+                        filled: true,
+                        fillColor: _bgWhite,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && nameErr != null)
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && nameErr != null) ? 1.5 : 1,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && nameErr != null)
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && nameErr != null) ? 1.5 : 1,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && nameErr != null)
+                                ? const Color(0xFFE53935)
+                                : themeColor,
+                            width: 1.5,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                    if (hasAttemptedSubmit && nameErr != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚠️ $nameErr',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+
+                    // Phone Field
+                    Text(
+                      'Emergency Contact / WhatsApp Phone *',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: _navy,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: phoneCtrl,
+                      onChanged: (_) => setModalState(() {}),
+                      keyboardType: TextInputType.phone,
+                      style: GoogleFonts.nunito(fontSize: 13, color: _navy, fontWeight: FontWeight.w600),
+                      decoration: InputDecoration(
+                        hintText: 'e.g. +62 812-3456-7890 or (021) 7890-1234',
+                        hintStyle: GoogleFonts.nunito(fontSize: 12, color: _navy.withValues(alpha: 0.4)),
+                        prefixIcon: Icon(Icons.phone_outlined, size: 18, color: themeColor),
+                        filled: true,
+                        fillColor: _bgWhite,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && phoneErr != null)
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && phoneErr != null) ? 1.5 : 1,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && phoneErr != null)
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && phoneErr != null) ? 1.5 : 1,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && phoneErr != null)
+                                ? const Color(0xFFE53935)
+                                : themeColor,
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (hasAttemptedSubmit && phoneErr != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚠️ $phoneErr',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 14),
+
+                    // Address Field with GPS Auto-fill
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Facility Location & Address *',
+                          style: GoogleFonts.nunito(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: _navy,
+                          ),
+                        ),
+                        InkWell(
+                          onTap: (isFetchingGps || isLocatingAddress)
+                              ? null
+                              : () async {
+                                  setModalState(() => isFetchingGps = true);
+                                  try {
+                                    final loc = await _locationService.getCurrentUserLocation();
+                                    addressCtrl.text = loc.formattedAddress;
+                                    selectedLat = loc.latitude;
+                                    selectedLng = loc.longitude;
+                                    try {
+                                      miniMapCtrl.move(ll.LatLng(selectedLat, selectedLng), 16.0);
+                                    } catch (_) {}
+                                  } catch (_) {}
+                                  setModalState(() => isFetchingGps = false);
+                                },
+                          borderRadius: BorderRadius.circular(8),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (isFetchingGps)
+                                  SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(strokeWidth: 1.5, color: themeColor),
+                                  )
+                                else
+                                  Icon(Icons.my_location_rounded, size: 14, color: themeColor),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Use Current GPS',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w800,
+                                    color: themeColor,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: addressCtrl,
+                      onChanged: (_) => setModalState(() {}),
+                      maxLines: 2,
+                      style: GoogleFonts.nunito(fontSize: 13, color: _navy, fontWeight: FontWeight.w600),
+                      decoration: InputDecoration(
+                        hintText: 'e.g. Jl. Cipete Raya No. 12, Cilandak, Jakarta Selatan',
+                        hintStyle: GoogleFonts.nunito(fontSize: 12, color: _navy.withValues(alpha: 0.4)),
+                        prefixIcon: Icon(Icons.location_on_outlined, size: 18, color: themeColor),
+                        filled: true,
+                        fillColor: _bgWhite,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && addressErr != null)
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && addressErr != null) ? 1.5 : 1,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && addressErr != null)
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && addressErr != null) ? 1.5 : 1,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && addressErr != null)
+                                ? const Color(0xFFE53935)
+                                : themeColor,
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (hasAttemptedSubmit && addressErr != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚠️ $addressErr',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+
+                    // Interactive Mini-Map (Matching Sighting Detail Outcome Form)
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        height: 150,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE8EAF0),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: _navy.withValues(alpha: 0.1)),
+                        ),
+                        child: Stack(
+                          children: [
+                            FlutterMap(
+                              mapController: miniMapCtrl,
+                              options: MapOptions(
+                                initialCenter: ll.LatLng(selectedLat, selectedLng),
+                                initialZoom: 15.5,
+                                onTap: (tapPos, point) async {
+                                  selectedLat = point.latitude;
+                                  selectedLng = point.longitude;
+                                  setModalState(() => isLocatingAddress = true);
+                                  try {
+                                    final addr = await _locationService.getAddressFromCoordinates(
+                                      point.latitude,
+                                      point.longitude,
+                                    );
+                                    addressCtrl.text = addr;
+                                  } catch (_) {}
+                                  setModalState(() => isLocatingAddress = false);
+                                },
+                              ),
+                              children: [
+                                TileLayer(
+                                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                  userAgentPackageName: 'com.pawwatch.app',
+                                ),
+                                MarkerLayer(
+                                  markers: [
+                                    Marker(
+                                      point: ll.LatLng(selectedLat, selectedLng),
+                                      width: 44,
+                                      height: 44,
+                                      child: Center(
+                                        child: Container(
+                                          padding: const EdgeInsets.all(6),
+                                          decoration: BoxDecoration(
+                                            color: themeColor,
+                                            shape: BoxShape.circle,
+                                            border: Border.all(color: Colors.white, width: 2.5),
+                                            boxShadow: [
+                                              BoxShadow(
+                                                color: Colors.black.withValues(alpha: 0.25),
+                                                blurRadius: 6,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ],
+                                          ),
+                                          child: Image.asset(
+                                            activeAsset,
+                                            width: 20,
+                                            height: 20,
+                                            fit: BoxFit.contain,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                            Positioned(
+                              top: 8,
+                              right: 8,
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.65),
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: Text(
+                                  'Tap map to drop pin',
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            if (isLocatingAddress)
+                              const Positioned(
+                                bottom: 8,
+                                left: 8,
+                                child: SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // 24-Hours Switch
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        'Open 24 Hours Emergency?',
+                        style: GoogleFonts.nunito(fontSize: 13, fontWeight: FontWeight.w800, color: _navy),
+                      ),
+                      value: is24Hours,
+                      activeThumbColor: themeColor,
+                      onChanged: (val) => setModalState(() => is24Hours = val),
+                    ),
+
+                    if (!is24Hours) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Operating Hours',
+                        style: GoogleFonts.nunito(fontSize: 12.5, fontWeight: FontWeight.w800, color: _navy),
+                      ),
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: hoursCtrl,
+                        style: GoogleFonts.nunito(fontSize: 13, color: _navy, fontWeight: FontWeight.w600),
+                        decoration: InputDecoration(
+                          hintText: 'e.g. 09:00 - 21:00 (Mon - Sat)',
+                          hintStyle: GoogleFonts.nunito(fontSize: 12, color: _navy.withValues(alpha: 0.4)),
+                          prefixIcon: Icon(Icons.access_time_rounded, size: 18, color: themeColor),
+                          filled: true,
+                          fillColor: _bgWhite,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: _navy.withValues(alpha: 0.15)),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: _navy.withValues(alpha: 0.15)),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(color: themeColor, width: 1.5),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                    ],
+
+                    // Services / Tags
+                    Text(
+                      'Services & Facilities (Optional)',
+                      style: GoogleFonts.nunito(fontSize: 12.5, fontWeight: FontWeight.w800, color: _navy),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: currentServices.map((service) {
+                        final isSelected = selectedServices.contains(service);
+                        return FilterChip(
+                          label: Text(service),
+                          selected: isSelected,
+                          onSelected: (val) {
+                            setModalState(() {
+                              if (val) {
+                                selectedServices.add(service);
+                              } else {
+                                selectedServices.remove(service);
+                              }
+                            });
+                          },
+                          labelStyle: GoogleFonts.nunito(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: isSelected ? Colors.white : _navy,
+                          ),
+                          backgroundColor: _lavLight.withValues(alpha: 0.4),
+                          selectedColor: themeColor,
+                          checkmarkColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 14),
+
+                    // Additional Notes
+                    Text(
+                      'Notes or Description (Optional)',
+                      style: GoogleFonts.nunito(fontSize: 12.5, fontWeight: FontWeight.w800, color: _navy),
+                    ),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: notesCtrl,
+                      onChanged: (_) => setModalState(() {}),
+                      maxLines: 2,
+                      style: GoogleFonts.nunito(fontSize: 13, color: _navy),
+                      decoration: InputDecoration(
+                        hintText: 'e.g. Offers stray discounts, Dr. Budi is very gentle with rescue kittens.',
+                        hintStyle: GoogleFonts.nunito(fontSize: 12, color: _navy.withValues(alpha: 0.4)),
+                        prefixIcon: Icon(Icons.notes_rounded, size: 18, color: themeColor),
+                        filled: true,
+                        fillColor: _bgWhite,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && notesErr != null)
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && notesErr != null) ? 1.5 : 1,
+                          ),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && notesErr != null)
+                                ? const Color(0xFFE53935)
+                                : _navy.withValues(alpha: 0.15),
+                            width: (hasAttemptedSubmit && notesErr != null) ? 1.5 : 1,
+                          ),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(
+                            color: (hasAttemptedSubmit && notesErr != null)
+                                ? const Color(0xFFE53935)
+                                : themeColor,
+                            width: 1.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (hasAttemptedSubmit && notesErr != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '⚠️ $notesErr',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+
+                    // Warning Banner
+                    if (formValidationError != null) ...[
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFEBEE),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFEF5350)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD32F2F)),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                formValidationError!,
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: const Color(0xFFB71C1C),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    // Submit Button
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: themeColor,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          elevation: 1,
+                        ),
+                        onPressed: isSubmitting
+                            ? null
+                            : () async {
+                                final currentNameErr = TextModerationService.validateFacilityName(
+                                  nameCtrl.text,
+                                  label: type == 'clinic' ? 'Vet Clinic' : 'Animal Shelter',
+                                );
+                                if (currentNameErr != null) {
+                                  setModalState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = '⚠️ $currentNameErr';
+                                  });
+                                  return;
+                                }
+
+                                final currentPhoneErr = TextModerationService.validatePhoneNumber(
+                                  phoneCtrl.text,
+                                  label: 'Emergency contact phone',
+                                );
+                                if (currentPhoneErr != null) {
+                                  setModalState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = '⚠️ $currentPhoneErr';
+                                  });
+                                  return;
+                                }
+
+                                final currentAddressErr = TextModerationService.validateAddress(
+                                  addressCtrl.text,
+                                  label: 'Facility address',
+                                );
+                                if (currentAddressErr != null) {
+                                  setModalState(() {
+                                    hasAttemptedSubmit = true;
+                                    formValidationError = '⚠️ $currentAddressErr';
+                                  });
+                                  return;
+                                }
+
+                                if (notesCtrl.text.trim().isNotEmpty) {
+                                  final currentNotesErr = TextModerationService.validateDescription(
+                                    notesCtrl.text,
+                                    fieldName: 'Notes',
+                                  );
+                                  if (currentNotesErr != null) {
+                                    setModalState(() {
+                                      hasAttemptedSubmit = true;
+                                      formValidationError = '⚠️ $currentNotesErr';
+                                    });
+                                    return;
+                                  }
+                                }
+
+                                setModalState(() {
+                                  isSubmitting = true;
+                                  formValidationError = null;
+                                });
+                                final messenger = ScaffoldMessenger.of(context);
+                                final nav = Navigator.of(ctx);
+
+                                try {
+                                  await FirebaseService.instance.submitClinicSuggestion(
+                                    name: nameCtrl.text.trim(),
+                                    type: type,
+                                    address: addressCtrl.text.trim(),
+                                    latitude: selectedLat,
+                                    longitude: selectedLng,
+                                    phone: phoneCtrl.text.trim(),
+                                    operatingHours: is24Hours ? '24 Hours Emergency' : hoursCtrl.text.trim(),
+                                    is24Hours: is24Hours,
+                                    services: selectedServices.toList(),
+                                    notes: notesCtrl.text.trim(),
+                                  );
+
+                                  if (!mounted) return;
+                                  nav.pop();
+                                  messenger.showSnackBar(
+                                    SnackBar(
+                                      content: Row(
+                                        children: [
+                                          const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            child: Text(
+                                              'Suggestion submitted! Our team will verify and add it to the map directory. 🐾',
+                                              style: GoogleFonts.nunito(fontWeight: FontWeight.w700),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      backgroundColor: _resolved,
+                                      behavior: SnackBarBehavior.floating,
+                                      duration: const Duration(seconds: 4),
+                                    ),
+                                  );
+                                } catch (e) {
+                                  if (!mounted) return;
+                                  setModalState(() {
+                                    isSubmitting = false;
+                                    formValidationError = 'Failed to submit: $e';
+                                  });
+                                }
+                              },
+                        child: isSubmitting
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                              )
+                            : Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Image.asset(
+                                    activeAsset,
+                                    width: 20,
+                                    height: 20,
+                                    fit: BoxFit.contain,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Submit for Admin Review',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 14.5,
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                  ],
+                ),
               ),
             );
           },

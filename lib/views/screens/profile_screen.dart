@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../models/user_profile.dart';
 import '../../services/firebase_service.dart';
+import '../../services/text_moderation_service.dart';
 import 'landing_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -106,6 +107,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final cityCtrl = TextEditingController(text: profile.city);
     File? selectedPhotoFile;
     bool isSaving = false;
+    bool hasAttemptedSubmit = false;
+    String? formValidationError;
+
+    String? validateDisplayName(String text) {
+      final trimmed = text.trim();
+      if (trimmed.isEmpty) return 'Display name is required.';
+      if (trimmed.length < 2) return 'Display name must be at least 2 characters.';
+      if (TextModerationService.hasProfanity(trimmed)) return 'Display name contains inappropriate words.';
+      if (TextModerationService.isGibberishOrSpam(trimmed)) return 'Please enter a valid display name.';
+      return null;
+    }
+
+    String? validateCity(String text) {
+      final trimmed = text.trim();
+      if (trimmed.isEmpty) return null;
+      if (trimmed.length < 2) return 'City / neighborhood is too short.';
+      if (TextModerationService.hasProfanity(trimmed)) return 'City / neighborhood contains inappropriate words.';
+      if (TextModerationService.isGibberishOrSpam(trimmed)) return 'Please enter a valid city or neighborhood.';
+      return null;
+    }
+
+    String? validateBio(String text) {
+      final trimmed = text.trim();
+      if (trimmed.isEmpty) return null;
+      return TextModerationService.validateDescription(trimmed, fieldName: 'Bio');
+    }
 
     showModalBottomSheet(
       context: context,
@@ -115,6 +142,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
         builder: (ctx, setSheetState) {
           final bottomInset = MediaQuery.viewInsetsOf(ctx).bottom;
           final safeBottom = MediaQuery.paddingOf(ctx).bottom;
+          final nameErr = validateDisplayName(nameCtrl.text);
+          final cityErr = validateCity(cityCtrl.text);
+          final bioErr = validateBio(bioCtrl.text);
 
           return SafeArea(
             top: false,
@@ -285,7 +315,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                       const SizedBox(height: 18),
-                      Text('Display Name',
+                      Text('Display Name *',
                           style: GoogleFonts.nunito(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
@@ -293,6 +323,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 6),
                       TextField(
                         controller: nameCtrl,
+                        onChanged: (_) => setSheetState(() {}),
                         style: GoogleFonts.nunito(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -304,12 +335,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               horizontal: 14, vertical: 10),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
+                            borderSide: BorderSide(
+                              color: (hasAttemptedSubmit && nameErr != null)
+                                  ? const Color(0xFFE53935)
+                                  : BorderSide.none.color,
+                              width: (hasAttemptedSubmit && nameErr != null) ? 1.5 : 0,
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: (hasAttemptedSubmit && nameErr != null)
+                                  ? const Color(0xFFE53935)
+                                  : Colors.transparent,
+                              width: (hasAttemptedSubmit && nameErr != null) ? 1.5 : 0,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: (hasAttemptedSubmit && nameErr != null)
+                                  ? const Color(0xFFE53935)
+                                  : _lavender,
+                              width: 1.5,
+                            ),
                           ),
                         ),
                       ),
+                      if (hasAttemptedSubmit && nameErr != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '⚠️ $nameErr',
+                          style: GoogleFonts.nunito(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFFE53935),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
-                      Text('City / Neighborhood',
+                      Text('City / Neighborhood (Optional)',
                           style: GoogleFonts.nunito(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
@@ -317,6 +382,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 6),
                       TextField(
                         controller: cityCtrl,
+                        onChanged: (_) => setSheetState(() {}),
                         style: GoogleFonts.nunito(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
@@ -329,12 +395,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               horizontal: 14, vertical: 10),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
+                            borderSide: BorderSide(
+                              color: (hasAttemptedSubmit && cityErr != null)
+                                  ? const Color(0xFFE53935)
+                                  : BorderSide.none.color,
+                              width: (hasAttemptedSubmit && cityErr != null) ? 1.5 : 0,
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: (hasAttemptedSubmit && cityErr != null)
+                                  ? const Color(0xFFE53935)
+                                  : Colors.transparent,
+                              width: (hasAttemptedSubmit && cityErr != null) ? 1.5 : 0,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: (hasAttemptedSubmit && cityErr != null)
+                                  ? const Color(0xFFE53935)
+                                  : _lavender,
+                              width: 1.5,
+                            ),
                           ),
                         ),
                       ),
+                      if (hasAttemptedSubmit && cityErr != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '⚠️ $cityErr',
+                          style: GoogleFonts.nunito(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFFE53935),
+                          ),
+                        ),
+                      ],
                       const SizedBox(height: 12),
-                      Text('Bio / Rescue Motivation',
+                      Text('Bio / Rescue Motivation (Optional)',
                           style: GoogleFonts.nunito(
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
@@ -342,6 +442,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       const SizedBox(height: 6),
                       TextField(
                         controller: bioCtrl,
+                        onChanged: (_) => setSheetState(() {}),
                         maxLines: 3,
                         style: GoogleFonts.nunito(
                             fontSize: 13,
@@ -353,11 +454,73 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           contentPadding: const EdgeInsets.all(14),
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
+                            borderSide: BorderSide(
+                              color: (hasAttemptedSubmit && bioErr != null)
+                                  ? const Color(0xFFE53935)
+                                  : BorderSide.none.color,
+                              width: (hasAttemptedSubmit && bioErr != null) ? 1.5 : 0,
+                            ),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: (hasAttemptedSubmit && bioErr != null)
+                                  ? const Color(0xFFE53935)
+                                  : Colors.transparent,
+                              width: (hasAttemptedSubmit && bioErr != null) ? 1.5 : 0,
+                            ),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide(
+                              color: (hasAttemptedSubmit && bioErr != null)
+                                  ? const Color(0xFFE53935)
+                                  : _lavender,
+                              width: 1.5,
+                            ),
                           ),
                         ),
                       ),
-                      const SizedBox(height: 22),
+                      if (hasAttemptedSubmit && bioErr != null) ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '⚠️ $bioErr',
+                          style: GoogleFonts.nunito(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w700,
+                            color: const Color(0xFFE53935),
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 18),
+                      if (formValidationError != null) ...[
+                        Container(
+                          width: double.infinity,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFEBEE),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: const Color(0xFFEF5350)),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.warning_amber_rounded, size: 18, color: Color(0xFFD32F2F)),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  formValidationError!,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: const Color(0xFFB71C1C),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
                       SizedBox(
                         width: double.infinity,
                         child: ElevatedButton(
@@ -373,7 +536,37 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           onPressed: isSaving
                               ? null
                               : () async {
-                                  setSheetState(() => isSaving = true);
+                                  final currentNameErr = validateDisplayName(nameCtrl.text);
+                                  if (currentNameErr != null) {
+                                    setSheetState(() {
+                                      hasAttemptedSubmit = true;
+                                      formValidationError = '⚠️ $currentNameErr';
+                                    });
+                                    return;
+                                  }
+
+                                  final currentCityErr = validateCity(cityCtrl.text);
+                                  if (currentCityErr != null) {
+                                    setSheetState(() {
+                                      hasAttemptedSubmit = true;
+                                      formValidationError = '⚠️ $currentCityErr';
+                                    });
+                                    return;
+                                  }
+
+                                  final currentBioErr = validateBio(bioCtrl.text);
+                                  if (currentBioErr != null) {
+                                    setSheetState(() {
+                                      hasAttemptedSubmit = true;
+                                      formValidationError = '⚠️ $currentBioErr';
+                                    });
+                                    return;
+                                  }
+
+                                  setSheetState(() {
+                                    isSaving = true;
+                                    formValidationError = null;
+                                  });
                                   try {
                                     String? uploadedPhotoUrl;
                                     if (selectedPhotoFile != null) {
@@ -405,12 +598,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                     );
                                     if (ctx.mounted) Navigator.pop(ctx);
                                   } catch (e) {
-                                    setSheetState(() => isSaving = false);
-                                    if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Error updating profile: $e')),
-                                      );
-                                    }
+                                    setSheetState(() {
+                                      isSaving = false;
+                                      formValidationError = 'Error updating profile: $e';
+                                    });
                                   }
                                 },
                           child: isSaving

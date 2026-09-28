@@ -11,6 +11,7 @@ import '../../services/firebase_service.dart';
 import '../../services/text_moderation_service.dart';
 import '../../utils/double_tap_guard.dart';
 import '../../models/sighting.dart';
+import '../widgets/shelter_picker_view.dart';
 
 class ReportFormScreen extends StatefulWidget {
   const ReportFormScreen({super.key});
@@ -49,6 +50,11 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
   String _locationText = 'Detecting current location...';
   bool _isLocationLoading = false;
   bool _isGpsAutoFilled = false;
+  bool _hasAttemptedSubmit = false;
+  String? _formValidationError;
+  String _resolvedPlacement = 'adopted'; // 'adopted' or 'shelter'
+  String? _selectedShelterName;
+  String? _selectedShelterAddress;
 
   @override
   void initState() {
@@ -86,7 +92,8 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
     final titleValid = TextModerationService.validateReportTitle(_titleController.text) == null;
     final descValid = TextModerationService.validateDescription(_descController.text) == null;
     if (_reportType == 'resolved') {
-      return _photos.isNotEmpty && titleValid && descValid;
+      final shelterValid = _resolvedPlacement != 'shelter' || _selectedShelterName != null;
+      return _photos.isNotEmpty && titleValid && descValid && shelterValid;
     }
     return _photos.isNotEmpty &&
         _selectedCategory != null &&
@@ -195,6 +202,10 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
                     const SizedBox(height: 14),
                     if (_reportType == 'needsHelp') ...[
                       _buildCategorySection(),
+                      const SizedBox(height: 14),
+                    ],
+                    if (_reportType == 'resolved') ...[
+                      _buildResolvedShelterSection(),
                       const SizedBox(height: 14),
                     ],
                     _buildLocationSection(),
@@ -460,7 +471,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
   Widget _buildTitleSection() {
     final titleError = _titleController.text.isNotEmpty
         ? TextModerationService.validateReportTitle(_titleController.text)
-        : null;
+        : (_hasAttemptedSubmit ? 'Title is required (min 4 characters).' : null);
 
     return Container(
       padding: const EdgeInsets.all(18),
@@ -568,6 +579,25 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               }),
             ),
           ),
+          if (_hasAttemptedSubmit && _photos.isEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.error_outline, size: 14, color: _urgent),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    '⚠️ At least 1 verified cat photo is required.',
+                    style: GoogleFonts.nunito(
+                      fontSize: 11.5,
+                      color: _urgent,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
         ],
       ),
     );
@@ -694,8 +724,8 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             color: Colors.white,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: _lavender,
-              width: 1.5,
+              color: (_hasAttemptedSubmit && _photos.isEmpty) ? _urgent : _lavender,
+              width: (_hasAttemptedSubmit && _photos.isEmpty) ? 2.0 : 1.5,
               style: BorderStyle.solid,
             ),
           ),
@@ -1161,8 +1191,10 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               color: const Color(0xFFF9F9FB),
               borderRadius: BorderRadius.circular(18),
               border: Border.all(
-                color: _navy.withValues(alpha: 0.08),
-                width: 1.2,
+                color: (_hasAttemptedSubmit && (_selectedCategory == null || _selectedCategory!.isEmpty))
+                    ? _urgent
+                    : _navy.withValues(alpha: 0.08),
+                width: (_hasAttemptedSubmit && (_selectedCategory == null || _selectedCategory!.isEmpty)) ? 1.5 : 1.2,
               ),
             ),
             child: RawScrollbar(
@@ -1186,6 +1218,161 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               ),
             ),
           ),
+          if (_hasAttemptedSubmit && (_selectedCategory == null || _selectedCategory!.isEmpty)) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Icon(Icons.error_outline, size: 14, color: _urgent),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    '⚠️ Please select a cat situation & rescue goal.',
+                    style: GoogleFonts.nunito(
+                      fontSize: 11.5,
+                      color: _urgent,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildResolvedShelterSection() {
+    final isShelter = _resolvedPlacement == 'shelter';
+    return _buildCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildSectionHeader(
+            icon: Icons.home_work_outlined,
+            title: 'Rescue Resolution & Safe Placement',
+            subtitle: 'Choose where the cat was safely placed or surrendered.',
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() => _resolvedPlacement = 'adopted'),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: !isShelter ? _resolved.withValues(alpha: 0.12) : const Color(0xFFF0F1F5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: !isShelter ? _resolved : Colors.transparent,
+                        width: !isShelter ? 1.6 : 1,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        const Text('🏡', style: TextStyle(fontSize: 18)),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Adopted / Home',
+                          style: GoogleFonts.nunito(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: !isShelter ? _resolved : _navy.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: GestureDetector(
+                  onTap: () => setState(() => _resolvedPlacement = 'shelter'),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isShelter ? const Color(0xFF00897B).withValues(alpha: 0.12) : const Color(0xFFF0F1F5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: isShelter ? const Color(0xFF00897B) : Colors.transparent,
+                        width: isShelter ? 1.6 : 1,
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        const Text('🏛️', style: TextStyle(fontSize: 18)),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Animal Shelter',
+                          style: GoogleFonts.nunito(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: isShelter ? const Color(0xFF00897B) : _navy.withValues(alpha: 0.6),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (isShelter) ...[
+            const SizedBox(height: 14),
+            ShelterPickerView(
+              referenceLat: _selectedLocation.latitude,
+              referenceLng: _selectedLocation.longitude,
+              initialShelterName: _selectedShelterName,
+              initialShelterAddress: _selectedShelterAddress,
+              themeColor: const Color(0xFF00897B),
+              onShelterSelected: (shelter) {
+                setState(() {
+                  _selectedShelterName = shelter.name;
+                  _selectedShelterAddress = shelter.address;
+                  _selectedLocation = ll.LatLng(shelter.latitude, shelter.longitude);
+                  _locationText = shelter.address;
+                });
+                try {
+                  _mapController.move(_selectedLocation, 16.0);
+                } catch (_) {}
+              },
+              onClearSelection: () {
+                setState(() {
+                  _selectedShelterName = null;
+                  _selectedShelterAddress = null;
+                });
+              },
+            ),
+            if (_hasAttemptedSubmit && _selectedShelterName == null) ...[
+              const SizedBox(height: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade300),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.error_outline, size: 14, color: Color(0xFFE53935)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Please choose a nearby shelter or register a new one above.',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w700,
+                          color: const Color(0xFFE53935),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
         ],
       ),
     );
@@ -1619,7 +1806,9 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             _descController.text,
             fieldName: isResolved ? 'Story' : 'Description',
           )
-        : null;
+        : (_hasAttemptedSubmit
+            ? (isResolved ? 'Story is required (min 8 characters).' : 'Description is required (min 8 characters).')
+            : null);
 
     return _buildCard(
       child: Column(
@@ -1756,75 +1945,136 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
 
   Widget _buildSubmitButton() {
     final canSubmit = _canSubmit;
-    return GestureDetector(
-      onTap: canSubmit
-          ? _handleSubmit
-          : () {
-              if (_photos.isEmpty) {
-                _showSnackBar('⚠️ Please add at least 1 verified cat photo.');
-              } else if (_reportType == 'needsHelp' &&
-                  (_selectedCategory == null || _selectedCategory!.isEmpty)) {
-                _showSnackBar('⚠️ Please select a cat situation & rescue goal.');
-              } else {
-                final titleErr = TextModerationService.validateReportTitle(_titleController.text);
-                if (titleErr != null) {
-                  _showSnackBar('⚠️ $titleErr');
-                  return;
-                }
-                final descErr = TextModerationService.validateDescription(
-                  _descController.text,
-                  fieldName: _reportType == 'resolved' ? 'Story' : 'Description',
-                );
-                if (descErr != null) {
-                  _showSnackBar('⚠️ $descErr');
-                  return;
-                }
-              }
-            },
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        width: double.infinity,
-        padding: const EdgeInsets.symmetric(vertical: 17),
-        decoration: BoxDecoration(
-          gradient: canSubmit
-              ? const LinearGradient(
-                  colors: [_lavender, Color(0xFF7B6DB5)],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                )
-              : null,
-          color: canSubmit ? null : _navy.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(18),
-          boxShadow: canSubmit
-              ? [
-                  BoxShadow(
-                    color: _lavender.withValues(alpha: 0.4),
-                    blurRadius: 14,
-                    offset: const Offset(0, 5),
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_formValidationError != null) ...[
+          Container(
+            width: double.infinity,
+            margin: const EdgeInsets.only(bottom: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: _urgent.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _urgent.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded, size: 18, color: _urgent),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    _formValidationError!,
+                    style: GoogleFonts.nunito(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFFB71C1C),
+                    ),
                   ),
-                ]
-              : [],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.send_rounded,
-              size: 18,
-              color: canSubmit ? Colors.white : _navy.withValues(alpha: 0.3),
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Text(
-              'Submit Report',
-              style: GoogleFonts.nunito(
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-                color: canSubmit ? Colors.white : _navy.withValues(alpha: 0.3),
-              ),
+          ),
+        ],
+        GestureDetector(
+          onTap: () {
+            final titleErr = TextModerationService.validateReportTitle(_titleController.text);
+            final descErr = TextModerationService.validateDescription(
+              _descController.text,
+              fieldName: _reportType == 'resolved' ? 'Story' : 'Description',
+            );
+            if (_photos.isEmpty) {
+              setState(() {
+                _hasAttemptedSubmit = true;
+                _formValidationError = 'Please add at least 1 verified cat photo.';
+              });
+              _showSnackBar('⚠️ Please add at least 1 verified cat photo.');
+              return;
+            }
+            if (_reportType == 'needsHelp' &&
+                (_selectedCategory == null || _selectedCategory!.isEmpty)) {
+              setState(() {
+                _hasAttemptedSubmit = true;
+                _formValidationError = 'Please select a cat situation & rescue goal.';
+              });
+              _showSnackBar('⚠️ Please select a cat situation & rescue goal.');
+              return;
+            }
+            if (_reportType == 'resolved' &&
+                _resolvedPlacement == 'shelter' &&
+                _selectedShelterName == null) {
+              setState(() {
+                _hasAttemptedSubmit = true;
+                _formValidationError = 'Please choose a nearby shelter or register a new one.';
+              });
+              _showSnackBar('⚠️ Please choose a nearby shelter or register a new one.');
+              return;
+            }
+            if (titleErr != null) {
+              setState(() {
+                _hasAttemptedSubmit = true;
+                _formValidationError = titleErr;
+              });
+              _showSnackBar('⚠️ $titleErr');
+              return;
+            }
+            if (descErr != null) {
+              setState(() {
+                _hasAttemptedSubmit = true;
+                _formValidationError = descErr;
+              });
+              _showSnackBar('⚠️ $descErr');
+              return;
+            }
+            setState(() => _formValidationError = null);
+            _handleSubmit();
+          },
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 17),
+            decoration: BoxDecoration(
+              gradient: canSubmit
+                  ? const LinearGradient(
+                      colors: [_lavender, Color(0xFF7B6DB5)],
+                      begin: Alignment.centerLeft,
+                      end: Alignment.centerRight,
+                    )
+                  : null,
+              color: canSubmit ? null : _navy.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(18),
+              boxShadow: canSubmit
+                  ? [
+                      BoxShadow(
+                        color: _lavender.withValues(alpha: 0.4),
+                        blurRadius: 14,
+                        offset: const Offset(0, 5),
+                      ),
+                    ]
+                  : [],
             ),
-          ],
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.send_rounded,
+                  size: 18,
+                  color: canSubmit ? Colors.white : _navy.withValues(alpha: 0.3),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Submit Report',
+                  style: GoogleFonts.nunito(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: canSubmit ? Colors.white : _navy.withValues(alpha: 0.3),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
-      ),
+      ],
     );
   }
 
@@ -1898,18 +2148,41 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
 
     if (_photos.isEmpty) {
       DoubleTapGuard.reset('submit_report');
+      setState(() {
+        _hasAttemptedSubmit = true;
+        _formValidationError = 'Please add at least 1 verified cat photo.';
+      });
       _showSnackBar('⚠️ Please add at least 1 verified cat photo.');
       return;
     }
     if (_reportType == 'needsHelp' &&
         (_selectedCategory == null || _selectedCategory!.isEmpty)) {
       DoubleTapGuard.reset('submit_report');
+      setState(() {
+        _hasAttemptedSubmit = true;
+        _formValidationError = 'Please select a cat situation & rescue goal.';
+      });
       _showSnackBar('⚠️ Please select a cat situation & rescue goal.');
+      return;
+    }
+    if (_reportType == 'resolved' &&
+        _resolvedPlacement == 'shelter' &&
+        _selectedShelterName == null) {
+      DoubleTapGuard.reset('submit_report');
+      setState(() {
+        _hasAttemptedSubmit = true;
+        _formValidationError = 'Please choose a nearby shelter or register a new one.';
+      });
+      _showSnackBar('⚠️ Please choose a nearby shelter or register a new one.');
       return;
     }
     final titleErr = TextModerationService.validateReportTitle(_titleController.text);
     if (titleErr != null) {
       DoubleTapGuard.reset('submit_report');
+      setState(() {
+        _hasAttemptedSubmit = true;
+        _formValidationError = titleErr;
+      });
       _showSnackBar('⚠️ $titleErr');
       return;
     }
@@ -1919,6 +2192,10 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
     );
     if (descErr != null) {
       DoubleTapGuard.reset('submit_report');
+      setState(() {
+        _hasAttemptedSubmit = true;
+        _formValidationError = descErr;
+      });
       _showSnackBar('⚠️ $descErr');
       return;
     }
@@ -2002,6 +2279,12 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
           : 'needsHelp';
     }
 
+    final String finalDesc = (_reportType == 'resolved' &&
+            _resolvedPlacement == 'shelter' &&
+            _selectedShelterName != null)
+        ? '${_descController.text.trim()}\n\nSafe Placement: Admitted to $_selectedShelterName${_selectedShelterAddress != null ? " ($_selectedShelterAddress)" : ""}.'
+        : _descController.text.trim();
+
     try {
       await FirebaseService.instance.createSighting(
         title: _titleController.text.trim(),
@@ -2009,7 +2292,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
         latitude: _selectedLocation.latitude,
         longitude: _selectedLocation.longitude,
         locationAddress: finalAddress,
-        description: _descController.text.trim(),
+        description: finalDesc,
         urgency: finalUrgency,
         category: finalCategory,
         routineHours: _routineHoursController.text.trim(),

@@ -2781,4 +2781,41 @@ class FirebaseService {
       'pendingVetUpdateId': FieldValue.delete(),
     });
   }
+
+  /// Community suggestion for a new vet clinic or rescue shelter (Admin verifies)
+  Future<void> submitClinicSuggestion({
+    required String name,
+    required String type, // 'clinic' or 'shelter'
+    required String address,
+    required double latitude,
+    required double longitude,
+    required String phone,
+    String? operatingHours,
+    bool is24Hours = false,
+    List<String> services = const [],
+    String? notes,
+  }) async {
+    final user = _auth.currentUser;
+    final uid = user?.uid ?? 'anon';
+    final userName = user?.displayName ?? user?.email ?? 'PawWatch Volunteer';
+
+    final docRef = _firestore.collection('clinic_suggestions').doc();
+    await docRef.set({
+      'id': docRef.id,
+      'name': name.trim(),
+      'type': type,
+      'address': address.trim(),
+      'latitude': latitude,
+      'longitude': longitude,
+      'phone': phone.trim(),
+      'operatingHours': operatingHours?.trim() ?? (is24Hours ? '24 Hours Emergency' : ''),
+      'is24Hours': is24Hours,
+      'services': services,
+      'notes': notes?.trim() ?? '',
+      'submittedBy': uid,
+      'submittedByName': userName,
+      'status': 'pending', // Pending review for "Verify Clinic Suggestion" use case
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+  }
 }
