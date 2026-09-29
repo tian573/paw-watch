@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../models/sighting.dart';
 import '../../models/user_profile.dart';
@@ -48,6 +49,11 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && FirebaseAuth.instance.currentUser?.email == 'admin@example.com') {
+        Navigator.pushReplacementNamed(context, '/admin');
+      }
+    });
     _sightingsStream = FirebaseService.instance.streamSightings();
     _checkFirstTimeUser();
     _loadDismissedDispatchIds();
@@ -2715,54 +2721,82 @@ class _HomeScreenState extends State<HomeScreen>
         ),
         Divider(color: _navy.withValues(alpha: 0.08), height: 1),
         Expanded(
-          child: StreamBuilder<List<Sighting>>(
-            stream: _sightingsStream,
-            builder: (context, snapshot) {
-              final sightings = snapshot.data ?? [];
-              final currentUid = FirebaseAuth.instance.currentUser?.uid;
-              final urgentList = sightings
-                  .where((s) =>
-                      s.isEligibleForRadialDispatch &&
-                      (currentUid == null || s.reporterId != currentUid) &&
-                      !_dismissedDispatchIds.contains(s.id) &&
-                      !s.isDispatchDismissedFor(currentUid))
-                  .toList();
-              final inCareList =
-                  sightings.where((s) => s.isInCare).toList();
+          child: StreamBuilder<List<Map<String, dynamic>>>(
+            stream: FirebaseService.instance.streamAnnouncements(),
+            builder: (context, annSnapshot) {
+              final announcements = annSnapshot.data ?? [];
+              return StreamBuilder<List<Sighting>>(
+                stream: _sightingsStream,
+                builder: (context, snapshot) {
+                  final sightings = snapshot.data ?? [];
+                  final currentUid = FirebaseAuth.instance.currentUser?.uid;
+                  final urgentList = sightings
+                      .where((s) =>
+                          s.isEligibleForRadialDispatch &&
+                          (currentUid == null || s.reporterId != currentUid) &&
+                          !_dismissedDispatchIds.contains(s.id) &&
+                          !s.isDispatchDismissedFor(currentUid))
+                      .toList();
+                  final inCareList =
+                      sightings.where((s) => s.isInCare).toList();
 
-              if (urgentList.isEmpty && inCareList.isEmpty) {
-                return Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+                  if (announcements.isEmpty && urgentList.isEmpty && inCareList.isEmpty) {
+                    return Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.done_all_rounded,
+                              size: 48,
+                              color: _lavender.withValues(alpha: 0.4)),
+                          const SizedBox(height: 12),
+                          Text(
+                            'All Quiet on the Front 🐾',
+                            style: GoogleFonts.nunito(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                              color: _navy,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'No urgent rescue dispatches or announcements.',
+                            style: GoogleFonts.nunito(
+                              fontSize: 12.5,
+                              color: _navy.withValues(alpha: 0.6),
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+
+                  return ListView(
+                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
                     children: [
-                      Icon(Icons.done_all_rounded,
-                          size: 48,
-                          color: _lavender.withValues(alpha: 0.4)),
-                      const SizedBox(height: 12),
-                      Text(
-                        'All Quiet on the Front 🐾',
-                        style: GoogleFonts.nunito(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          color: _navy,
+                      if (announcements.isNotEmpty) ...[
+                        Row(
+                          children: [
+                            const Icon(Icons.campaign_rounded,
+                                color: Color(0xFF6C3FC5), size: 17),
+                            const SizedBox(width: 6),
+                            Text(
+                              'OFFICIAL ANNOUNCEMENTS (${announcements.length})',
+                              style: GoogleFonts.nunito(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w900,
+                                color: const Color(0xFF6C3FC5),
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'No urgent rescue dispatches pending nearby.',
-                        style: GoogleFonts.nunito(
-                          fontSize: 12.5,
-                          color: _navy.withValues(alpha: 0.6),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }
-
-              return ListView(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
-                children: [
+                        const SizedBox(height: 10),
+                        ...announcements.map((a) => Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: _buildAnnouncementNotificationCard(a),
+                            )),
+                        const SizedBox(height: 10),
+                      ],
                   if (urgentList.isNotEmpty) ...[
                     Row(
                       children: [
@@ -2882,9 +2916,117 @@ class _HomeScreenState extends State<HomeScreen>
                 ],
               );
             },
-          ),
+          );
+        },
+      ),
+    ),
+  ],
+);
+}
+
+  Widget _buildAnnouncementNotificationCard(Map<String, dynamic> a) {
+    final title = a['title']?.toString() ?? 'Announcement';
+    final body = a['body']?.toString() ?? '';
+    final category = a['category']?.toString() ?? 'general';
+    final ts = a['createdAt'] as Timestamp?;
+    final timeStr = ts != null
+        ? '${ts.toDate().day}/${ts.toDate().month}/${ts.toDate().year}'
+        : 'Recent';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFFF9F6FF), Color(0xFFFFFFFF)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
-      ],
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFF6C3FC5).withValues(alpha: 0.18)),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF6C3FC5).withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6C3FC5).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.campaign_rounded, size: 13, color: Color(0xFF6C3FC5)),
+                    const SizedBox(width: 4),
+                    Text(
+                      category.toUpperCase(),
+                      style: GoogleFonts.nunito(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: const Color(0xFF6C3FC5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Spacer(),
+              Row(
+                children: [
+                  const Icon(Icons.verified_rounded, size: 12, color: Color(0xFF6C3FC5)),
+                  const SizedBox(width: 3),
+                  Text(
+                    'PawWatch Team',
+                    style: GoogleFonts.nunito(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF6C3FC5),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    '• $timeStr',
+                    style: GoogleFonts.nunito(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: _navy.withValues(alpha: 0.45),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            title,
+            style: GoogleFonts.nunito(
+              fontSize: 14.5,
+              fontWeight: FontWeight.w800,
+              color: _navy,
+            ),
+          ),
+          if (body.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              body,
+              style: GoogleFonts.nunito(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: _navy.withValues(alpha: 0.75),
+                height: 1.35,
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 

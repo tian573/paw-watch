@@ -1411,11 +1411,20 @@ class FirebaseService {
   }
 
   /// Flag a sighting as inappropriate
-  Future<void> flagSighting(String sightingId, String reason) async {
+  Future<void> flagSighting(
+    String sightingId,
+    String reason, {
+    String? sightingTitle,
+    String? photoUrl,
+    String? locationName,
+  }) async {
     final user = _auth.currentUser;
     await _firestore.collection('flags').add({
       'type': 'sighting',
       'sightingId': sightingId,
+      'sightingTitle': sightingTitle,
+      'photoUrl': photoUrl,
+      'locationName': locationName,
       'reportedBy': user?.uid ?? 'anon',
       'reason': reason,
       'createdAt': FieldValue.serverTimestamp(),
@@ -1428,10 +1437,11 @@ class FirebaseService {
     required String messageId,
     required String reason,
     String? photoUrl,
+    String? messageText,
+    String? senderName,
   }) async {
-    final user = _auth.currentUser;
-    final uid = user?.uid ?? 'anon';
-    await _firestore.collection('flags').add({
+    final uid = _auth.currentUser?.uid ?? 'anon';
+    final data = <String, dynamic>{
       'type': 'chat_message',
       'chatId': chatId,
       'messageId': messageId,
@@ -1439,7 +1449,11 @@ class FirebaseService {
       'reportedBy': uid,
       'reason': reason,
       'createdAt': FieldValue.serverTimestamp(),
-    });
+    };
+    if (messageText != null) data['messageText'] = messageText;
+    if (senderName != null) data['senderName'] = senderName;
+
+    await _firestore.collection('flags').add(data);
 
     await _firestore
         .collection('coordinationChats')
@@ -1536,12 +1550,18 @@ class FirebaseService {
     required String sightingId,
     required String commentId,
     required String reason,
+    String? commentText,
+    String? authorName,
+    String? sightingTitle,
   }) async {
     final user = _auth.currentUser;
     await _firestore.collection('flags').add({
       'type': 'comment',
       'sightingId': sightingId,
       'commentId': commentId,
+      'commentText': commentText,
+      'authorName': authorName,
+      'sightingTitle': sightingTitle,
       'reportedBy': user?.uid ?? 'anon',
       'reason': reason,
       'createdAt': FieldValue.serverTimestamp(),
@@ -1623,6 +1643,15 @@ class FirebaseService {
       }
       return UserProfile.fromFirestore(doc);
     });
+  }
+
+  /// Get a single UserProfile once
+  Future<UserProfile?> getUserProfile(String uid) async {
+    final doc = await _firestore.collection('users').doc(uid).get();
+    if (doc.exists && doc.data() != null) {
+      return UserProfile.fromFirestore(doc);
+    }
+    return null;
   }
 
   /// Submit a reporter review & rating for a rescuer after handover or rescue
@@ -2817,5 +2846,272 @@ class FirebaseService {
       'status': 'pending', // Pending review for "Verify Clinic Suggestion" use case
       'createdAt': FieldValue.serverTimestamp(),
     });
+  }
+
+  // ─────────────── ADMIN METHODS ───────────────
+
+  /// Check if current user is admin
+  bool get isCurrentUserAdmin {
+    final email = _auth.currentUser?.email;
+    return email == 'admin@example.com';
+  }
+
+  /// Stream all flags (pending) for admin review
+  Stream<List<Map<String, dynamic>>> streamPendingFlags() {
+    return _firestore
+        .collection('flags')
+        .where('status', isEqualTo: 'pending')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              final data = d.data();
+              data['docId'] = d.id;
+              return data;
+            }).toList())
+        .handleError((_) => <Map<String, dynamic>>[]);
+  }
+
+  /// Stream all flags for admin (no status filter, fallback if index missing)
+  Stream<List<Map<String, dynamic>>> streamAllFlags() {
+    return _firestore
+        .collection('flags')
+        .orderBy('createdAt', descending: true)
+        .limit(100)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              final data = d.data();
+              data['docId'] = d.id;
+              return data;
+            }).toList())
+        .handleError((_) => <Map<String, dynamic>>[]);
+  }
+
+  /// Stream pending clinic/shelter suggestions
+  Stream<List<Map<String, dynamic>>> streamPendingClinicSuggestions() {
+    return _firestore
+        .collection('clinic_suggestions')
+        .where('status', isEqualTo: 'pending')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              final data = d.data();
+              data['docId'] = d.id;
+              return data;
+            }).toList())
+        .handleError((_) => <Map<String, dynamic>>[]);
+  }
+
+  /// Stream all clinic suggestions
+  Stream<List<Map<String, dynamic>>> streamAllClinicSuggestions() {
+    return _firestore
+        .collection('clinic_suggestions')
+        .orderBy('createdAt', descending: true)
+        .limit(100)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              final data = d.data();
+              data['docId'] = d.id;
+              return data;
+            }).toList())
+        .handleError((_) => <Map<String, dynamic>>[]);
+  }
+
+  /// Ban a user
+  Future<void> banUser(String targetUid, {String? reason}) async {
+    await _firestore.collection('users').doc(targetUid).update({
+      'isBanned': true,
+      'bannedAt': FieldValue.serverTimestamp(),
+      'bannedBy': _auth.currentUser?.uid ?? 'admin',
+      'banReason': reason ?? 'Violation of community guidelines',
+    });
+  }
+
+  /// Unban a user
+  Future<void> unbanUser(String targetUid) async {
+    await _firestore.collection('users').doc(targetUid).update({
+      'isBanned': false,
+      'bannedAt': FieldValue.delete(),
+      'bannedBy': FieldValue.delete(),
+      'banReason': FieldValue.delete(),
+    });
+  }
+
+  /// Suspend a user temporarily
+  Future<void> suspendUser(String targetUid, {String? reason, int days = 7}) async {
+    await _firestore.collection('users').doc(targetUid).update({
+      'isSuspended': true,
+      'suspendedAt': FieldValue.serverTimestamp(),
+      'suspendedBy': _auth.currentUser?.uid ?? 'admin',
+      'suspendReason': reason ?? 'Temporary suspension',
+      'suspendDays': days,
+    });
+  }
+
+  /// Unsuspend a user
+  Future<void> unsuspendUser(String targetUid) async {
+    await _firestore.collection('users').doc(targetUid).update({
+      'isSuspended': false,
+      'suspendedAt': FieldValue.delete(),
+      'suspendedBy': FieldValue.delete(),
+      'suspendReason': FieldValue.delete(),
+      'suspendDays': FieldValue.delete(),
+    });
+  }
+
+  /// Admin: delete a comment (hard override, works for any comment type)
+  Future<void> adminDeleteComment({
+    required String sightingId,
+    required String commentId,
+  }) async {
+    final batch = _firestore.batch();
+    final commentRef = _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .doc(commentId);
+
+    batch.update(commentRef, {
+      'text': '[Removed by Admin]',
+      'isDeleted': true,
+      'deletedAt': FieldValue.serverTimestamp(),
+      'deletedBy': _auth.currentUser?.uid ?? 'admin',
+    });
+
+    final sightingRef = _firestore.collection('sightings').doc(sightingId);
+    batch.update(sightingRef, {'commentCount': FieldValue.increment(-1)});
+    await batch.commit();
+  }
+
+  /// Admin: delete a sighting/report
+  Future<void> adminDeleteSighting(String sightingId) async {
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'isDeleted': true,
+      'deletedAt': FieldValue.serverTimestamp(),
+      'deletedBy': _auth.currentUser?.uid ?? 'admin',
+    });
+  }
+
+  /// Admin: verify a clinic/shelter suggestion
+  Future<void> verifyClinicSuggestion(String docId) async {
+    await _firestore.collection('clinic_suggestions').doc(docId).update({
+      'status': 'verified',
+      'verifiedAt': FieldValue.serverTimestamp(),
+      'verifiedBy': _auth.currentUser?.uid ?? 'admin',
+    });
+  }
+
+  /// Admin: reject a clinic/shelter suggestion
+  Future<void> rejectClinicSuggestion(String docId, {String? reason}) async {
+    await _firestore.collection('clinic_suggestions').doc(docId).update({
+      'status': 'rejected',
+      'rejectedAt': FieldValue.serverTimestamp(),
+      'rejectedBy': _auth.currentUser?.uid ?? 'admin',
+      'rejectionReason': reason ?? '',
+    });
+  }
+
+  /// Admin: resolve/dismiss a flag
+  Future<void> resolveFlag(String flagDocId, {String action = 'dismissed'}) async {
+    await _firestore.collection('flags').doc(flagDocId).update({
+      'status': action,
+      'resolvedAt': FieldValue.serverTimestamp(),
+      'resolvedBy': _auth.currentUser?.uid ?? 'admin',
+    });
+  }
+
+  /// Admin: create an announcement (appears in all users' notifications)
+  Future<void> createAnnouncement({
+    required String title,
+    required String body,
+    String? category,
+  }) async {
+    final user = _auth.currentUser;
+    await _firestore.collection('announcements').add({
+      'title': title.trim(),
+      'body': body.trim(),
+      'category': category ?? 'general',
+      'createdBy': user?.uid ?? 'admin',
+      'createdByName': user?.displayName ?? 'PawWatch Admin',
+      'createdAt': FieldValue.serverTimestamp(),
+      'isActive': true,
+    });
+  }
+
+  /// Stream announcements (for all users' notification tab)
+  Stream<List<Map<String, dynamic>>> streamAnnouncements() {
+    return _firestore
+        .collection('announcements')
+        .where('isActive', isEqualTo: true)
+        .orderBy('createdAt', descending: true)
+        .limit(50)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              final data = d.data();
+              data['docId'] = d.id;
+              return data;
+            }).toList())
+        .handleError((_) => <Map<String, dynamic>>[]);
+  }
+
+  /// Admin: create a new badge definition
+  Future<void> createBadge({
+    required String title,
+    required String description,
+    required String requirements,
+    String? iconUrl,
+  }) async {
+    await _firestore.collection('badge_definitions').add({
+      'title': title.trim(),
+      'description': description.trim(),
+      'requirements': requirements.trim(),
+      'iconUrl': iconUrl,
+      'createdAt': FieldValue.serverTimestamp(),
+      'createdBy': _auth.currentUser?.uid ?? 'admin',
+      'isActive': true,
+    });
+  }
+
+  /// Stream all badge definitions
+  Stream<List<Map<String, dynamic>>> streamBadgeDefinitions() {
+    return _firestore
+        .collection('badge_definitions')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snap) => snap.docs.map((d) {
+              final data = d.data();
+              data['docId'] = d.id;
+              return data;
+            }).toList())
+        .handleError((_) => <Map<String, dynamic>>[]);
+  }
+
+  /// Stream all users for admin user management
+  Stream<List<UserProfile>> streamAllUsers() {
+    return _firestore
+        .collection('users')
+        .orderBy('displayName')
+        .snapshots()
+        .map((snap) => snap.docs
+            .map((d) => UserProfile.fromFirestore(d))
+            .toList())
+        .handleError((_) => <UserProfile>[]);
+  }
+
+  /// Get user count
+  Future<int> getUserCount() async {
+    final snap = await _firestore.collection('users').count().get();
+    return snap.count ?? 0;
+  }
+
+  /// Get sighting count
+  Future<int> getSightingCount() async {
+    final snap = await _firestore.collection('sightings').count().get();
+    return snap.count ?? 0;
+  }
+
+  /// Get flag count
+  Future<int> getFlagCount() async {
+    final snap = await _firestore.collection('flags').count().get();
+    return snap.count ?? 0;
   }
 }

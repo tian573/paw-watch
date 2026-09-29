@@ -21,7 +21,17 @@ import '../../utils/double_tap_guard.dart';
 class SightingDetailScreen extends StatefulWidget {
   final Sighting sighting;
   final String? initialAction;
-  const SightingDetailScreen({super.key, required this.sighting, this.initialAction});
+  final String? highlightCommentId;
+  final bool scrollToComments;
+
+  const SightingDetailScreen({
+    super.key,
+    required this.sighting,
+    this.initialAction,
+    this.highlightCommentId,
+    this.scrollToComments = false,
+  });
+
   @override
   State<SightingDetailScreen> createState() => _SightingDetailScreenState();
 }
@@ -40,6 +50,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   final _commentCtrl = TextEditingController();
   final _replyCtrl = TextEditingController();
   final _actionsScrollController = ScrollController();
+  final _mainScrollController = ScrollController();
+  final _commentsSectionKey = GlobalKey();
+  final _highlightCommentKey = GlobalKey();
   int _photoPage = 0;
   String? _replyingToId;
   String? _replyingToName;
@@ -111,6 +124,29 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         }
       });
     }
+    if (widget.scrollToComments || widget.highlightCommentId != null) {
+      _scheduleScrollToComment();
+    }
+  }
+
+  void _scheduleScrollToComment() {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      for (final delay in [300, 700, 1200, 1800]) {
+        await Future.delayed(Duration(milliseconds: delay));
+        if (!mounted) return;
+        final targetCtx =
+            _highlightCommentKey.currentContext ?? _commentsSectionKey.currentContext;
+        if (targetCtx != null && targetCtx.mounted) {
+          Scrollable.ensureVisible(
+            targetCtx,
+            duration: const Duration(milliseconds: 650),
+            curve: Curves.easeInOutCubic,
+            alignment: 0.12,
+          );
+          break;
+        }
+      }
+    });
   }
 
   @override
@@ -118,6 +154,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     _commentCtrl.dispose();
     _replyCtrl.dispose();
     _actionsScrollController.dispose();
+    _mainScrollController.dispose();
     super.dispose();
   }
 
@@ -587,7 +624,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 Navigator.pop(context);
                 final extra = customController.text.trim();
                 final fullReason = extra.isNotEmpty ? '${sel ?? ""}: $extra' : (sel ?? '');
-                await FirebaseService.instance.flagSighting(s.id, fullReason);
+                await FirebaseService.instance.flagSighting(
+                  s.id,
+                  fullReason,
+                  sightingTitle: s.displayTitle,
+                  photoUrl: s.photoUrls.isNotEmpty ? s.photoUrls.first : null,
+                  locationName: s.locationAddress,
+                );
                 if (mounted) _snack('Sighting reported. Thank you!');
               },
               child: Text('Submit',
@@ -739,6 +782,45 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       _showReportCommentDialog(c, s);
                     },
                   ),
+                ],
+                if (FirebaseService.instance.isCurrentUserAdmin) ...[
+                  const Divider(height: 1),
+                  ListTile(
+                    leading: const Icon(Icons.delete_forever_rounded, color: _urgent),
+                    title: Text('Admin: Delete Comment',
+                        style: GoogleFonts.nunito(
+                            fontWeight: FontWeight.w800, color: _urgent)),
+                    subtitle: Text('Force delete this comment immediately',
+                        style: GoogleFonts.nunito(
+                            fontSize: 12, color: _navy.withValues(alpha: 0.5))),
+                    onTap: () async {
+                      Navigator.pop(context);
+                      final commentId = c['id']?.toString() ?? c['docId']?.toString() ?? '';
+                      if (commentId.isNotEmpty) {
+                        await FirebaseService.instance.adminDeleteComment(
+                          sightingId: s.id,
+                          commentId: commentId,
+                        );
+                        _snack('Comment removed by Admin.');
+                      }
+                    },
+                  ),
+                  if ((c['authorUid'] ?? c['userId']) != null)
+                    ListTile(
+                      leading: const Icon(Icons.shield_rounded, color: Color(0xFF6C3FC5)),
+                      title: Text('Admin: Moderate User',
+                          style: GoogleFonts.nunito(
+                              fontWeight: FontWeight.w800, color: const Color(0xFF6C3FC5))),
+                      subtitle: Text('Ban or suspend comment author',
+                          style: GoogleFonts.nunito(
+                              fontSize: 12, color: _navy.withValues(alpha: 0.5))),
+                      onTap: () {
+                        Navigator.pop(context);
+                        final authorUid = (c['authorUid'] ?? c['userId']).toString();
+                        final authorName = (c['authorName'] ?? c['userName'] ?? 'User').toString();
+                        _adminModerateUser(authorUid, authorName);
+                      },
+                    ),
                 ],
                 const Divider(height: 1),
                 ListTile(
@@ -1739,10 +1821,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ? '${selected ?? ""}: $extra'
                     : (selected ?? '');
 
+                final commentText = c['text']?.toString() ?? c['customNote']?.toString() ?? '';
                 await FirebaseService.instance.flagComment(
                   sightingId: sightingId,
                   commentId: commentId,
                   reason: fullReason,
+                  commentText: commentText,
+                  authorName: authorName,
+                  sightingTitle: s.displayTitle,
                 );
 
                 if (!canBlock) {
@@ -6851,6 +6937,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           body: Stack(
             children: [
               CustomScrollView(
+                controller: _mainScrollController,
                 physics: const BouncingScrollPhysics(),
                 slivers: [
                   SliverToBoxAdapter(child: _buildCarousel(s)),
@@ -15078,63 +15165,66 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   Widget _buildCommunity(Sighting s) =>
-      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(
-          'Community Updates',
-          style: GoogleFonts.nunito(
-            fontSize: 17,
-            fontWeight: FontWeight.w900,
-            color: _navy,
+      Container(
+        key: _commentsSectionKey,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(
+            'Community Updates',
+            style: GoogleFonts.nunito(
+              fontSize: 17,
+              fontWeight: FontWeight.w900,
+              color: _navy,
+            ),
           ),
-        ),
-        const SizedBox(height: 12),
-        StreamBuilder<List<Map<String, dynamic>>>(
-          stream: FirebaseService.instance.streamCommunityUpdates(s.id),
-          builder: (context, snap) {
-            final updates = snap.data ?? [];
+          const SizedBox(height: 12),
+          StreamBuilder<List<Map<String, dynamic>>>(
+            stream: FirebaseService.instance.streamCommunityUpdates(s.id),
+            builder: (context, snap) {
+              final updates = snap.data ?? [];
 
-            List<Map<String, dynamic>> getReplies(String parentId) {
-              return updates
-                  .where((r) =>
-                      r['parentId'] == parentId && r['isDeleted'] != true)
-                  .toList();
-            }
+              List<Map<String, dynamic>> getReplies(String parentId) {
+                return updates
+                    .where((r) =>
+                        r['parentId'] == parentId && r['isDeleted'] != true)
+                    .toList();
+              }
 
-            final top = updates.where((u) {
-              if ((u['parentId'] ?? '') != '') return false;
-              final isDeleted = u['isDeleted'] == true;
-              final childReplies = getReplies(u['id'] ?? '');
-              if (isDeleted && childReplies.isEmpty) return false;
-              return true;
-            }).toList();
+              final top = updates.where((u) {
+                if ((u['parentId'] ?? '') != '') return false;
+                final isDeleted = u['isDeleted'] == true;
+                final childReplies = getReplies(u['id'] ?? '');
+                if (isDeleted && childReplies.isEmpty) return false;
+                return true;
+              }).toList();
 
-            if (top.isEmpty) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 20),
-                child: Center(
-                    child: Column(children: [
-                  Icon(Icons.chat_bubble_outline,
-                      size: 36, color: _lavender.withValues(alpha: 0.3)),
-                  const SizedBox(height: 8),
-                  Text('No updates yet. Be the first to help!',
-                      style: GoogleFonts.nunito(
-                          fontSize: 13,
-                          color: _navy.withValues(alpha: 0.45),
-                          fontWeight: FontWeight.w600)),
-                ])),
-              );
-            }
+              if (top.isEmpty) {
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 20),
+                  child: Center(
+                      child: Column(children: [
+                    Icon(Icons.chat_bubble_outline,
+                        size: 36, color: _lavender.withValues(alpha: 0.3)),
+                    const SizedBox(height: 8),
+                    Text('No updates yet. Be the first to help!',
+                        style: GoogleFonts.nunito(
+                            fontSize: 13,
+                            color: _navy.withValues(alpha: 0.45),
+                            fontWeight: FontWeight.w600)),
+                  ])),
+                );
+              }
 
-            return Column(
-                children: top.map((u) {
-              final replies = getReplies(u['id'] ?? '');
-              return _updateTile(u, replies, s);
-            }).toList());
-          },
-        ),
-        const SizedBox(height: 14),
-        _buildCommentInput(s.id),
-      ]);
+              return Column(
+                  children: top.map((u) {
+                final replies = getReplies(u['id'] ?? '');
+                return _updateTile(u, replies, s);
+              }).toList());
+            },
+          ),
+          const SizedBox(height: 14),
+          _buildCommentInput(s.id),
+        ]),
+      );
 
   Widget _updateTile(Map<String, dynamic> u,
       List<Map<String, dynamic>> replies, Sighting s) {
@@ -15174,9 +15264,49 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                     ? _aColor(action ?? '')
                                     : _avColor(isAnon ? 'Anon' : name);
 
+    final isTargetComment = widget.highlightCommentId != null && u['id'] == widget.highlightCommentId;
+
     return Container(
+      key: isTargetComment ? _highlightCommentKey : null,
       margin: const EdgeInsets.only(bottom: 14),
-      child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      padding: isTargetComment ? const EdgeInsets.all(10) : EdgeInsets.zero,
+      decoration: isTargetComment
+          ? BoxDecoration(
+              color: const Color(0xFFFFA000).withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFFFFA000), width: 1.8),
+            )
+          : null,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (isTargetComment) ...[
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFFA000).withValues(alpha: 0.18),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.flag_rounded, size: 13, color: Color(0xFFFFA000)),
+                  const SizedBox(width: 4),
+                  Text(
+                    'FLAGGED COMMENT UNDER REVIEW',
+                    style: GoogleFonts.nunito(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.5,
+                      color: const Color(0xFFB78103),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         GestureDetector(
           onTap: () {
             final authorUid = u['authorId']?.toString() ?? '';
@@ -15844,107 +15974,131 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         : (r['authorName'] ?? 'Anonymous');
                     final rDeleted = r['isDeleted'] == true;
                     final rEdited = r['isEdited'] == true;
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: Row(
-                          crossAxisAlignment:
-                              CrossAxisAlignment.start,
-                          children: [
+                    final isReplyTarget = widget.highlightCommentId != null &&
+                        r['id'] == widget.highlightCommentId;
+                    return Container(
+                      key: isReplyTarget ? _highlightCommentKey : null,
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: isReplyTarget ? const EdgeInsets.all(8) : EdgeInsets.zero,
+                      decoration: isReplyTarget
+                          ? BoxDecoration(
+                              color: const Color(0xFFFFA000).withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFFFFA000), width: 1.5),
+                            )
+                          : null,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (isReplyTarget) ...[
                             Container(
-                                width: 2,
-                                height: 28,
-                                margin: const EdgeInsets.only(
-                                    right: 10),
-                                color: _lavender.withValues(
-                                    alpha: 0.3)),
-                            Container(
-                                width: 26,
-                                height: 26,
-                                decoration: BoxDecoration(
-                                    color: _avColor(
-                                        rAnon ? 'Anon' : rName),
-                                    shape: BoxShape.circle),
-                                child: Center(
-                                    child: Text(
-                                        _ini(rAnon ? 'AN' : rName),
-                                        style: GoogleFonts.nunito(
-                                            fontSize: 9,
-                                            fontWeight:
-                                                FontWeight.w800,
-                                            color: Colors.white)))),
-                            const SizedBox(width: 8),
-                            Expanded(
-                                child: Column(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                  Row(children: [
-                                    Text(rName,
-                                        style: GoogleFonts.nunito(
-                                            fontSize: 12,
-                                            fontWeight:
-                                                FontWeight.w800,
-                                            color: _navy)),
-                                    const Spacer(),
-                                    Text(_fmtTime(r['createdAt']),
-                                        style: GoogleFonts.nunito(
-                                            fontSize: 10,
-                                            color: _navy.withValues(
-                                                alpha: 0.4),
-                                            fontWeight:
-                                                FontWeight.w600)),
-                                    if (rEdited && !rDeleted)
-                                      Padding(
-                                        padding: const EdgeInsets.only(
-                                            left: 4),
-                                        child: Text('(edited)',
-                                            style: GoogleFonts.nunito(
-                                                fontSize: 10,
-                                                fontStyle:
-                                                    FontStyle.italic,
-                                                color: _navy.withValues(
-                                                    alpha: 0.35))),
-                                      ),
-                                    if (!rDeleted)
-                                      GestureDetector(
-                                        onTap: () =>
-                                            _showCommentMenu(r, s),
-                                        child: Padding(
-                                          padding:
-                                              const EdgeInsets.only(
-                                                  left: 6),
-                                          child: Icon(Icons.more_horiz,
-                                              size: 14,
-                                              color: _navy.withValues(
-                                                  alpha: 0.4)),
+                              margin: const EdgeInsets.only(bottom: 6),
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFA000).withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.flag_rounded, size: 11, color: Color(0xFFFFA000)),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    'FLAGGED REPLY',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w900,
+                                      color: const Color(0xFFB78103),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Container(
+                                  width: 2,
+                                  height: 28,
+                                  margin: const EdgeInsets.only(right: 10),
+                                  color: _lavender.withValues(alpha: 0.3)),
+                              Container(
+                                  width: 26,
+                                  height: 26,
+                                  decoration: BoxDecoration(
+                                      color: _avColor(rAnon ? 'Anon' : rName),
+                                      shape: BoxShape.circle),
+                                  child: Center(
+                                      child: Text(
+                                          _ini(rAnon ? 'AN' : rName),
+                                          style: GoogleFonts.nunito(
+                                              fontSize: 9,
+                                              fontWeight: FontWeight.w800,
+                                              color: Colors.white)))),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                  child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                    Row(children: [
+                                      Text(rName,
+                                          style: GoogleFonts.nunito(
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.w800,
+                                              color: _navy)),
+                                      const Spacer(),
+                                      Text(_fmtTime(r['createdAt']),
+                                          style: GoogleFonts.nunito(
+                                              fontSize: 10,
+                                              color: _navy.withValues(alpha: 0.4),
+                                              fontWeight: FontWeight.w600)),
+                                      if (rEdited && !rDeleted)
+                                        Padding(
+                                          padding: const EdgeInsets.only(left: 4),
+                                          child: Text('(edited)',
+                                              style: GoogleFonts.nunito(
+                                                  fontSize: 10,
+                                                  fontStyle: FontStyle.italic,
+                                                  color: _navy.withValues(alpha: 0.35))),
                                         ),
-                                      ),
-                                  ]),
-                                  const SizedBox(height: 2),
-                                  if (rDeleted)
-                                    Text('(comment deleted)',
-                                        style: GoogleFonts.nunito(
-                                            fontSize: 12,
-                                            fontStyle: FontStyle.italic,
-                                            color: _navy.withValues(
-                                                alpha: 0.4),
-                                            fontWeight:
-                                                FontWeight.w500))
-                                  else
-                                    Text(r['text'] ?? '',
-                                        style: GoogleFonts.nunito(
-                                            fontSize: 12,
-                                            color: _navy.withValues(
-                                                alpha: 0.7),
-                                            fontWeight:
-                                                FontWeight.w600)),
-                                ])),
-                          ]),
+                                      if (!rDeleted)
+                                        GestureDetector(
+                                          onTap: () => _showCommentMenu(r, s),
+                                          child: Padding(
+                                            padding: const EdgeInsets.only(left: 6),
+                                            child: Icon(Icons.more_horiz,
+                                                size: 14,
+                                                color: _navy.withValues(alpha: 0.4)),
+                                          ),
+                                        ),
+                                    ]),
+                                    const SizedBox(height: 2),
+                                    if (rDeleted)
+                                      Text('(comment deleted)',
+                                          style: GoogleFonts.nunito(
+                                              fontSize: 12,
+                                              fontStyle: FontStyle.italic,
+                                              color: _navy.withValues(alpha: 0.4),
+                                              fontWeight: FontWeight.w500))
+                                    else
+                                      Text(r['text'] ?? '',
+                                          style: GoogleFonts.nunito(
+                                              fontSize: 12,
+                                              color: _navy.withValues(alpha: 0.7),
+                                              fontWeight: FontWeight.w600)),
+                                  ])),
+                            ],
+                          ),
+                        ],
+                      ),
                     );
                   }).toList()),
                 ),
             ])),
-      ]),
+          ]),
+        ],
+      ),
     );
   }
 
@@ -16128,6 +16282,36 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 onTap: () => _showFlag(s),
               ),
             ],
+            if (FirebaseService.instance.isCurrentUserAdmin) ...[
+              const Divider(height: 1),
+              ListTile(
+                leading: const Icon(Icons.delete_forever_rounded, color: _urgent),
+                title: Text('Admin: Delete Report',
+                    style: GoogleFonts.nunito(
+                        fontWeight: FontWeight.w800, color: _urgent)),
+                subtitle: Text('Force delete this report as Administrator',
+                    style: GoogleFonts.nunito(
+                        fontSize: 12, color: _navy.withValues(alpha: 0.5))),
+                onTap: () {
+                  Navigator.pop(context);
+                  _adminConfirmDeleteReport(s);
+                },
+              ),
+              if (s.reporterId.isNotEmpty)
+                ListTile(
+                  leading: const Icon(Icons.shield_rounded, color: Color(0xFF6C3FC5)),
+                  title: Text('Admin: Moderate Reporter',
+                      style: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w800, color: const Color(0xFF6C3FC5))),
+                  subtitle: Text('Ban or suspend reporter (${s.reporterName.isNotEmpty ? s.reporterName : "User"})',
+                      style: GoogleFonts.nunito(
+                          fontSize: 12, color: _navy.withValues(alpha: 0.5))),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _adminModerateUser(s.reporterId, s.reporterName);
+                  },
+                ),
+            ],
             const Divider(height: 1),
             ListTile(
               leading:
@@ -16139,6 +16323,136 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               onTap: () => Navigator.pop(context),
             ),
           ]),
+        ),
+      ),
+    );
+  }
+
+  void _adminConfirmDeleteReport(Sighting s) {
+    showDialog(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Color(0xFFE53935)),
+            const SizedBox(width: 8),
+            Text('Admin: Delete Report',
+                style: GoogleFonts.nunito(fontWeight: FontWeight.w900, color: _navy)),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to delete "${s.displayTitle}"? As an administrator, this will override all protections and permanently remove the report.',
+          style: GoogleFonts.nunito(color: _navy.withValues(alpha: 0.7)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx),
+            child: Text('Cancel', style: GoogleFonts.nunito(color: _navy, fontWeight: FontWeight.w700)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFE53935),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              Navigator.pop(dCtx);
+              try {
+                await FirebaseService.instance.adminDeleteSighting(s.id);
+                if (mounted) {
+                  Navigator.pop(context, true);
+                  _snack('Report deleted by Admin.');
+                }
+              } catch (e) {
+                if (mounted) _snack('Failed to delete: $e');
+              }
+            },
+            child: Text('Delete Report', style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _adminModerateUser(String targetUid, String targetName) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (mCtx) => Container(
+        padding: const EdgeInsets.all(20),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: _navy.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                const Icon(Icons.shield_rounded, color: Color(0xFF6C3FC5), size: 24),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Moderate User: $targetName',
+                    style: GoogleFonts.nunito(fontSize: 18, fontWeight: FontWeight.w900, color: _navy),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.pause_circle_rounded, color: Color(0xFFFFA000)),
+              title: Text('Suspend for 7 Days',
+                  style: GoogleFonts.nunito(fontWeight: FontWeight.w800, color: _navy)),
+              subtitle: Text('Temporarily prevent user actions',
+                  style: GoogleFonts.nunito(fontSize: 12, color: _navy.withValues(alpha: 0.5))),
+              onTap: () async {
+                Navigator.pop(mCtx);
+                await FirebaseService.instance.suspendUser(targetUid, days: 7);
+                _snack('$targetName suspended for 7 days.');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.block_rounded, color: Color(0xFFE53935)),
+              title: Text('Ban User Permanently',
+                  style: GoogleFonts.nunito(fontWeight: FontWeight.w800, color: const Color(0xFFE53935))),
+              subtitle: Text('Completely block this user from PawWatch',
+                  style: GoogleFonts.nunito(fontSize: 12, color: _navy.withValues(alpha: 0.5))),
+              onTap: () async {
+                Navigator.pop(mCtx);
+                await FirebaseService.instance.banUser(targetUid);
+                _snack('$targetName has been banned.');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.lock_open_rounded, color: Color(0xFF43A047)),
+              title: Text('Unban / Unsuspend User',
+                  style: GoogleFonts.nunito(fontWeight: FontWeight.w800, color: const Color(0xFF43A047))),
+              subtitle: Text('Restore account privileges',
+                  style: GoogleFonts.nunito(fontSize: 12, color: _navy.withValues(alpha: 0.5))),
+              onTap: () async {
+                Navigator.pop(mCtx);
+                await FirebaseService.instance.unbanUser(targetUid);
+                await FirebaseService.instance.unsuspendUser(targetUid);
+                _snack('$targetName restored to active status.');
+              },
+            ),
+          ],
         ),
       ),
     );

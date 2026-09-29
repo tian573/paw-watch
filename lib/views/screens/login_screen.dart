@@ -68,7 +68,12 @@ class _LoginScreenState extends State<LoginScreen>
         password: _passwordCtrl.text,
       );
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/home');
+        final email = FirebaseAuth.instance.currentUser?.email;
+        if (email == 'admin@example.com') {
+          Navigator.pushReplacementNamed(context, '/admin');
+        } else {
+          Navigator.pushReplacementNamed(context, '/home');
+        }
       }
     } on FirebaseAuthException catch (e) {
       _showSnackBar(_authErrorMessage(e.code));
@@ -105,7 +110,12 @@ class _LoginScreenState extends State<LoginScreen>
       }
 
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/home');
+        final email = FirebaseAuth.instance.currentUser?.email;
+        if (email == 'admin@example.com') {
+          Navigator.pushReplacementNamed(context, '/admin');
+        } else {
+          Navigator.pushReplacementNamed(context, '/home');
+        }
       }
     } catch (e, stack) {
       debugPrint('Google Login Error: $e');

@@ -522,6 +522,8 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
           messageId: msg.id,
           reason: fullReason,
           photoUrl: msg.photoUrl,
+          messageText: msg.text.isNotEmpty ? msg.text : null,
+          senderName: msg.senderName,
         );
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

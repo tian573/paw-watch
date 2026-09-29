@@ -55,6 +55,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
   String _resolvedPlacement = 'adopted'; // 'adopted' or 'shelter'
   String? _selectedShelterName;
   String? _selectedShelterAddress;
+  bool _isRegisterTabActive = false;
 
   @override
   void initState() {
@@ -1344,6 +1345,11 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
                   _selectedShelterAddress = null;
                 });
               },
+              onRegisterTabActiveChanged: (isActive) {
+                setState(() {
+                  _isRegisterTabActive = isActive;
+                });
+              },
             ),
             if (_hasAttemptedSubmit && _selectedShelterName == null) ...[
               const SizedBox(height: 6),
@@ -2001,14 +2007,26 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
               return;
             }
             if (_reportType == 'resolved' &&
-                _resolvedPlacement == 'shelter' &&
-                _selectedShelterName == null) {
-              setState(() {
-                _hasAttemptedSubmit = true;
-                _formValidationError = 'Please choose a nearby shelter or register a new one.';
-              });
-              _showSnackBar('⚠️ Please choose a nearby shelter or register a new one.');
-              return;
+                _resolvedPlacement == 'shelter') {
+              if (_isRegisterTabActive && _selectedShelterName == null) {
+                setState(() {
+                  _hasAttemptedSubmit = true;
+                  _formValidationError =
+                      'Please tap "Register Shelter" to submit your suggested shelter first, or choose an available shelter.';
+                });
+                _showSnackBar(
+                    '⚠️ Please tap "Register Shelter" to submit your suggested shelter first.');
+                return;
+              }
+              if (_selectedShelterName == null) {
+                setState(() {
+                  _hasAttemptedSubmit = true;
+                  _formValidationError =
+                      'Please choose a nearby shelter or register a new one.';
+                });
+                _showSnackBar('⚠️ Please choose a nearby shelter or register a new one.');
+                return;
+              }
             }
             if (titleErr != null) {
               setState(() {
@@ -2166,15 +2184,28 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
       return;
     }
     if (_reportType == 'resolved' &&
-        _resolvedPlacement == 'shelter' &&
-        _selectedShelterName == null) {
-      DoubleTapGuard.reset('submit_report');
-      setState(() {
-        _hasAttemptedSubmit = true;
-        _formValidationError = 'Please choose a nearby shelter or register a new one.';
-      });
-      _showSnackBar('⚠️ Please choose a nearby shelter or register a new one.');
-      return;
+        _resolvedPlacement == 'shelter') {
+      if (_isRegisterTabActive && _selectedShelterName == null) {
+        DoubleTapGuard.reset('submit_report');
+        setState(() {
+          _hasAttemptedSubmit = true;
+          _formValidationError =
+              'Please tap "Register Shelter" to submit your suggested shelter first, or choose an available shelter.';
+        });
+        _showSnackBar(
+            '⚠️ Please tap "Register Shelter" to submit your suggested shelter first.');
+        return;
+      }
+      if (_selectedShelterName == null) {
+        DoubleTapGuard.reset('submit_report');
+        setState(() {
+          _hasAttemptedSubmit = true;
+          _formValidationError =
+              'Please choose a nearby shelter or register a new one.';
+        });
+        _showSnackBar('⚠️ Please choose a nearby shelter or register a new one.');
+        return;
+      }
     }
     final titleErr = TextModerationService.validateReportTitle(_titleController.text);
     if (titleErr != null) {

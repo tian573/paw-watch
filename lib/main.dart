@@ -7,6 +7,7 @@ import 'views/screens/landing_screen.dart';
 import 'views/screens/register_screen.dart';
 import 'views/screens/home_feed.dart';
 import 'views/screens/login_screen.dart';
+import 'views/screens/admin_home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -39,6 +40,7 @@ class MyApp extends StatelessWidget {
         '/register': (context) => const RegisterScreen(),
         '/home': (context) => const HomeScreen(),
         '/login': (context) => const LoginScreen(),
+        '/admin': (context) => const AdminHomeScreen(),
       },
     );
   }
@@ -64,10 +66,15 @@ class _AuthGate extends StatelessWidget {
           );
         }
         if (snapshot.hasData && snapshot.data != null) {
+          final user = snapshot.data!;
+          // Route admin to admin panel
+          if (user.email == 'admin@example.com') {
+            return const AdminHomeScreen();
+          }
           return const HomeScreen();
         }
         return const LandingScreen();
       },
     );
   }
-}
+}

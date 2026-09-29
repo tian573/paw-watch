@@ -27,6 +27,10 @@ class UserProfile {
   final DateTime joinedAt;
   final List<String> badges;
   final List<Map<String, dynamic>> reviews;
+  final String role; // 'user' or 'admin'
+  final bool isBanned;
+  final bool isSuspended;
+  final String? suspendReason;
 
   const UserProfile({
     required this.uid,
@@ -48,7 +52,13 @@ class UserProfile {
     required this.joinedAt,
     this.badges = const ['Newcomer PawWatcher 🐾'],
     this.reviews = const [],
+    this.role = 'user',
+    this.isBanned = false,
+    this.isSuspended = false,
+    this.suspendReason,
   });
+
+  bool get isAdmin => role == 'admin' || email == 'admin@example.com';
 
   String get initials {
     final name = displayName.trim();
@@ -141,6 +151,10 @@ class UserProfile {
       'joinedAt': Timestamp.fromDate(joinedAt),
       'badges': badges,
       'reviews': reviews,
+      'role': role,
+      'isBanned': isBanned,
+      'isSuspended': isSuspended,
+      'suspendReason': suspendReason,
     };
   }
 
@@ -234,6 +248,10 @@ class UserProfile {
       joinedAt: parsedJoined,
       badges: badgeList,
       reviews: reviewList,
+      role: data['role']?.toString() ?? 'user',
+      isBanned: data['isBanned'] == true,
+      isSuspended: data['isSuspended'] == true,
+      suspendReason: data['suspendReason']?.toString(),
     );
   }
 }

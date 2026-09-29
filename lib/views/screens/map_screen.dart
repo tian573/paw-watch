@@ -20,12 +20,14 @@ class MapScreen extends StatefulWidget {
   final VoidCallback? onNotificationTap;
   final VoidCallback? onProfileTap;
   final Sighting? initialFocusedSighting;
+  final bool isAdmin;
 
   const MapScreen({
     super.key,
     this.onNotificationTap,
     this.onProfileTap,
     this.initialFocusedSighting,
+    this.isAdmin = false,
   });
 
   @override
@@ -1588,6 +1590,31 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
               ),
             ),
           ),
+          if (widget.isAdmin || FirebaseService.instance.isCurrentUserAdmin) ...[
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              height: 38,
+              child: OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: const Color(0xFFE53935),
+                  side: const BorderSide(color: Color(0xFFE53935), width: 1.2),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                ),
+                onPressed: () => _confirmAdminDeleteSighting(s),
+                icon: const Icon(Icons.delete_forever_rounded, size: 16),
+                label: Text(
+                  'Admin: Delete Report',
+                  style: GoogleFonts.nunito(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -1807,6 +1834,100 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                 ),
               ),
             ],
+          ),
+          if ((widget.isAdmin || FirebaseService.instance.isCurrentUserAdmin) && !sc.isVerified) ...[
+            const SizedBox(height: 10),
+            SizedBox(
+              width: double.infinity,
+              height: 38,
+              child: ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF43A047),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  elevation: 0,
+                ),
+                onPressed: () async {
+                  await FirebaseService.instance.verifyClinicSuggestion(sc.id);
+                  setState(() {
+                    _selectedShelter = null;
+                  });
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('✅ "${sc.name}" verified!'),
+                        backgroundColor: const Color(0xFF43A047),
+                      ),
+                    );
+                  }
+                },
+                icon: const Icon(Icons.verified_rounded, size: 16),
+                label: Text(
+                  'Admin: Verify Clinic / Shelter',
+                  style: GoogleFonts.nunito(fontWeight: FontWeight.w800, fontSize: 13),
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _confirmAdminDeleteSighting(Sighting s) {
+    showDialog(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Color(0xFFE53935)),
+            const SizedBox(width: 8),
+            Text('Admin: Delete Report',
+                style: GoogleFonts.nunito(fontWeight: FontWeight.w900, color: _navy)),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to delete "${s.displayTitle}"? As an administrator, this will remove the report from the app and the map.',
+          style: GoogleFonts.nunito(color: _navy.withValues(alpha: 0.7)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx),
+            child: Text('Cancel', style: GoogleFonts.nunito(color: _navy, fontWeight: FontWeight.w700)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFE53935),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              Navigator.pop(dCtx);
+              try {
+                await FirebaseService.instance.adminDeleteSighting(s.id);
+                setState(() {
+                  _selectedSighting = null;
+                });
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('Report "${s.displayTitle}" deleted by Admin.'),
+                      backgroundColor: const Color(0xFF1B2A4A),
+                    ),
+                  );
+                }
+              } catch (e) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('Failed to delete: $e')),
+                  );
+                }
+              }
+            },
+            child: Text('Delete Report', style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
           ),
         ],
       ),

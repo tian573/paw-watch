@@ -70,6 +70,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
         );
       }
     }
+    if (FirebaseService.instance.isCurrentUserAdmin) {
+      return ClipOval(
+        child: Image.asset(
+          'assets/images/admin.png',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          errorBuilder: (_, _, _) => _fallbackAvatar(initials, tierColor, size),
+        ),
+      );
+    }
     return _fallbackAvatar(initials, tierColor, size);
   }
 

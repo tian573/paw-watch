@@ -123,6 +123,8 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
 
       for (final doc in snap.docs) {
         final d = doc.data();
+        // Shelters entered must be verified by admin before appearing in available list
+        if (d['status'] != 'verified') continue;
         final id = doc.id;
         final name = d['name']?.toString() ?? '';
         if (name.isEmpty) continue;
@@ -325,14 +327,15 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            backgroundColor: const Color(0xFF00897B),
+            backgroundColor: const Color(0xFFF57C00),
+            duration: const Duration(seconds: 5),
             content: Row(
               children: [
-                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                const Icon(Icons.schedule_rounded, color: Colors.white, size: 20),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${newShelter.name} registered and selected for transfer! 🏛️🐾',
+                    '${newShelter.name} submitted & selected! Pending admin verification 🔍',
                     style: GoogleFonts.nunito(fontWeight: FontWeight.w700),
                   ),
                 ),
@@ -811,7 +814,13 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
                 ElevatedButton.icon(
                   onPressed: () {
                     _regNameCtrl.text = _searchQuery.trim();
-                    setState(() => _activeTab = 1);
+                    setState(() {
+                      _activeTab = 1;
+                      _selectedShelter = null;
+                      _isPickerExpanded = true;
+                    });
+                    widget.onClearSelection?.call();
+                    widget.onRegisterTabActiveChanged?.call(true);
                   },
                   icon: const Icon(Icons.add_business_rounded, size: 15),
                   label: Text('Register "$_searchQuery" as New Shelter'),
