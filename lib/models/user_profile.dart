@@ -121,9 +121,13 @@ class UserProfile {
 
   bool get isEligibleForFoster => trustTier == TrustTier.trustedFoster;
 
-  int get xpForNextLevel => level * 200;
+  static const int maxLevel = 100;
+  bool get isMaxLevel => level >= maxLevel;
+
+  int get xpForNextLevel => isMaxLevel ? maxLevel * 200 : level * 200;
   int get currentLevelBaseXp => (level - 1) * 200;
   double get levelProgress {
+    if (isMaxLevel) return 1.0;
     final next = xpForNextLevel;
     final base = currentLevelBaseXp;
     if (next <= base) return 1.0;
@@ -199,7 +203,8 @@ class UserProfile {
     final int rawTotalXp = (data['totalXp'] is num) ? (data['totalXp'] as num).toInt() : 0;
     final int rawXp = (data['xp'] is num) ? (data['xp'] as num).toInt() : 0;
     final int totalXp = rawTotalXp > rawXp ? rawTotalXp : rawXp;
-    final int calculatedLevel = (totalXp / 200).floor() + 1;
+    final int calculatedLevel =
+        ((totalXp / 200).floor() + 1).clamp(1, maxLevel);
 
     final int succRescues = (data['successfulRescues'] is num)
         ? (data['successfulRescues'] as num).toInt()

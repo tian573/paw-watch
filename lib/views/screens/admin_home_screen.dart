@@ -737,7 +737,23 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                   );
                   return;
                 }
-                Navigator.pop(ctx);
+                final isNameTaken =
+                    await FirebaseService.instance.isDisplayNameTaken(name);
+                if (isNameTaken) {
+                  messenger.showSnackBar(
+                    SnackBar(content: Text('The display name "$name" is already taken')),
+                  );
+                  return;
+                }
+                final isEmailTaken =
+                    await FirebaseService.instance.isEmailRegistered(email);
+                if (isEmailTaken) {
+                  messenger.showSnackBar(
+                    SnackBar(content: Text('The email "$email" is already registered')),
+                  );
+                  return;
+                }
+                if (ctx.mounted) Navigator.pop(ctx);
                 await FirebaseService.instance.adminAddUser(
                   displayName: name,
                   email: email,
@@ -880,7 +896,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                'Lv.${u.level}',
+                u.isMaxLevel ? 'Lv.MAX' : 'Lv.${u.level}',
                 style: GoogleFonts.nunito(
                   fontSize: 9,
                   fontWeight: FontWeight.w800,
@@ -1001,7 +1017,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _buildUserStat('Level', '${u.level}'),
+                    _buildUserStat('Level', u.isMaxLevel ? '${u.level} (MAX)' : '${u.level}'),
                     _buildUserStat('XP', '${u.totalXp}'),
                     _buildUserStat('Rescues', '${u.totalRescues}'),
                     _buildUserStat('Trust', u.trustScore.toStringAsFixed(1)),

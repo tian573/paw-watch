@@ -35,6 +35,8 @@ class _RegisterScreenState extends State<RegisterScreen>
   bool _hasViewedTerms = false;
   bool _isLoading = false;
   bool _isGoogleLoading = false;
+  String? _displayNameError;
+  String? _emailError;
 
   late AnimationController _animController;
   late Animation<double> _fadeAnimation;
@@ -43,6 +45,16 @@ class _RegisterScreenState extends State<RegisterScreen>
   @override
   void initState() {
     super.initState();
+    _displayNameCtrl.addListener(() {
+      if (_displayNameError != null) {
+        setState(() => _displayNameError = null);
+      }
+    });
+    _emailCtrl.addListener(() {
+      if (_emailError != null) {
+        setState(() => _emailError = null);
+      }
+    });
     _animController = AnimationController(
       duration: const Duration(milliseconds: 700),
       vsync: this,
@@ -75,28 +87,66 @@ class _RegisterScreenState extends State<RegisterScreen>
       return;
     }
     setState(() => _isLoading = true);
+
+    final displayName = _displayNameCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
+
+    // Check if display name is already taken
+    final isNameTaken =
+        await FirebaseService.instance.isDisplayNameTaken(displayName);
+    if (isNameTaken) {
+      if (mounted) {
+        setState(() {
+          _displayNameError = 'This display name is already taken';
+          _isLoading = false;
+        });
+        _formKey.currentState?.validate();
+        _showSnackBar('The display name "$displayName" is already taken. Please choose another.');
+      }
+      return;
+    }
+
+    // Check if email is already registered
+    final isEmailTaken =
+        await FirebaseService.instance.isEmailRegistered(email);
+    if (isEmailTaken) {
+      if (mounted) {
+        setState(() {
+          _emailError = 'This email address is already registered';
+          _isLoading = false;
+        });
+        _formKey.currentState?.validate();
+        _showSnackBar('This email address is already registered. Please log in instead.');
+      }
+      return;
+    }
+
     try {
       final credential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(
-        email: _emailCtrl.text.trim(),
+        email: email,
         password: _passwordCtrl.text,
       );
-      await credential.user?.updateDisplayName(_displayNameCtrl.text.trim());
+      await credential.user?.updateDisplayName(displayName);
       if (credential.user != null) {
         await FirebaseService.instance.ensureUserDoc(
           credential.user!,
-          displayName: _displayNameCtrl.text.trim(),
+          displayName: displayName,
         );
       }
       if (mounted) {
-        final email = FirebaseAuth.instance.currentUser?.email;
-        if (email == 'admin@example.com') {
+        final curEmail = FirebaseAuth.instance.currentUser?.email;
+        if (curEmail == 'admin@example.com') {
           Navigator.pushReplacementNamed(context, '/admin');
         } else {
           Navigator.pushReplacementNamed(context, '/home');
         }
       }
     } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        setState(() => _emailError = 'This email address is already registered');
+        _formKey.currentState?.validate();
+      }
       _showSnackBar(_authErrorMessage(e.code));
     } catch (_) {
       _showSnackBar('Something went wrong. Please try again.');
@@ -367,7 +417,12 @@ class _RegisterScreenState extends State<RegisterScreen>
       hint: 'e.g. Sarah Jones',
       icon: Icons.person_outline,
       helperText: 'Letters only (at least 3 characters). No numbers or symbols.',
-      validator: TextModerationService.validateDisplayName,
+      validator: (v) {
+        final modErr = TextModerationService.validateDisplayName(v);
+        if (modErr != null) return modErr;
+        if (_displayNameError != null) return _displayNameError;
+        return null;
+      },
     );
   }
 
@@ -383,6 +438,7 @@ class _RegisterScreenState extends State<RegisterScreen>
         if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,}$').hasMatch(v.trim())) {
           return 'Enter a valid email address';
         }
+        if (_emailError != null) return _emailError;
         return null;
       },
     );

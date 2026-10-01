@@ -40,6 +40,8 @@ class _HomeScreenState extends State<HomeScreen>
   String _activeFilter = 'All';
   bool _showNewUserTip = false;
   final Set<String> _dismissedDispatchIds = {};
+  final Set<String> _dismissedFosterCareIds = {};
+  final Set<String> _dismissedPendingVetIds = {};
   final Set<String> _dismissedAnnouncementIds = {};
   final Set<String> _readNotificationIds = {};
   bool _hasUnreadNotificationsState = false;
@@ -61,6 +63,7 @@ class _HomeScreenState extends State<HomeScreen>
       }
     });
     _sightingsStream = FirebaseService.instance.streamSightings();
+    FirebaseService.instance.autoResolveVerifiedShelterSightings();
     _checkFirstTimeUser();
     _loadNotificationPreferences();
     _announcementsSub = FirebaseService.instance.streamAnnouncements().listen((announcements) {
@@ -84,13 +87,47 @@ class _HomeScreenState extends State<HomeScreen>
       final dismissedDispatches = prefs.getStringList('dismissed_dispatch_ids_$uid') ?? [];
       final dismissedAnnouncements = prefs.getStringList('dismissed_announcement_ids_$uid') ?? [];
       final readNotifications = prefs.getStringList('read_notification_ids_$uid') ?? [];
+      final dismissedFosterCare = prefs.getStringList('dismissed_foster_care_ids_$uid') ?? [];
+      final dismissedPendingVet = prefs.getStringList('dismissed_pending_vet_ids_$uid') ?? [];
       if (mounted) {
         setState(() {
           _dismissedDispatchIds.addAll(dismissedDispatches);
           _dismissedAnnouncementIds.addAll(dismissedAnnouncements);
           _readNotificationIds.addAll(readNotifications);
+          _dismissedFosterCareIds.addAll(dismissedFosterCare);
+          _dismissedPendingVetIds.addAll(dismissedPendingVet);
         });
         _updateUnreadStatus();
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _dismissFosterCare(String sightingId) async {
+    setState(() {
+      _dismissedFosterCareIds.add(sightingId);
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+      final list = prefs.getStringList('dismissed_foster_care_ids_$uid') ?? [];
+      if (!list.contains(sightingId)) {
+        list.add(sightingId);
+        await prefs.setStringList('dismissed_foster_care_ids_$uid', list);
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _dismissPendingVet(String sightingId) async {
+    setState(() {
+      _dismissedPendingVetIds.add(sightingId);
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+      final list = prefs.getStringList('dismissed_pending_vet_ids_$uid') ?? [];
+      if (!list.contains(sightingId)) {
+        list.add(sightingId);
+        await prefs.setStringList('dismissed_pending_vet_ids_$uid', list);
       }
     } catch (_) {}
   }
@@ -680,13 +717,52 @@ class _HomeScreenState extends State<HomeScreen>
                   ? null
                   : allSightings
                       .where((s) =>
+                          !_dismissedPendingVetIds.contains(s.id) &&
                           !s.isDeleted &&
-                          (s.isVetVisitPending || s.isPendingVerification) &&
+                          !s.isFinishedOrResolved &&
+                          !s.isResolved &&
                           s.urgency != 'resolved' &&
+                          s.category != 'Resolved' &&
+                          s.category != 'Sheltered' &&
+                          s.category != 'Rehomed' &&
+                          s.careStatus != 'resolved' &&
+                          (s.resolvedByAction == null ||
+                              s.resolvedByAction!.isEmpty) &&
+                          (s.isVetVisitPending || s.isPendingVerification) &&
                           (s.pendingVetRescuerId == currentUid ||
                               s.reporterId == currentUid ||
                               s.pendingHandoverRescuerId == currentUid ||
                               (s.rescueClaimed && s.rescueClaimedBy == currentUid)))
+                      .firstOrNull;
+
+              final myActiveFosterCareSighting = currentUid == null
+                  ? null
+                  : allSightings
+                      .where((s) =>
+                          !_dismissedFosterCareIds.contains(s.id) &&
+                          !s.isDeleted &&
+                          !s.isFinishedOrResolved &&
+                          !s.isResolved &&
+                          s.urgency != 'resolved' &&
+                          s.urgency != 'communityCare' &&
+                          s.careStatus == 'inCare_foster' &&
+                          s.careStatus != 'resolved' &&
+                          s.careStatus != 'inCare_shelter' &&
+                          s.careStatus != 'onStreet' &&
+                          s.category != 'Resolved' &&
+                          s.category != 'Sheltered' &&
+                          s.category != 'Rehomed' &&
+                          (s.resolvedByAction == null ||
+                              s.resolvedByAction!.isEmpty) &&
+                          (s.pendingOutcomeAction == null ||
+                              s.pendingOutcomeAction!.isEmpty) &&
+                          !s.isSheltered &&
+                          !s.isRehomed &&
+                          s.lastSeenStatus != 'helpedOffline' &&
+                          s.lastSeenStatus != 'sheltered' &&
+                          s.lastSeenStatus != 'rehomed' &&
+                          s.careTakerId != null &&
+                          s.careTakerId == currentUid)
                       .firstOrNull;
 
               final postVetDecisionSightings = allSightings
@@ -701,6 +777,7 @@ class _HomeScreenState extends State<HomeScreen>
 
               final isLockedWithCat = myActiveRescueTrip != null ||
                   myPendingVetSighting != null ||
+                  myActiveFosterCareSighting != null ||
                   postVetDecisionSightings.isNotEmpty;
 
               final urgentDispatches = isLockedWithCat
@@ -729,6 +806,14 @@ class _HomeScreenState extends State<HomeScreen>
                         padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
                         child: _buildPendingVetVerificationBanner(
                             myPendingVetSighting),
+                      ),
+                    ),
+                  if (myActiveFosterCareSighting != null)
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+                        child: _buildActiveFosterCareReminderBanner(
+                            myActiveFosterCareSighting),
                       ),
                     ),
                   if (postVetDecisionSightings.isNotEmpty)
@@ -2789,31 +2874,73 @@ class _HomeScreenState extends State<HomeScreen>
     final currentUid = FirebaseAuth.instance.currentUser?.uid;
     final isReporter = s.reporterId == currentUid;
 
-    String bannerTitle = s.title.isNotEmpty ? s.title : "Vet Care Cat";
+    final isHandover = s.pendingHandoverRescuerId != null &&
+        s.pendingHandoverRescuerId!.isNotEmpty;
+    final isOutcome = s.pendingOutcomeAction != null &&
+        s.pendingOutcomeAction!.isNotEmpty;
+    final isAdoption = s.pendingAdoptionApplicantId != null &&
+        s.pendingAdoptionApplicantId!.isNotEmpty;
+
+    String bannerTitle = s.title.isNotEmpty
+        ? s.title
+        : (isHandover
+            ? "Foster Care Cat"
+            : (isOutcome ? "Placement Outcome" : "Vet Care Cat"));
     String subtitleText;
-    if (isReporter) {
-      if (s.isVetVisitPending) {
+    String badgeLabel;
+    IconData badgeIcon;
+
+    if (isHandover) {
+      badgeLabel = isReporter ? 'ACTION REQUIRED' : 'FOSTER HANDOVER SUBMITTED';
+      badgeIcon = isReporter ? Icons.checklist_rounded : Icons.home_outlined;
+      if (isReporter) {
+        final rescuer = (s.pendingHandoverRescuerName != null &&
+                s.pendingHandoverRescuerName!.isNotEmpty)
+            ? s.pendingHandoverRescuerName!
+            : "Volunteer";
+        subtitleText =
+            'Foster custody requested by $rescuer! Tap to review care plan and confirm handover.';
+      } else {
+        subtitleText =
+            'Foster custody request submitted! Waiting for ${s.reporterName.isNotEmpty ? s.reporterName : "reporter"} to confirm handover.';
+      }
+    } else if (isOutcome) {
+      final isShelter = s.pendingOutcomeAction == 'sheltered';
+      badgeLabel = isReporter
+          ? 'ACTION REQUIRED'
+          : (isShelter ? 'SHELTER TRANSFER SUBMITTED' : 'OUTCOME SUBMITTED');
+      badgeIcon = isReporter ? Icons.checklist_rounded : Icons.pets_rounded;
+      if (isReporter) {
+        subtitleText =
+            'Outcome update submitted (${s.pendingOutcomeAction})! Tap to review and confirm.';
+      } else {
+        subtitleText =
+            'Outcome confirmation submitted (${s.pendingOutcomeAction})! Waiting for review.';
+      }
+    } else if (isAdoption) {
+      badgeLabel = isReporter ? 'ACTION REQUIRED' : 'ADOPTION REQUEST';
+      badgeIcon = isReporter ? Icons.checklist_rounded : Icons.favorite_rounded;
+      if (isReporter) {
+        subtitleText =
+            'Adoption request from ${s.pendingAdoptionApplicantName ?? "an applicant"}! Tap to review.';
+      } else {
+        subtitleText =
+            'Adoption request submitted! Waiting for ${s.reporterName.isNotEmpty ? s.reporterName : "reporter"} to review.';
+      }
+    } else {
+      badgeLabel = isReporter ? 'ACTION REQUIRED' : 'VET CHECK SUBMITTED';
+      badgeIcon = isReporter ? Icons.checklist_rounded : Icons.local_hospital_rounded;
+      if (isReporter) {
         final rescuerName = (s.pendingVetRescuerName != null &&
                 s.pendingVetRescuerName!.isNotEmpty)
             ? s.pendingVetRescuerName!
             : "Rescuer";
         subtitleText =
             '$rescuerName submitted vet clinic proof! Tap to review receipt and confirm care.';
-      } else if (s.pendingOutcomeAction != null &&
-          s.pendingOutcomeAction!.isNotEmpty) {
-        subtitleText =
-            'Outcome update submitted (${s.pendingOutcomeAction})! Tap to review and confirm.';
-      } else if (s.pendingHandoverRescuerId != null &&
-          s.pendingHandoverRescuerId!.isNotEmpty) {
-        subtitleText =
-            'Care handover requested! Tap to review and confirm handover.';
       } else {
         subtitleText =
-            'Action logged! Tap to review and verify this rescue update.';
+            'Proof submitted! Waiting for ${s.reporterName.isNotEmpty ? s.reporterName : "reporter"} to verify clinic receipt.';
       }
-    } else {
-      subtitleText =
-          'Proof submitted! Waiting for ${s.reporterName.isNotEmpty ? s.reporterName : "reporter"} to verify clinic receipt.';
     }
 
     return Container(
@@ -2848,15 +2975,13 @@ class _HomeScreenState extends State<HomeScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
-                      isReporter
-                          ? Icons.checklist_rounded
-                          : Icons.local_hospital_rounded,
+                      badgeIcon,
                       color: Colors.white,
                       size: 13,
                     ),
                     const SizedBox(width: 4),
                     Text(
-                      isReporter ? 'ACTION REQUIRED' : 'VET CHECK SUBMITTED',
+                      badgeLabel,
                       style: GoogleFonts.nunito(
                         fontSize: 10,
                         fontWeight: FontWeight.w900,
@@ -2867,29 +2992,16 @@ class _HomeScreenState extends State<HomeScreen>
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Flexible(
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: (isReporter
-                            ? const Color(0xFFFFA000)
-                            : const Color(0xFFBA68C8))
-                        .withValues(alpha: 0.25),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Text(
-                    isReporter
-                        ? 'Needs Your Verification'
-                        : 'Awaiting Reporter Verification',
-                    style: GoogleFonts.nunito(
-                      fontSize: 10.5,
-                      fontWeight: FontWeight.w800,
-                      color: isReporter
-                          ? const Color(0xFFE65100)
-                          : const Color(0xFF4A148C),
-                    ),
-                    overflow: TextOverflow.ellipsis,
+              const Spacer(),
+              InkWell(
+                onTap: () => _dismissPendingVet(s.id),
+                borderRadius: BorderRadius.circular(16),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: _navy.withValues(alpha: 0.45),
                   ),
                 ),
               ),
@@ -2986,8 +3098,217 @@ class _HomeScreenState extends State<HomeScreen>
               ),
               label: Text(
                 isReporter
-                    ? 'Review & Verify Receipt'
+                    ? (isHandover
+                        ? 'Review & Confirm Handover'
+                        : isOutcome
+                            ? 'Review & Confirm Outcome'
+                            : isAdoption
+                                ? 'Review & Confirm Adoption'
+                                : 'Review & Verify Receipt')
                     : 'View Report & Coordinate Chat',
+                style: GoogleFonts.nunito(
+                  fontWeight: FontWeight.w800,
+                  fontSize: 12.5,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActiveFosterCareReminderBanner(Sighting s) {
+    final bannerTitle =
+        s.title.isNotEmpty ? s.title : "Foster Cat in Your Care";
+    final isAllDone = s.isAllMilestonesCompleted;
+    final activeDay = s.nextPendingMilestoneDay;
+    final totalDays = s.effectiveDurationDays;
+
+    final String pillText = isAllDone
+        ? 'All $totalDays Days Done'
+        : 'Day $activeDay of $totalDays';
+
+    final String subtitleText = isAllDone
+        ? 'All $totalDays care milestones completed! Foster goals reached. Ready for placement outcome.'
+        : 'Day $activeDay is ready: Log feeding, health check, and upload photos for this cat!';
+
+    final String buttonText = isAllDone
+        ? 'Care Plan Complete • Decide Final Outcome'
+        : 'Open Care Plan & Log Day $activeDay 🐾';
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFFE8F5E9),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: const Color(0xFF2E7D32).withValues(alpha: 0.35),
+          width: 1.5,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2E7D32),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.home_rounded,
+                      color: Colors.white,
+                      size: 13,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'CAT IN YOUR CARE',
+                      style: GoogleFonts.nunito(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF2E7D32).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  pillText,
+                  style: GoogleFonts.nunito(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFF1B5E20),
+                  ),
+                ),
+              ),
+              const Spacer(),
+              InkWell(
+                onTap: () => _dismissFosterCare(s.id),
+                borderRadius: BorderRadius.circular(16),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.close_rounded,
+                    size: 18,
+                    color: _navy.withValues(alpha: 0.45),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              if (s.photoUrls.isNotEmpty)
+                PawImage(
+                  url: s.photoUrls.first,
+                  width: 50,
+                  height: 50,
+                  fit: BoxFit.cover,
+                  borderRadius: BorderRadius.circular(12),
+                  placeholder: Container(
+                    width: 50,
+                    height: 50,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF81C784).withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Icon(Icons.pets,
+                        size: 22, color: Color(0xFF2E7D32)),
+                  ),
+                )
+              else
+                Container(
+                  width: 50,
+                  height: 50,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF81C784).withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(Icons.pets,
+                      size: 22, color: Color(0xFF2E7D32)),
+                ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      bannerTitle,
+                      style: GoogleFonts.nunito(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        color: _navy,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitleText,
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        color: _navy.withValues(alpha: 0.75),
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF2E7D32),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+              ),
+              onPressed: () async {
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SightingDetailScreen(sighting: s),
+                  ),
+                );
+                if (mounted) setState(() {});
+              },
+              icon: Icon(
+                isAllDone
+                    ? Icons.check_circle_rounded
+                    : Icons.favorite_rounded,
+                size: 16,
+              ),
+              label: Text(
+                buttonText,
                 style: GoogleFonts.nunito(
                   fontWeight: FontWeight.w800,
                   fontSize: 12.5,

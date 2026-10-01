@@ -8681,7 +8681,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
           // In care with ... (short desc on the bottom)
           Text(
-            'In care with ${s.careTakerName ?? "Caretaker"} • ${s.daysInCare} ${s.daysInCare == 1 ? "day" : "days"} in care',
+            'In care with ${s.careTakerName ?? "Caretaker"} • ${s.completedMilestoneCount} of ${s.effectiveDurationDays} days completed',
             textAlign: TextAlign.center,
             style: GoogleFonts.nunito(
               fontSize: 12.5,
@@ -13924,10 +13924,413 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 ),
               ],
             ),
+            if (s.adoptionApplicantCount > 1) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    side: const BorderSide(color: Color(0xFF2E7D32)),
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () => _showAllAdoptionApplicantsSheet(s),
+                  icon: const Icon(Icons.people_outline_rounded,
+                      size: 16, color: Color(0xFF2E7D32)),
+                  label: Text(
+                    'View All ${s.adoptionApplicantCount} Applicants',
+                    style: GoogleFonts.nunito(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 12,
+                        color: const Color(0xFF2E7D32)),
+                  ),
+                ),
+              ),
+            ],
           ],
         ],
       ),
     );
+  }
+
+  void _showAllAdoptionApplicantsSheet(Sighting s) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * 0.7,
+        ),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 10),
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.people_rounded,
+                    color: Color(0xFF2E7D32), size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'All Adoption Applicants',
+                  style: GoogleFonts.nunito(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    color: _navy,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Choose the best home for this cat',
+              style: GoogleFonts.nunito(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: _navy.withValues(alpha: 0.5),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: FutureBuilder<List<Map<String, dynamic>>>(
+                future: FirebaseService.instance
+                    .getAdoptionApplicants(s.id),
+                builder: (ctx, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return const Padding(
+                      padding: EdgeInsets.all(32),
+                      child: Center(
+                          child: CircularProgressIndicator(
+                              color: Color(0xFF2E7D32))),
+                    );
+                  }
+                  final applicants = snap.data ?? [];
+                  if (applicants.isEmpty) {
+                    return Padding(
+                      padding: const EdgeInsets.all(32),
+                      child: Text(
+                        'No pending applicants.',
+                        style: GoogleFonts.nunito(
+                          color: _navy.withValues(alpha: 0.5),
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    );
+                  }
+                  return ListView.separated(
+                    shrinkWrap: true,
+                    padding: EdgeInsets.fromLTRB(
+                        16, 0, 16, 20 + MediaQuery.of(ctx).padding.bottom),
+                    itemCount: applicants.length,
+                    separatorBuilder: (_, __) =>
+                        const SizedBox(height: 10),
+                    itemBuilder: (_, i) {
+                      final a = applicants[i];
+                      final aName =
+                          a['authorName']?.toString() ?? 'Adopter';
+                      final aNote =
+                          a['customNote']?.toString() ?? '';
+                      final aPhone =
+                          a['contactPhone']?.toString() ?? '';
+                      final aUid =
+                          a['authorId']?.toString() ?? '';
+                      final aUpdateId =
+                          a['updateId']?.toString() ?? '';
+                      return Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF2E7D32)
+                              .withValues(alpha: 0.04),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: const Color(0xFF2E7D32)
+                                .withValues(alpha: 0.2),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment:
+                              CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 16,
+                                  backgroundColor:
+                                      const Color(0xFF2E7D32)
+                                          .withValues(alpha: 0.15),
+                                  child: Text(
+                                    aName.isNotEmpty
+                                        ? aName[0].toUpperCase()
+                                        : '?',
+                                    style: GoogleFonts.nunito(
+                                      fontWeight: FontWeight.w900,
+                                      color:
+                                          const Color(0xFF2E7D32),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Expanded(
+                                  child: Text(
+                                    aName,
+                                    style: GoogleFonts.nunito(
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 14,
+                                      color: _navy,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            if (aNote.isNotEmpty) ...[
+                              const SizedBox(height: 8),
+                              Text(
+                                '"$aNote"',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                  color: _navy.withValues(
+                                      alpha: 0.7),
+                                  fontStyle: FontStyle.italic,
+                                ),
+                              ),
+                            ],
+                            if (aPhone.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                '📞 $aPhone',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w700,
+                                  color: _navy.withValues(
+                                      alpha: 0.6),
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 10),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child:
+                                      ElevatedButton.icon(
+                                    style:
+                                        ElevatedButton.styleFrom(
+                                      backgroundColor:
+                                          const Color(
+                                              0xFF2E7D32),
+                                      foregroundColor:
+                                          Colors.white,
+                                      padding: const EdgeInsets
+                                          .symmetric(
+                                          vertical: 8),
+                                      shape:
+                                          RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius
+                                                .circular(
+                                                    8),
+                                      ),
+                                      elevation: 0,
+                                    ),
+                                    onPressed: () {
+                                      Navigator.pop(ctx);
+                                      _confirmApproveSpecificAdoptionDialog(
+                                        s,
+                                        applicantId: aUid,
+                                        applicantName: aName,
+                                        updateId: aUpdateId,
+                                      );
+                                    },
+                                    icon: const Icon(
+                                        Icons
+                                            .check_circle_rounded,
+                                        size: 14),
+                                    label: Text(
+                                      'Approve',
+                                      style:
+                                          GoogleFonts.nunito(
+                                        fontWeight:
+                                            FontWeight.w800,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                OutlinedButton(
+                                  style: OutlinedButton
+                                      .styleFrom(
+                                    side: BorderSide(
+                                        color: _navy
+                                            .withValues(
+                                                alpha:
+                                                    0.15)),
+                                    padding: const EdgeInsets
+                                        .symmetric(
+                                        horizontal: 12,
+                                        vertical: 8),
+                                    shape:
+                                        RoundedRectangleBorder(
+                                      borderRadius:
+                                          BorderRadius
+                                              .circular(8),
+                                    ),
+                                  ),
+                                  onPressed: () async {
+                                    await FirebaseService
+                                        .instance
+                                        .declineAdoption(
+                                      sightingId: s.id,
+                                      updateId: aUpdateId,
+                                    );
+                                    if (ctx.mounted) {
+                                      Navigator.pop(ctx);
+                                    }
+                                    _snack(
+                                        '$aName\'s application declined.');
+                                  },
+                                  child: Text(
+                                    'Decline',
+                                    style:
+                                        GoogleFonts.nunito(
+                                      fontWeight:
+                                          FontWeight.w700,
+                                      fontSize: 11,
+                                      color: _navy
+                                          .withValues(
+                                              alpha: 0.5),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 6),
+                                IconButton(
+                                  tooltip:
+                                      'Chat with $aName',
+                                  icon: const Icon(
+                                    Icons
+                                        .chat_bubble_outline_rounded,
+                                    color:
+                                        Color(0xFF2E7D32),
+                                    size: 18,
+                                  ),
+                                  onPressed: () {
+                                    Navigator.pop(ctx);
+                                    if (aUid.isNotEmpty) {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (_) =>
+                                              CoordinationChatScreen(
+                                            sighting: s,
+                                            otherUserId:
+                                                aUid,
+                                            otherUserName:
+                                                aName,
+                                            otherUserRole:
+                                                'Adoption Applicant',
+                                          ),
+                                        ),
+                                      );
+                                    }
+                                  },
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmApproveSpecificAdoptionDialog(
+    Sighting s, {
+    required String applicantId,
+    required String applicantName,
+    required String updateId,
+  }) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.celebration_rounded, color: Color(0xFF2E7D32)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Confirm Adoption? 🏡🎉',
+                style: GoogleFonts.nunito(
+                    fontWeight: FontWeight.w900, fontSize: 16, color: _navy),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Approving will officially mark this rescue as Rehomed and complete! Both you and $applicantName will receive +200 XP.',
+          style: GoogleFonts.nunito(
+              fontSize: 13, color: _navy.withValues(alpha: 0.8)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx, false),
+            child: Text('Cancel',
+                style: GoogleFonts.nunito(
+                    fontWeight: FontWeight.w700, color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF2E7D32),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(dCtx, true),
+            child: Text('Confirm & Rehome (+200 XP)',
+                style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+
+    if (ok == true && mounted) {
+      try {
+        await FirebaseService.instance.approveAdoption(
+          sightingId: s.id,
+          updateId: updateId,
+          applicantId: applicantId,
+          applicantName: applicantName,
+        );
+        _snack('🎉 Adoption confirmed! Cat successfully rehomed (+200 XP)');
+      } catch (e) {
+        _snack('Failed to confirm adoption: $e');
+      }
+    }
   }
 
   Future<void> _confirmApproveAdoptionDialog(Sighting s) async {
@@ -14197,26 +14600,62 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 ),
                 const SizedBox(width: 8),
                 Expanded(
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2E7D32),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10)),
-                      elevation: 0,
-                    ),
-                    onPressed: () => _showSubmitAdoptionApplicationSheet(s),
-                    icon: const Icon(Icons.home_rounded, size: 14),
-                    label: Text(
-                      'Request to Adopt',
-                      style: GoogleFonts.nunito(
-                          fontWeight: FontWeight.w800, fontSize: 12),
-                    ),
+                  child: FutureBuilder<bool>(
+                    future: FirebaseService.instance
+                        .hasUserAlreadyRequestedAdoption(s.id),
+                    builder: (ctx, snap) {
+                      final alreadyRequested = snap.data == true ||
+                          s.pendingAdoptionApplicantId == _uid;
+                      return ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: alreadyRequested
+                              ? Colors.grey.shade400
+                              : const Color(0xFF2E7D32),
+                          foregroundColor: Colors.white,
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10)),
+                          elevation: 0,
+                        ),
+                        onPressed: alreadyRequested
+                            ? null
+                            : () =>
+                                _showSubmitAdoptionApplicationSheet(s),
+                        icon: Icon(
+                          alreadyRequested
+                              ? Icons.check_circle_outline_rounded
+                              : Icons.home_rounded,
+                          size: 14,
+                        ),
+                        label: Text(
+                          alreadyRequested
+                              ? 'Already Requested'
+                              : 'Request to Adopt',
+                          style: GoogleFonts.nunito(
+                              fontWeight: FontWeight.w800, fontSize: 12),
+                        ),
+                      );
+                    },
                   ),
                 ),
               ],
             ),
+            if (s.adoptionApplicantCount > 0) ...[
+              const SizedBox(height: 6),
+              Center(
+                child: Text(
+                  s.adoptionApplicantCount == 1
+                      ? '1 person has requested to adopt'
+                      : '${s.adoptionApplicantCount} people have requested to adopt',
+                  style: GoogleFonts.nunito(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: _navy.withValues(alpha: 0.45),
+                  ),
+                ),
+              ),
+            ],
           ],
         ],
       ),

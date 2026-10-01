@@ -555,6 +555,13 @@ class FirebaseService {
           updateFields['rescueClaimedBy'] = FieldValue.delete();
           updateFields['rescueClaimedByName'] = FieldValue.delete();
           updateFields['rescueClaimedAt'] = FieldValue.delete();
+          updateFields['pendingOutcomeAction'] = FieldValue.delete();
+          updateFields['pendingOutcomeNote'] = FieldValue.delete();
+          updateFields['pendingOutcomeProofUrl'] = FieldValue.delete();
+          updateFields['pendingOutcomeUpdateId'] = FieldValue.delete();
+          updateFields['careTakerId'] = FieldValue.delete();
+          updateFields['careTakerName'] = FieldValue.delete();
+          updateFields['careStartedAt'] = FieldValue.delete();
           if (updatedLatitude != null && updatedLongitude != null) {
             updateFields['latitude'] = updatedLatitude;
             updateFields['longitude'] = updatedLongitude;
@@ -576,6 +583,13 @@ class FirebaseService {
           updateFields['rescueClaimedBy'] = FieldValue.delete();
           updateFields['rescueClaimedByName'] = FieldValue.delete();
           updateFields['rescueClaimedAt'] = FieldValue.delete();
+          updateFields['pendingOutcomeAction'] = FieldValue.delete();
+          updateFields['pendingOutcomeNote'] = FieldValue.delete();
+          updateFields['pendingOutcomeProofUrl'] = FieldValue.delete();
+          updateFields['pendingOutcomeUpdateId'] = FieldValue.delete();
+          updateFields['careTakerId'] = FieldValue.delete();
+          updateFields['careTakerName'] = FieldValue.delete();
+          updateFields['careStartedAt'] = FieldValue.delete();
         }
 
         await _firestore
@@ -2263,10 +2277,10 @@ class FirebaseService {
       updateFields['isSterilized'] = true;
       updateFields['healthTags'] =
           FieldValue.arrayUnion(['✂️ Spayed / Neutered', '🩺 Vet Checked']);
-      updateFields['careTakerId'] = FieldValue.delete();
-      updateFields['careTakerName'] = FieldValue.delete();
-      updateFields['careStartedAt'] = FieldValue.delete();
     }
+    updateFields['careTakerId'] = FieldValue.delete();
+    updateFields['careTakerName'] = FieldValue.delete();
+    updateFields['careStartedAt'] = FieldValue.delete();
 
     if (updatedLatitude != null && updatedLongitude != null) {
       updateFields['latitude'] = updatedLatitude;
@@ -2407,13 +2421,77 @@ class FirebaseService {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
-    await _firestore.collection('sightings').doc(sightingId).update({
-      'pendingAdoptionApplicantId': uid,
-      'pendingAdoptionApplicantName': name,
-      'pendingAdoptionMessage': message.trim(),
-      'pendingAdoptionContact': contactPhone?.trim(),
-      'pendingAdoptionUpdateId': updateRef.id,
+    // Read current sighting to decide whether to set the "spotlight" applicant
+    final sDoc =
+        await _firestore.collection('sightings').doc(sightingId).get();
+    final data = sDoc.data() ?? {};
+    final currentApplicant = data['pendingAdoptionApplicantId']?.toString();
+    final hasExistingApplicant =
+        currentApplicant != null && currentApplicant.isNotEmpty;
+
+    final Map<String, dynamic> updateData = {
+      'adoptionApplicantCount': FieldValue.increment(1),
+      'adoptionApplicantIds': FieldValue.arrayUnion([uid]),
+    };
+
+    // Only set the "spotlight" applicant fields if there isn't one already
+    if (!hasExistingApplicant) {
+      updateData['pendingAdoptionApplicantId'] = uid;
+      updateData['pendingAdoptionApplicantName'] = name;
+      updateData['pendingAdoptionMessage'] = message.trim();
+      updateData['pendingAdoptionContact'] = contactPhone?.trim();
+      updateData['pendingAdoptionUpdateId'] = updateRef.id;
+    }
+
+    await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .update(updateData);
+  }
+
+  /// Returns true if the current user has already submitted an adoption
+  /// application for the given sighting (regardless of its current status).
+  Future<bool> hasUserAlreadyRequestedAdoption(String sightingId) async {
+    final user = _auth.currentUser;
+    if (user == null) return false;
+    final snap = await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .where('type', isEqualTo: 'adoptionApplication')
+        .where('authorId', isEqualTo: user.uid)
+        .limit(1)
+        .get();
+    return snap.docs.isNotEmpty;
+  }
+
+  /// Returns all pending adoption applications for a sighting, ordered newest first.
+  Future<List<Map<String, dynamic>>> getAdoptionApplicants(
+      String sightingId) async {
+    final snap = await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .where('type', isEqualTo: 'adoptionApplication')
+        .get();
+    final results = snap.docs
+        .map((d) {
+          final data = d.data();
+          data['updateId'] = d.id;
+          return data;
+        })
+        .where((d) => d['status'] == 'pending')
+        .toList();
+    // Sort newest first (createdAt may be a Timestamp or null)
+    results.sort((a, b) {
+      final aTs = a['createdAt'] as Timestamp?;
+      final bTs = b['createdAt'] as Timestamp?;
+      if (aTs == null && bTs == null) return 0;
+      if (aTs == null) return 1;
+      if (bTs == null) return -1;
+      return bTs.compareTo(aTs);
     });
+    return results;
   }
 
   /// Caretaker / reporter approves adoption application and rehomes the cat
@@ -2473,18 +2551,29 @@ class FirebaseService {
       'resolvedAt': FieldValue.serverTimestamp(),
       'resolvedByAction': 'rehomed',
       'careStatus': 'resolved',
+      'isOpenForAdoption': false,
       'pendingAdoptionApplicantId': FieldValue.delete(),
       'pendingAdoptionApplicantName': FieldValue.delete(),
       'pendingAdoptionMessage': FieldValue.delete(),
       'pendingAdoptionContact': FieldValue.delete(),
       'pendingAdoptionUpdateId': FieldValue.delete(),
+      'pendingOutcomeAction': FieldValue.delete(),
+      'pendingOutcomeNote': FieldValue.delete(),
+      'pendingOutcomeProofUrl': FieldValue.delete(),
+      'pendingOutcomeUpdateId': FieldValue.delete(),
+      'careTakerId': FieldValue.delete(),
+      'careTakerName': FieldValue.delete(),
+      'careStartedAt': FieldValue.delete(),
     });
   }
 
-  /// Caretaker / reporter declines adoption application
+  /// Caretaker / reporter declines adoption application.
+  /// If there are other pending applicants, the next one is promoted
+  /// into the "spotlight" fields shown on the pending adoption banner.
   Future<void> declineAdoption({
     required String sightingId,
     String? updateId,
+    String? declinedApplicantId,
   }) async {
     if (updateId != null && updateId.isNotEmpty) {
       await _firestore
@@ -2494,13 +2583,38 @@ class FirebaseService {
           .doc(updateId)
           .update({'status': 'declined'});
     }
-    await _firestore.collection('sightings').doc(sightingId).update({
-      'pendingAdoptionApplicantId': FieldValue.delete(),
-      'pendingAdoptionApplicantName': FieldValue.delete(),
-      'pendingAdoptionMessage': FieldValue.delete(),
-      'pendingAdoptionContact': FieldValue.delete(),
-      'pendingAdoptionUpdateId': FieldValue.delete(),
-    });
+
+    // Check for remaining pending applicants to promote
+    final remaining = await _firestore
+        .collection('sightings')
+        .doc(sightingId)
+        .collection('updates')
+        .where('type', isEqualTo: 'adoptionApplication')
+        .where('status', isEqualTo: 'pending')
+        .orderBy('createdAt')
+        .limit(1)
+        .get();
+
+    if (remaining.docs.isNotEmpty) {
+      final next = remaining.docs.first;
+      final nd = next.data();
+      await _firestore.collection('sightings').doc(sightingId).update({
+        'pendingAdoptionApplicantId': nd['authorId'],
+        'pendingAdoptionApplicantName': nd['authorName'],
+        'pendingAdoptionMessage': nd['customNote'] ?? '',
+        'pendingAdoptionContact': nd['contactPhone'],
+        'pendingAdoptionUpdateId': next.id,
+      });
+    } else {
+      // No remaining applicants — clear the spotlight
+      await _firestore.collection('sightings').doc(sightingId).update({
+        'pendingAdoptionApplicantId': FieldValue.delete(),
+        'pendingAdoptionApplicantName': FieldValue.delete(),
+        'pendingAdoptionMessage': FieldValue.delete(),
+        'pendingAdoptionContact': FieldValue.delete(),
+        'pendingAdoptionUpdateId': FieldValue.delete(),
+      });
+    }
   }
 
   /// Caretaker / rescuer requests outcome confirmation (shelter transfer, rehome, TNR return)
@@ -2691,6 +2805,9 @@ class FirebaseService {
         'pendingOutcomeNote': FieldValue.delete(),
         'pendingOutcomeProofUrl': FieldValue.delete(),
         'pendingOutcomeUpdateId': FieldValue.delete(),
+        'careTakerId': FieldValue.delete(),
+        'careTakerName': FieldValue.delete(),
+        'careStartedAt': FieldValue.delete(),
       };
       if (caretakerUid != null && caretakerUid.isNotEmpty) {
         sightingResolveFields['rescuerUserIds'] =
@@ -3145,6 +3262,52 @@ class FirebaseService {
     }
   }
 
+  /// Checks if a displayName is already taken in the users collection.
+  /// Optionally exclude a specific UID (useful when editing own profile).
+  Future<bool> isDisplayNameTaken(String name, {String? excludeUid}) async {
+    final trimmed = name.trim().toLowerCase();
+    if (trimmed.isEmpty) return false;
+    try {
+      final snap = await _firestore.collection('users').get();
+      for (final doc in snap.docs) {
+        if (excludeUid != null && doc.id == excludeUid) continue;
+        final docName =
+            (doc.data()['displayName']?.toString() ?? '').trim().toLowerCase();
+        if (docName == trimmed) {
+          return true;
+        }
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Checks if an email is already registered in Firestore users or banned_users
+  Future<bool> isEmailRegistered(String email) async {
+    final trimmed = email.trim().toLowerCase();
+    if (trimmed.isEmpty) return false;
+    try {
+      final snap = await _firestore
+          .collection('users')
+          .where('email', isEqualTo: trimmed)
+          .limit(1)
+          .get();
+      if (snap.docs.isNotEmpty) return true;
+
+      final bannedSnap = await _firestore
+          .collection('banned_users')
+          .where('email', isEqualTo: trimmed)
+          .limit(1)
+          .get();
+      if (bannedSnap.docs.isNotEmpty) return true;
+
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Suspend a user temporarily
   Future<void> suspendUser(String targetUid, {String? reason, int days = 7}) async {
     await _firestore.collection('users').doc(targetUid).update({
@@ -3229,15 +3392,73 @@ class FirebaseService {
         final pendingSightings = await _firestore
             .collection('sightings')
             .where('pendingOutcomeAction', isEqualTo: 'sheltered')
-            .where('shelterOrClinicName', isEqualTo: shelterName)
             .get();
+        final targetName = shelterName.trim().toLowerCase();
         for (final sDoc in pendingSightings.docs) {
-          await approveOutcomeConfirmation(
-            sightingId: sDoc.id,
-            outcomeAction: 'sheltered',
-          );
+          final sData = sDoc.data();
+          final sName = (sData['shelterOrClinicName'] ?? '').toString().trim().toLowerCase();
+          if (sName == targetName || sName.isEmpty || targetName.isEmpty) {
+            await approveOutcomeConfirmation(
+              sightingId: sDoc.id,
+              outcomeAction: 'sheltered',
+              updateId: sData['pendingOutcomeUpdateId']?.toString(),
+            );
+          }
         }
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('Error approving pending shelter sightings: $e');
+      }
+    }
+  }
+
+  /// Self-healing check: automatically resolve any sightings whose requested shelter
+  /// or rehoming outcome has been submitted or verified.
+  Future<void> autoResolveVerifiedShelterSightings() async {
+    try {
+      final pendingSightings = await _firestore
+          .collection('sightings')
+          .where('pendingOutcomeAction', whereIn: ['sheltered', 'rehomed', 'returnedToSpot'])
+          .get();
+      for (final sDoc in pendingSightings.docs) {
+        final sData = sDoc.data();
+        final action = sData['pendingOutcomeAction']?.toString() ?? 'sheltered';
+        await approveOutcomeConfirmation(
+          sightingId: sDoc.id,
+          outcomeAction: action,
+          updateId: sData['pendingOutcomeUpdateId']?.toString(),
+        );
+      }
+    } catch (e) {
+      debugPrint('Error in autoResolveVerifiedShelterSightings: $e');
+    }
+
+    // Clean up any lingering custody for sightings that are resolved/sheltered/rehomed
+    try {
+      final resolvedSightings = await _firestore
+          .collection('sightings')
+          .where('category', whereIn: ['Resolved', 'Sheltered', 'Rehomed'])
+          .get();
+      for (final doc in resolvedSightings.docs) {
+        final d = doc.data();
+        if (d['careTakerId'] != null ||
+            d['careStatus'] != 'resolved' ||
+            d['urgency'] != 'resolved' ||
+            d['pendingOutcomeAction'] != null) {
+          await doc.reference.update({
+            'urgency': 'resolved',
+            'careStatus': 'resolved',
+            'careTakerId': FieldValue.delete(),
+            'careTakerName': FieldValue.delete(),
+            'careStartedAt': FieldValue.delete(),
+            'pendingOutcomeAction': FieldValue.delete(),
+            'pendingOutcomeNote': FieldValue.delete(),
+            'pendingOutcomeProofUrl': FieldValue.delete(),
+            'pendingOutcomeUpdateId': FieldValue.delete(),
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Error cleaning up resolved sightings: $e');
     }
   }
 

@@ -75,6 +75,7 @@ class Sighting {
   final String? pendingAdoptionMessage;
   final String? pendingAdoptionContact;
   final String? pendingAdoptionUpdateId;
+  final int adoptionApplicantCount;
   final List<String> rescuerUserIds;
   final List<String> blockedUserIds;
   final String? outcomeVideoUrl;
@@ -157,6 +158,7 @@ class Sighting {
     this.pendingAdoptionMessage,
     this.pendingAdoptionContact,
     this.pendingAdoptionUpdateId,
+    this.adoptionApplicantCount = 0,
     this.rescuerUserIds = const [],
     this.blockedUserIds = const [],
     this.outcomeVideoUrl,
@@ -256,7 +258,15 @@ class Sighting {
   bool get isInCare =>
       careStatus != null &&
       (careStatus == 'inCare_foster' || careStatus == 'inCare_shelter') &&
-      urgency != 'resolved';
+      urgency != 'resolved' &&
+      !isResolved &&
+      !isFinishedOrResolved &&
+      resolvedByAction != 'returnedToSpot' &&
+      resolvedByAction != 'rehomed' &&
+      resolvedByAction != 'sheltered' &&
+      category != 'Resolved' &&
+      category != 'Sheltered' &&
+      category != 'Rehomed';
 
   int get daysInCare {
     final start = careStartedAt ?? createdAt;
@@ -295,6 +305,19 @@ class Sighting {
 
   bool get isAllMilestonesCompleted =>
       completedMilestones.length >= effectiveMilestoneDays.length;
+
+  int get completedMilestoneCount => completedMilestones.length;
+
+  /// Returns the next pending milestone day that hasn't been completed yet.
+  /// If day 1 is already completed, it instantly switches to day 2 and so forth without waiting 24 hours.
+  int get nextPendingMilestoneDay {
+    for (final day in effectiveMilestoneDays) {
+      if (!isMilestoneDone(day)) {
+        return day;
+      }
+    }
+    return effectiveMilestoneDays.isNotEmpty ? effectiveMilestoneDays.last : 1;
+  }
 
   bool get areOutcomesUnlocked => isAllMilestonesCompleted;
 
@@ -426,6 +449,10 @@ class Sighting {
     if (pendingAdoptionApplicantId != null &&
         pendingAdoptionApplicantId!.isNotEmpty) {
       return 'Adoption request received from ${pendingAdoptionApplicantName ?? "an applicant"} — awaiting confirmation.';
+    }
+    if (pendingHandoverRescuerId != null &&
+        pendingHandoverRescuerId!.isNotEmpty) {
+      return 'Foster custody handover submitted — awaiting reporter verification.';
     }
     if (isVetVisitPending ||
         (pendingVetRescuerId != null && pendingVetRescuerId!.isNotEmpty)) {
@@ -606,7 +633,10 @@ class Sighting {
       isRehomed ||
       isTnrReturned ||
       category == 'Resolved' ||
+      category == 'Sheltered' ||
+      category == 'Rehomed' ||
       careStatus == 'resolved' ||
+      urgency == 'resolved' ||
       (resolvedByAction != null && resolvedByAction!.isNotEmpty);
 
   bool get isTnrReturned =>
@@ -855,6 +885,7 @@ class Sighting {
       'pendingAdoptionMessage': pendingAdoptionMessage,
       'pendingAdoptionContact': pendingAdoptionContact,
       'pendingAdoptionUpdateId': pendingAdoptionUpdateId,
+      'adoptionApplicantCount': adoptionApplicantCount,
       'rescuerUserIds': rescuerUserIds,
       'blockedUserIds': blockedUserIds,
       'isDeleted': isDeleted,
@@ -954,9 +985,22 @@ class Sighting {
         : rawCategory;
 
     final rawUrgency = data['urgency']?.toString() ?? 'needsHelp';
-    final normalizedUrgency = (rawUrgency == 'notUrgent' || rawUrgency == 'safe')
-        ? 'resolved'
-        : rawUrgency;
+    final rawStatus = data['status']?.toString();
+    final rawCareStatus = data['careStatus']?.toString();
+    final rawResolvedByAction = data['resolvedByAction']?.toString();
+    final isExplicitlyResolved = rawUrgency == 'resolved' ||
+        rawUrgency == 'notUrgent' ||
+        rawUrgency == 'safe' ||
+        rawStatus == 'resolved' ||
+        rawCareStatus == 'resolved' ||
+        normalizedCategory == 'Resolved' ||
+        normalizedCategory == 'Sheltered' ||
+        normalizedCategory == 'Rehomed' ||
+        rawResolvedByAction == 'sheltered' ||
+        rawResolvedByAction == 'rehomed' ||
+        data['resolved'] == true ||
+        data['isResolved'] == true;
+    final normalizedUrgency = isExplicitlyResolved ? 'resolved' : rawUrgency;
 
     final rawMilestones = data['completedMilestones'];
     List<int> milestones = [];
@@ -1089,6 +1133,9 @@ class Sighting {
       pendingAdoptionMessage: data['pendingAdoptionMessage']?.toString(),
       pendingAdoptionContact: data['pendingAdoptionContact']?.toString(),
       pendingAdoptionUpdateId: data['pendingAdoptionUpdateId']?.toString(),
+      adoptionApplicantCount: (data['adoptionApplicantCount'] is num)
+          ? (data['adoptionApplicantCount'] as num).toInt()
+          : 0,
       rescuerUserIds: (data['rescuerUserIds'] is List)
           ? (data['rescuerUserIds'] as List).map((e) => e.toString()).toList()
           : [],

@@ -547,13 +547,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           onPressed: isSaving
                               ? null
                               : () async {
-                                  final currentNameErr = validateDisplayName(nameCtrl.text);
+                                  final newName = nameCtrl.text.trim();
+                                  final currentNameErr = validateDisplayName(newName);
                                   if (currentNameErr != null) {
                                     setSheetState(() {
                                       hasAttemptedSubmit = true;
                                       formValidationError = '⚠️ $currentNameErr';
                                     });
                                     return;
+                                  }
+
+                                  if (newName.toLowerCase() !=
+                                      profile.displayName.trim().toLowerCase()) {
+                                    final isTaken = await FirebaseService.instance
+                                        .isDisplayNameTaken(newName,
+                                            excludeUid: profile.uid);
+                                    if (isTaken) {
+                                      setSheetState(() {
+                                        hasAttemptedSubmit = true;
+                                        formValidationError =
+                                            'The display name "$newName" is already taken. Please choose another.';
+                                      });
+                                      return;
+                                    }
                                   }
 
                                   final currentCityErr = validateCity(cityCtrl.text);
@@ -1154,7 +1170,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  'Level ${profile.level}',
+                  profile.isMaxLevel
+                      ? 'Level ${profile.level} (MAX)'
+                      : 'Level ${profile.level}',
                   style: GoogleFonts.nunito(
                     fontSize: 20,
                     fontWeight: FontWeight.w900,
@@ -1162,11 +1180,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 Text(
-                  '${profile.totalXp} Total XP',
+                  profile.isMaxLevel
+                      ? '${profile.totalXp} Total XP • Max Level 🏆'
+                      : '${profile.totalXp} Total XP',
                   style: GoogleFonts.nunito(
                     fontSize: 11,
                     fontWeight: FontWeight.w700,
-                    color: _navy.withValues(alpha: 0.5),
+                    color: profile.isMaxLevel
+                        ? const Color(0xFFD97706)
+                        : _navy.withValues(alpha: 0.5),
                   ),
                 ),
                 const SizedBox(height: 8),
