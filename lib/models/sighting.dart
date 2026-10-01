@@ -78,6 +78,11 @@ class Sighting {
   final List<String> rescuerUserIds;
   final List<String> blockedUserIds;
   final String? outcomeVideoUrl;
+  final bool isDeleted;
+  final bool deletedByAdmin;
+  final DateTime? deletedAt;
+  final String? deletedBy;
+  final String? deletedReason;
 
   const Sighting({
     required this.id,
@@ -155,6 +160,11 @@ class Sighting {
     this.rescuerUserIds = const [],
     this.blockedUserIds = const [],
     this.outcomeVideoUrl,
+    this.isDeleted = false,
+    this.deletedByAdmin = false,
+    this.deletedAt,
+    this.deletedBy,
+    this.deletedReason,
   });
 
   /// Whether the 24-hour reporter decision window has expired after vet visit verification
@@ -409,6 +419,7 @@ class Sighting {
       careStatus != 'inCare_shelter' &&
       !isCommunityFosterRequested &&
       !isOpenForAdoption &&
+      (pendingOutcomeAction == null || pendingOutcomeAction!.isEmpty) &&
       (pendingHandoverRescuerId == null || pendingHandoverRescuerId!.isEmpty);
 
   String get pendingVerificationDescription {
@@ -421,12 +432,16 @@ class Sighting {
       return 'Vet Clinic Visit submitted — awaiting reporter verification.';
     }
     if (pendingOutcomeAction != null && pendingOutcomeAction!.isNotEmpty) {
+      if (pendingOutcomeAction == 'sheltered') {
+        return 'Shelter transfer submitted — awaiting admin verification.';
+      }
       return 'Outcome confirmation requested — awaiting reporter verification.';
     }
     return 'Action logged — awaiting reporter verification.';
   }
 
   bool get isEligibleForRadialDispatch {
+    if (isDeleted) return false;
     if (urgency == 'resolved' || urgency == 'communityCare' || isInCare || isTnrCommunityCat) return false;
     if (hasVetVisit || isVetVisitPending || isPendingVerification || isAwaitingPostVetDecision) return false;
     if (rescueClaimed || isRescueClaimActive) return false;
@@ -842,6 +857,11 @@ class Sighting {
       'pendingAdoptionUpdateId': pendingAdoptionUpdateId,
       'rescuerUserIds': rescuerUserIds,
       'blockedUserIds': blockedUserIds,
+      'isDeleted': isDeleted,
+      'deletedByAdmin': deletedByAdmin,
+      'deletedAt': deletedAt != null ? Timestamp.fromDate(deletedAt!) : null,
+      'deletedBy': deletedBy,
+      'deletedReason': deletedReason,
     };
   }
 
@@ -909,6 +929,17 @@ class Sighting {
       parsedResolvedAt = DateTime.tryParse(data['resolvedAt']);
     }
 
+    DateTime? parsedDeletedAt;
+    if (data['deletedAt'] is Timestamp) {
+      parsedDeletedAt = (data['deletedAt'] as Timestamp).toDate();
+    } else if (data['deletedAt'] is String) {
+      parsedDeletedAt = DateTime.tryParse(data['deletedAt']);
+    }
+
+    final isDeletedVal = data['isDeleted'] == true;
+    final deletedByAdminVal = data['deletedByAdmin'] == true ||
+        (isDeletedVal && (data['deletedBy'] == 'admin' || data['deletedBy'] != null));
+
     final rawPhotos = data['photoUrls'] ?? data['photos'];
     List<String> photos = [];
     if (rawPhotos is List) {
@@ -963,8 +994,12 @@ class Sighting {
       urgency: normalizedUrgency,
       category: normalizedCategory,
       createdAt: parsedDate,
-      commentCount: (data['commentCount'] is num) ? (data['commentCount'] as num).toInt() : 0,
-      upvotes: (data['upvotes'] is num) ? (data['upvotes'] as num).toInt() : 0,
+      commentCount: (data['commentCount'] is num && (data['commentCount'] as num).toInt() > 0)
+          ? (data['commentCount'] as num).toInt()
+          : 0,
+      upvotes: (data['upvotes'] is num && (data['upvotes'] as num).toInt() > 0)
+          ? (data['upvotes'] as num).toInt()
+          : 0,
       rescueClaimed: data['rescueClaimed'] == true ||
           (data['rescueClaimedBy'] != null &&
               data['rescueClaimedBy'].toString().trim().isNotEmpty),
@@ -1062,6 +1097,11 @@ class Sighting {
           : [],
       outcomeVideoUrl: data['outcomeVideoUrl']?.toString() ??
           data['proofVideoUrl']?.toString(),
+      isDeleted: isDeletedVal,
+      deletedByAdmin: deletedByAdminVal,
+      deletedAt: parsedDeletedAt,
+      deletedBy: data['deletedBy']?.toString(),
+      deletedReason: data['deletedReason']?.toString(),
     );
   }
 }

@@ -196,9 +196,9 @@ class UserProfile {
           .toList();
     }
 
-    final int totalXp = (data['totalXp'] is num)
-        ? (data['totalXp'] as num).toInt()
-        : ((data['xp'] is num) ? (data['xp'] as num).toInt() : 0);
+    final int rawTotalXp = (data['totalXp'] is num) ? (data['totalXp'] as num).toInt() : 0;
+    final int rawXp = (data['xp'] is num) ? (data['xp'] as num).toInt() : 0;
+    final int totalXp = rawTotalXp > rawXp ? rawTotalXp : rawXp;
     final int calculatedLevel = (totalXp / 200).floor() + 1;
 
     final int succRescues = (data['successfulRescues'] is num)

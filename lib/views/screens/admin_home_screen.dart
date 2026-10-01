@@ -115,6 +115,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
   int _currentTab = 0;
   String _flagFilter = 'all';
+  String _flagStatusTab = 'pending'; // 'pending' | 'resolved'
 
   final Map<String, Future<Sighting?>> _sightingCache = {};
   final Map<String, Future<Map<String, dynamic>?>> _commentCache = {};
@@ -141,6 +142,8 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         });
       }
     });
+    // Auto-discover and ensure all active/registered users have Firestore documents
+    FirebaseService.instance.syncMissingUsersFromActivity();
   }
 
   @override
@@ -209,15 +212,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     if (trimmedId.isEmpty) return Future.value(null);
 
     return _sightingCache.putIfAbsent(trimmedId, () async {
-      // 1. Check in-memory sample seed sightings first (instant, 0ms latency)
-      try {
-        final sample = FirebaseService.sampleSightings
-            .where((s) => s.id == trimmedId)
-            .firstOrNull;
-        if (sample != null) return sample;
-      } catch (_) {}
-
-      // 2. Query Firestore with a strict 3-second timeout so it never hangs
+      // 1. Query Firestore first to fetch real-time state and deletion flags
       try {
         final doc = await FirebaseFirestore.instance
             .collection('sightings')
@@ -230,6 +225,15 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       } catch (e) {
         debugPrint('Error loading sighting $trimmedId: $e');
       }
+
+      // 2. Fallback to in-memory sample seed sightings if not in Firestore
+      try {
+        final sample = FirebaseService.sampleSightings
+            .where((s) => s.id == trimmedId)
+            .firstOrNull;
+        if (sample != null) return sample;
+      } catch (_) {}
+
       return null;
     });
   }
@@ -275,6 +279,66 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       }
       return null;
     });
+  }
+
+  bool _isFlagOlderThan30Days(dynamic ts) {
+    if (ts == null) return false;
+    DateTime? dt;
+    if (ts is Timestamp) {
+      dt = ts.toDate();
+    } else if (ts is DateTime) {
+      dt = ts;
+    } else if (ts is String) {
+      dt = DateTime.tryParse(ts);
+    }
+    if (dt == null) return false;
+    return DateTime.now().difference(dt).inDays >= 30;
+  }
+
+  void _confirmClearResolvedFlags() {
+    showDialog(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: [
+            const Icon(Icons.delete_sweep_rounded, color: _red),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Clear Resolved History',
+                style: GoogleFonts.nunito(fontWeight: FontWeight.w900, color: _navy),
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to delete all resolved and dismissed flags from history? This will permanently remove them from database storage to free up space.',
+          style: GoogleFonts.nunito(color: _navy.withValues(alpha: 0.7)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx),
+            child: Text('Cancel',
+                style: GoogleFonts.nunito(color: _navy, fontWeight: FontWeight.w700)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              Navigator.pop(dCtx);
+              final count = await FirebaseService.instance.clearResolvedFlags();
+              _snack('Cleared $count resolved items from history ✓');
+            },
+            child: Text('Clear All',
+                style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
   }
 
   String _formatTimestamp(dynamic ts) {
@@ -533,7 +597,29 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   Widget _buildUsersTab() {
     return Column(
       children: [
-        _buildAdminAppBar('User Management'),
+        _buildAdminAppBar(
+          'User Management',
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.person_add_rounded, color: _adminPurple),
+              tooltip: 'Add / Link User',
+              onPressed: () => _showAddUserDialog(context),
+            ),
+            IconButton(
+              icon: const Icon(Icons.sync_rounded, color: _adminPurple),
+              tooltip: 'Sync Users from Activity',
+              onPressed: () async {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Syncing registered and active users...'),
+                    duration: Duration(seconds: 1),
+                  ),
+                );
+                await FirebaseService.instance.syncMissingUsersFromActivity();
+              },
+            ),
+          ],
+        ),
         Expanded(
           child: StreamBuilder<List<UserProfile>>(
             stream: FirebaseService.instance.streamAllUsers(),
@@ -583,6 +669,94 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
+  void _showAddUserDialog(BuildContext context) {
+    final nameCtrl = TextEditingController();
+    final emailCtrl = TextEditingController();
+    String selectedRole = 'user';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(
+            'Add / Link User',
+            style: GoogleFonts.nunito(fontWeight: FontWeight.w900, color: _navy),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: const InputDecoration(
+                  labelText: 'Full Name / Display Name',
+                  hintText: 'e.g. Sarah Jones',
+                  prefixIcon: Icon(Icons.badge_rounded, color: _adminPurple),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: emailCtrl,
+                keyboardType: TextInputType.emailAddress,
+                decoration: const InputDecoration(
+                  labelText: 'Email Address',
+                  hintText: 'e.g. sarahjones@gmail.com',
+                  prefixIcon: Icon(Icons.email_rounded, color: _adminPurple),
+                ),
+              ),
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                initialValue: selectedRole,
+                decoration: const InputDecoration(labelText: 'Role'),
+                items: const [
+                  DropdownMenuItem(value: 'user', child: Text('Community User')),
+                  DropdownMenuItem(value: 'admin', child: Text('Administrator')),
+                ],
+                onChanged: (val) => setDlgState(() => selectedRole = val ?? 'user'),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _adminPurple,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () async {
+                final name = nameCtrl.text.trim();
+                final email = emailCtrl.text.trim();
+                final messenger = ScaffoldMessenger.of(context);
+                if (name.isEmpty || email.isEmpty) {
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Please enter both name and email')),
+                  );
+                  return;
+                }
+                Navigator.pop(ctx);
+                await FirebaseService.instance.adminAddUser(
+                  displayName: name,
+                  email: email,
+                  role: selectedRole,
+                );
+                if (mounted) {
+                  messenger.showSnackBar(
+                    SnackBar(content: Text('User "$name" registered in management! 🎉')),
+                  );
+                }
+              },
+              child: const Text('Add User'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildUserCard(UserProfile u) {
     final statusColor = u.isBanned
         ? _red
@@ -629,7 +803,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                         width: 44,
                         height: 44,
                         fit: BoxFit.cover,
-                        errorBuilder: (_, __, ___) => Center(
+                        errorBuilder: (_, _, _) => Center(
                           child: Text(
                             u.initials,
                             style: GoogleFonts.nunito(
@@ -714,6 +888,26 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 ),
               ),
             ),
+            if (u.isBanned) ...[
+              const SizedBox(width: 4),
+              IconButton(
+                icon: const Icon(Icons.delete_outline_rounded,
+                    color: _red, size: 20),
+                tooltip: 'Remove from User Management',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+                onPressed: () async {
+                  final confirm = await _confirmAction(
+                    'Remove ${u.displayName}?',
+                    'This will remove this banned user from User Management to free up space.',
+                  );
+                  if (confirm == true) {
+                    await FirebaseService.instance.deleteUserDocument(u.uid);
+                    _snack('${u.displayName} removed from User Management.');
+                  }
+                },
+              ),
+            ],
           ],
         ),
       ),
@@ -764,7 +958,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                           width: 70,
                           height: 70,
                           fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => Center(
+                          errorBuilder: (_, _, _) => Center(
                             child: Text(
                               u.initials,
                               style: GoogleFonts.nunito(
@@ -885,7 +1079,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                           }
                         },
                       ),
-                    if (u.isBanned)
+                    if (u.isBanned) ...[
                       _buildAdminActionButton(
                         icon: Icons.lock_open_rounded,
                         label: 'Unban User',
@@ -896,6 +1090,25 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                           _snack('${u.displayName} has been unbanned.');
                         },
                       ),
+                      const SizedBox(height: 8),
+                      _buildAdminActionButton(
+                        icon: Icons.person_remove_rounded,
+                        label: 'Remove from User Management',
+                        color: _red,
+                        onTap: () async {
+                          final confirm = await _confirmAction(
+                              'Remove ${u.displayName}?',
+                              'This will permanently remove this banned user from User Management to free up space.');
+                          if (confirm == true) {
+                            await FirebaseService.instance
+                                .deleteUserDocument(u.uid);
+                            if (ctx.mounted) Navigator.pop(ctx);
+                            _snack(
+                                '${u.displayName} removed from User Management.');
+                          }
+                        },
+                      ),
+                    ],
                     const SizedBox(height: 8),
                     if (!u.isSuspended && !u.isBanned)
                       _buildAdminActionButton(
@@ -1323,7 +1536,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
   // ─────────────── ADMIN APP BAR ───────────────
 
-  Widget _buildAdminAppBar(String title) {
+  Widget _buildAdminAppBar(String title, {List<Widget>? actions}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
@@ -1347,7 +1560,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 width: 28,
                 height: 28,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => Icon(
+                errorBuilder: (_, _, _) => Icon(
                   Icons.admin_panel_settings_rounded,
                   color: _adminPurple,
                   size: 20,
@@ -1356,14 +1569,17 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             ),
           ),
           const SizedBox(width: 10),
-          Text(
-            title,
-            style: GoogleFonts.nunito(
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-              color: _navy,
+          Expanded(
+            child: Text(
+              title,
+              style: GoogleFonts.nunito(
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+                color: _navy,
+              ),
             ),
           ),
+          if (actions != null) ...actions,
         ],
       ),
     );
@@ -1637,26 +1853,230 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           return _buildEmptyTab(Icons.flag_rounded, 'No flagged items');
         }
 
-        final totalCount = flags.length;
-        final sightingCount =
-            flags.where((f) => _resolveFlagType(f) == 'sighting').length;
-        final commentCount =
-            flags.where((f) => _resolveFlagType(f) == 'comment').length;
-        final reviewCount =
-            flags.where((f) => _resolveFlagType(f) == 'review').length;
-        final chatCount =
-            flags.where((f) => _resolveFlagType(f) == 'chat_message').length;
+        final pendingFlags = flags
+            .where((f) => (f['status'] ?? 'pending') == 'pending')
+            .toList();
 
-        final filteredFlags = flags.where((f) {
+        final allResolvedFlags = flags
+            .where((f) => f['status'] == 'resolved' || f['status'] == 'dismissed')
+            .toList();
+
+        final resolvedFlags = allResolvedFlags.where((f) {
+          final resolvedTs = f['resolvedAt'] ?? f['createdAt'];
+          return !_isFlagOlderThan30Days(resolvedTs);
+        }).toList();
+
+        final pendingTotal = pendingFlags.length;
+        final resolvedTotal = resolvedFlags.length;
+
+        final isViewingPending = _flagStatusTab == 'pending';
+        final activePool = isViewingPending ? pendingFlags : resolvedFlags;
+
+        final totalCount = activePool.length;
+        final sightingCount =
+            activePool.where((f) => _resolveFlagType(f) == 'sighting').length;
+        final commentCount =
+            activePool.where((f) => _resolveFlagType(f) == 'comment').length;
+        final reviewCount =
+            activePool.where((f) => _resolveFlagType(f) == 'review').length;
+        final chatCount =
+            activePool.where((f) => _resolveFlagType(f) == 'chat_message').length;
+
+        final filteredFlags = activePool.where((f) {
           if (_flagFilter == 'all') return true;
           return _resolveFlagType(f) == _flagFilter;
         }).toList();
 
         return Column(
           children: [
+            // Status Sub-Tab Switcher: Pending Review vs Resolved History
+            Container(
+              margin: const EdgeInsets.fromLTRB(16, 10, 16, 4),
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                color: _navy.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _flagStatusTab = 'pending'),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        decoration: BoxDecoration(
+                          color: isViewingPending ? Colors.white : Colors.transparent,
+                          borderRadius: BorderRadius.circular(9),
+                          boxShadow: isViewingPending
+                              ? [
+                                  BoxShadow(
+                                    color: _navy.withValues(alpha: 0.08),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.pending_actions_rounded,
+                              size: 15,
+                              color: isViewingPending ? _adminPurple : _navy.withValues(alpha: 0.5),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Pending Review',
+                              style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: isViewingPending ? _adminPurple : _navy.withValues(alpha: 0.6),
+                              ),
+                            ),
+                            if (pendingTotal > 0) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: isViewingPending ? _red : _red.withValues(alpha: 0.7),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '$pendingTotal',
+                                  style: const TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: GestureDetector(
+                      onTap: () => setState(() => _flagStatusTab = 'resolved'),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        decoration: BoxDecoration(
+                          color: !isViewingPending ? Colors.white : Colors.transparent,
+                          borderRadius: BorderRadius.circular(9),
+                          boxShadow: !isViewingPending
+                              ? [
+                                  BoxShadow(
+                                    color: _navy.withValues(alpha: 0.08),
+                                    blurRadius: 4,
+                                    offset: const Offset(0, 1),
+                                  ),
+                                ]
+                              : null,
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.task_alt_rounded,
+                              size: 15,
+                              color: !isViewingPending ? _adminPurple : _navy.withValues(alpha: 0.5),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Resolved History',
+                              style: GoogleFonts.nunito(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: !isViewingPending ? _adminPurple : _navy.withValues(alpha: 0.6),
+                              ),
+                            ),
+                            if (resolvedTotal > 0) ...[
+                              const SizedBox(width: 6),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: !isViewingPending ? _green : _green.withValues(alpha: 0.6),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  '$resolvedTotal',
+                                  style: const TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // If in resolved tab: retention banner and clear button
+            if (!isViewingPending)
+              Container(
+                margin: const EdgeInsets.fromLTRB(16, 6, 16, 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: _navy.withValues(alpha: 0.04),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: _navy.withValues(alpha: 0.08)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.auto_delete_outlined, size: 14, color: _navy.withValues(alpha: 0.5)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Auto-archives after 30 days',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          color: _navy.withValues(alpha: 0.6),
+                        ),
+                      ),
+                    ),
+                    if (resolvedFlags.isNotEmpty)
+                      GestureDetector(
+                        onTap: () => _confirmClearResolvedFlags(),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: _red.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.delete_sweep_rounded, size: 13, color: _red),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Clear History',
+                                style: GoogleFonts.nunito(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w800,
+                                  color: _red,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+
             // Horizontal filter chips
             Container(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.symmetric(vertical: 6),
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -1679,8 +2099,16 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             Expanded(
               child: filteredFlags.isEmpty
                   ? _buildEmptyTab(
-                      Icons.filter_list_off_rounded,
-                      'No $_flagFilter flags found',
+                      isViewingPending
+                          ? Icons.verified_rounded
+                          : Icons.history_rounded,
+                      isViewingPending
+                          ? (_flagFilter == 'all'
+                              ? 'All clear! No pending flagged items'
+                              : 'No pending $_flagFilter flags found')
+                          : (_flagFilter == 'all'
+                              ? 'No resolved flags in history'
+                              : 'No resolved $_flagFilter flags found'),
                     )
                   : ListView.separated(
                       padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
@@ -1768,6 +2196,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                             color = _red;
                             typeLabel = 'SIGHTING';
 
+                            final isDeleted = sighting?.isDeleted == true;
                             final reportTitle = (sighting != null && sighting.displayTitle.isNotEmpty)
                                 ? sighting.displayTitle
                                 : (f['sightingTitle']?.toString().trim().isNotEmpty == true
@@ -1775,7 +2204,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                     : (sightingId.isNotEmpty
                                         ? 'Sighting #${sightingId.length > 8 ? sightingId.substring(0, 8) : sightingId}'
                                         : 'Flagged Sighting Report'));
-                            cardTitle = reportTitle;
+                            cardTitle = isDeleted ? '$reportTitle [Deleted by Admin]' : reportTitle;
 
                             final reportType = sighting?.category.trim().isNotEmpty == true
                                 ? sighting!.category.trim()
@@ -1787,7 +2216,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                 : (f['locationName']?.toString().trim().isNotEmpty == true
                                     ? f['locationName'].toString().trim()
                                     : '');
-                            metaInfo = '🐾 Type: $reportType${loc.isNotEmpty ? " • 📍 $loc" : ""}';
+                            metaInfo = isDeleted
+                                ? '🗑️ DELETED BY ADMIN • 🐾 Type: $reportType${loc.isNotEmpty ? " • 📍 $loc" : ""}'
+                                : '🐾 Type: $reportType${loc.isNotEmpty ? " • 📍 $loc" : ""}';
 
                             final desc = sighting?.description.trim().isNotEmpty == true
                                 ? sighting!.description.trim()
@@ -2169,6 +2600,17 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                               : _navy.withValues(alpha: 0.5),
                                         ),
                                       ),
+                                      if (f['resolvedAt'] != null) ...[
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          '• ${_formatTimestamp(f['resolvedAt'])}',
+                                          style: GoogleFonts.nunito(
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.w600,
+                                            color: _navy.withValues(alpha: 0.4),
+                                          ),
+                                        ),
+                                      ],
                                       const Spacer(),
                                       GestureDetector(
                                         onTap: () => _handleFlagTap(f),
@@ -2187,6 +2629,24 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                             Icon(Icons.open_in_new_rounded,
                                                 size: 12, color: _adminPurple),
                                           ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 10),
+                                      GestureDetector(
+                                        onTap: () async {
+                                          if (f['docId'] != null) {
+                                            await FirebaseService.instance.deleteFlag(f['docId']);
+                                            _snack('Removed from history');
+                                          }
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4),
+                                          decoration: BoxDecoration(
+                                            color: _navy.withValues(alpha: 0.05),
+                                            borderRadius: BorderRadius.circular(6),
+                                          ),
+                                          child: Icon(Icons.delete_outline_rounded,
+                                              size: 14, color: _navy.withValues(alpha: 0.45)),
                                         ),
                                       ),
                                     ],
@@ -2466,6 +2926,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
     if (sightingId != null && sightingId.isNotEmpty) {
       try {
+        _sightingCache.remove(sightingId);
         final s = await _getCachedSighting(sightingId);
         if (s != null) {
           if (mounted) {
@@ -2478,7 +2939,12 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                   scrollToComments: (type == 'comment'),
                 ),
               ),
-            );
+            ).then((_) {
+              _sightingCache.remove(sightingId);
+              _sightingMap.remove(sightingId);
+              _ensureSightingLoaded(sightingId);
+              if (mounted) setState(() {});
+            });
           }
         } else {
           _snack('This report has already been deleted or removed.');
@@ -2929,6 +3395,22 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                             fontSize: 10,
                             fontWeight: FontWeight.w600,
                             color: _navy.withValues(alpha: 0.4)),
+                      ),
+                      const SizedBox(width: 4),
+                      InkWell(
+                        onTap: () async {
+                          final docId = a['docId']?.toString();
+                          if (docId != null) {
+                            await FirebaseService.instance.deleteAnnouncement(docId);
+                            _snack('Announcement deleted.');
+                          }
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: const Padding(
+                          padding: EdgeInsets.all(4),
+                          child: Icon(Icons.delete_outline_rounded,
+                              size: 16, color: Color(0xFFE53935)),
+                        ),
                       ),
                     ],
                   ),

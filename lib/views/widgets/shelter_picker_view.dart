@@ -295,52 +295,49 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
         services: _regServices.toList(),
         notes: _regNotesCtrl.text.trim(),
       );
-
-      final newShelter = ShelterClinic(
-        id: 'sugg_${DateTime.now().millisecondsSinceEpoch}',
-        name: _regNameCtrl.text.trim(),
-        type: 'shelter',
-        latitude: _regLat,
-        longitude: _regLng,
-        address: _regAddressCtrl.text.trim(),
-        phone: _regPhoneCtrl.text.trim(),
-        operatingHours: _reg24Hours
-            ? '24 Hours Emergency Intake'
-            : (_regHoursCtrl.text.trim().isEmpty ? 'Open Daily' : _regHoursCtrl.text.trim()),
-        services: _regServices.toList(),
-        is24Hours: _reg24Hours,
-        isVerified: false,
-      );
-
+      final submittedName = _regNameCtrl.text.trim();
       setState(() {
-        _allShelters.insert(0, newShelter);
-        _selectedShelter = newShelter;
-        _isPickerExpanded = false;
+        _isPickerExpanded = true;
         _activeTab = 0;
         _isSubmittingNew = false;
+        _selectedShelter = null;
+        _regNameCtrl.clear();
+        _regAddressCtrl.clear();
+        _regPhoneCtrl.clear();
+        _regNotesCtrl.clear();
+        _regHoursCtrl.clear();
       });
 
       widget.onRegisterTabActiveChanged?.call(false);
-
-      widget.onShelterSelected(newShelter);
+      widget.onClearSelection?.call();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            backgroundColor: const Color(0xFFF57C00),
-            duration: const Duration(seconds: 5),
-            content: Row(
+        showDialog(
+          context: context,
+          builder: (dCtx) => AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Row(
               children: [
-                const Icon(Icons.schedule_rounded, color: Colors.white, size: 20),
+                const Icon(Icons.verified_user_rounded, color: Color(0xFF00897B)),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    '${newShelter.name} submitted & selected! Pending admin verification 🔍',
-                    style: GoogleFonts.nunito(fontWeight: FontWeight.w700),
+                    'Shelter Submitted for Review',
+                    style: GoogleFonts.nunito(fontWeight: FontWeight.w900, fontSize: 16),
                   ),
                 ),
               ],
             ),
+            content: Text(
+              'Thank you! "$submittedName" has been submitted for admin verification on the Community Map.\n\nTo safeguard rescued cats from unauthorized or unsafe facilities, newly suggested shelters must be verified by administrators before cats can be transferred to them. Please select an existing verified partner shelter from the list below.',
+              style: GoogleFonts.nunito(fontSize: 13, height: 1.4),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dCtx),
+                child: Text('Understood', style: GoogleFonts.nunito(fontWeight: FontWeight.w800, color: const Color(0xFF00897B))),
+              ),
+            ],
           ),
         );
       }
@@ -348,7 +345,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
       if (mounted) {
         setState(() {
           _isSubmittingNew = false;
-          _regValidationError = 'Failed to register shelter: $e';
+          _regValidationError = 'Failed to suggest shelter: $e';
         });
       }
     }
@@ -442,13 +439,13 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            Icons.near_me_rounded,
+                            Icons.verified_rounded,
                             size: 15,
                             color: _activeTab == 0 ? widget.themeColor : _navy.withValues(alpha: 0.5),
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            'Nearby Shelters (${_allShelters.length})',
+                            'Verified Shelters (${_allShelters.length})',
                             style: GoogleFonts.nunito(
                               fontSize: 12,
                               fontWeight: _activeTab == 0 ? FontWeight.w800 : FontWeight.w600,
@@ -491,13 +488,13 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
                           Icon(
-                            Icons.add_business_rounded,
+                            Icons.add_location_alt_rounded,
                             size: 15,
                             color: _activeTab == 1 ? widget.themeColor : _navy.withValues(alpha: 0.5),
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            'Register New',
+                            'Suggest to Map',
                             style: GoogleFonts.nunito(
                               fontSize: 12,
                               fontWeight: _activeTab == 1 ? FontWeight.w800 : FontWeight.w600,
@@ -822,8 +819,8 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
                     widget.onClearSelection?.call();
                     widget.onRegisterTabActiveChanged?.call(true);
                   },
-                  icon: const Icon(Icons.add_business_rounded, size: 15),
-                  label: Text('Register "$_searchQuery" as New Shelter'),
+                  icon: const Icon(Icons.add_location_alt_rounded, size: 15),
+                  label: Text('Suggest "$_searchQuery" on Map for Verification'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: widget.themeColor,
                     foregroundColor: Colors.white,
@@ -1035,7 +1032,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Register & Suggest Shelter',
+                      'Suggest Shelter for Map Verification',
                       style: GoogleFonts.nunito(
                         fontSize: 14,
                         fontWeight: FontWeight.w900,
@@ -1043,7 +1040,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
                       ),
                     ),
                     Text(
-                      'Matches PawWatch map suggestions and auto-selects for this report',
+                      'Requires admin verification on Community Map before cat transfers',
                       style: GoogleFonts.nunito(
                         fontSize: 10.5,
                         fontWeight: FontWeight.w600,
@@ -1054,6 +1051,34 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF00897B).withValues(alpha: 0.08),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                  color: const Color(0xFF00897B).withValues(alpha: 0.25)),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.shield_outlined,
+                    color: Color(0xFF00897B), size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'To protect rescued cats, newly suggested shelters must be verified by admins on the Community Map before cat transfers can be completed here.',
+                    style: GoogleFonts.nunito(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: const Color(0xFF004D40),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
           const Divider(height: 18),
 
@@ -1499,7 +1524,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                   : const Icon(Icons.check_circle_rounded, size: 18),
               label: Text(
-                _isSubmittingNew ? 'Registering Shelter...' : '🏛️ Register & Select Shelter',
+                _isSubmittingNew ? 'Submitting Suggestion...' : 'Submit Shelter for Map Verification',
                 style: GoogleFonts.nunito(fontSize: 13.5, fontWeight: FontWeight.w800),
               ),
               style: ElevatedButton.styleFrom(

@@ -21,6 +21,7 @@ class MapScreen extends StatefulWidget {
   final VoidCallback? onProfileTap;
   final Sighting? initialFocusedSighting;
   final bool isAdmin;
+  final bool hasUnreadNotifications;
 
   const MapScreen({
     super.key,
@@ -28,6 +29,7 @@ class MapScreen extends StatefulWidget {
     this.onProfileTap,
     this.initialFocusedSighting,
     this.isAdmin = false,
+    this.hasUnreadNotifications = false,
   });
 
   @override
@@ -56,7 +58,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   bool _isLoadingGps = true;
   double _currentZoom = 14.0;
 
-  String _activeFilter = 'All'; // 'All', 'Needs Help', 'Nearby', 'Resolved', 'Shelters & Vets'
+  String _activeFilter = 'All'; // 'All', 'Needs Help', 'Needs Home', 'Nearby', 'Shelters & Vets'
   double _radiusFilterKm = 5.0;
   bool _includeShelters = true;
 
@@ -223,15 +225,18 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         return false;
       }
 
+      // Prioritize active cases (needs help, needs home, urgent): exclude resolved from map
+      if (s.urgency == 'resolved' && s.id != widget.initialFocusedSighting?.id) {
+        return false;
+      }
+
       switch (_activeFilter) {
         case 'Needs Home':
           return s.isNeedsHome;
         case 'Needs Help':
           return (s.urgency == 'urgent' || s.urgency == 'needsHelp') && !s.isNeedsHome;
         case 'Nearby':
-          return distKm <= min(_radiusFilterKm, 3.0) && s.urgency != 'resolved';
-        case 'Resolved':
-          return s.urgency == 'resolved';
+          return distKm <= min(_radiusFilterKm, 3.0);
         case 'Shelters & Vets':
           return false; // Show only shelters & clinics in this mode
         case 'All':
@@ -242,7 +247,6 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   }
 
   List<ShelterClinic> _filterShelters() {
-    if (_activeFilter == 'Resolved') return [];
     if (_activeFilter == 'Needs Help') return [];
     if (_activeFilter == 'Needs Home') return [];
     if (!_includeShelters && _activeFilter != 'Shelters & Vets') return [];
@@ -439,142 +443,202 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   }
 
   Widget _buildBrandedHeader() {
-    final user = FirebaseAuth.instance.currentUser;
-    final displayName = user?.displayName ?? user?.email ?? 'PawWatcher';
-    final initials = displayName.isNotEmpty
-        ? displayName.trim().split(' ').map((p) => p.isNotEmpty ? p[0] : '').take(2).join().toUpperCase()
-        : 'PW';
-
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+      child: Stack(
+        alignment: Alignment.center,
         children: [
-          // Notification Bell
-          GestureDetector(
-            onTap: widget.onNotificationTap,
-            behavior: HitTestBehavior.opaque,
-            child: Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: _navy.withValues(alpha: 0.08),
-                    blurRadius: 10,
-                    offset: const Offset(0, 2),
-                  ),
-                ],
+          Align(
+            alignment: Alignment.centerLeft,
+            child: _buildNotificationBell(),
+          ),
+          Center(
+            child: _buildPawWatchLogo(),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: _buildUserXpWidget(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNotificationBell() {
+    return GestureDetector(
+      onTap: widget.onNotificationTap,
+      behavior: HitTestBehavior.opaque,
+      child: Stack(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: _navy.withValues(alpha: 0.07),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ],
+            ),
+            child: const Icon(Icons.notifications_outlined, color: _navy, size: 22),
+          ),
+          if (widget.hasUnreadNotifications)
+            Positioned(
+              top: 6,
+              right: 6,
+              child: Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: _lavender,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _bgWhite, width: 1.5),
+                ),
               ),
-              child: Stack(
-                alignment: Alignment.center,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPawWatchLogo() {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Image.asset(
+          'assets/images/AppLogo.png',
+          height: 38,
+          fit: BoxFit.contain,
+        ),
+        const SizedBox(height: 2),
+        RichText(
+          text: TextSpan(
+            style: GoogleFonts.nunito(fontSize: 10.5, fontWeight: FontWeight.w800),
+            children: const [
+              TextSpan(text: 'Rescue.', style: TextStyle(color: _navy)),
+              TextSpan(text: ' '),
+              TextSpan(text: 'Report.', style: TextStyle(color: _lavender)),
+              TextSpan(text: ' '),
+              TextSpan(text: 'Earn.', style: TextStyle(color: _green)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildUserXpWidget() {
+    final user = FirebaseAuth.instance.currentUser;
+    final uid = user?.uid ?? 'anon';
+
+    return StreamBuilder<UserProfile>(
+      stream: _userProfileStream,
+      builder: (context, snapshot) {
+        final profile = snapshot.data ??
+            UserProfile(
+              uid: uid,
+              displayName: user?.displayName ?? 'PawWatcher',
+              email: user?.email ?? '',
+              joinedAt: DateTime.now(),
+            );
+
+        return GestureDetector(
+          onTap: widget.onProfileTap,
+          behavior: HitTestBehavior.opaque,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Stack(
+                clipBehavior: Clip.none,
                 children: [
-                  const Icon(Icons.notifications_outlined, color: _navy, size: 22),
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: profile.trustTierColor.withValues(alpha: 0.18),
+                      shape: BoxShape.circle,
+                      border: Border.all(color: profile.trustTierColor, width: 2),
+                    ),
+                    child: Center(
+                      child: Text(
+                        profile.initials,
+                        style: GoogleFonts.nunito(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w800,
+                          color: profile.trustTierColor,
+                        ),
+                      ),
+                    ),
+                  ),
                   Positioned(
-                    top: 8,
-                    right: 8,
+                    bottom: -3,
+                    right: -3,
                     child: Container(
-                      width: 9,
-                      height: 9,
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                       decoration: BoxDecoration(
-                        color: _coral,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 1.5),
+                        color: profile.trustTierColor,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        'Lv.${profile.level}',
+                        style: GoogleFonts.nunito(
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.white,
+                        ),
                       ),
                     ),
                   ),
                 ],
               ),
-            ),
-          ),
-
-          // Branded Center Title & Logo
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Image.asset(
-                'assets/images/AppLogo.png',
-                height: 34,
-                fit: BoxFit.contain,
+              const SizedBox(height: 4),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.star_rounded, size: 11, color: const Color(0xFFFFA000)),
+                  const SizedBox(width: 1),
+                  Text(
+                    profile.trustScore.toStringAsFixed(1),
+                    style: GoogleFonts.nunito(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w800,
+                      color: _navy.withValues(alpha: 0.75),
+                    ),
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${profile.totalXp} XP',
+                    style: GoogleFonts.nunito(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w700,
+                      color: _navy.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 2),
-              RichText(
-                text: TextSpan(
-                  style: GoogleFonts.nunito(fontSize: 10.5, fontWeight: FontWeight.w800),
-                  children: const [
-                    TextSpan(text: 'Rescue.', style: TextStyle(color: _navy)),
-                    TextSpan(text: ' '),
-                    TextSpan(text: 'Report.', style: TextStyle(color: _lavender)),
-                    TextSpan(text: ' '),
-                    TextSpan(text: 'Earn.', style: TextStyle(color: _green)),
-                  ],
+              SizedBox(
+                width: 58,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: profile.levelProgress,
+                    minHeight: 4,
+                    backgroundColor: _lavLight,
+                    valueColor:
+                        AlwaysStoppedAnimation<Color>(profile.trustTierColor),
+                  ),
                 ),
               ),
             ],
           ),
-
-          // User Level / XP Avatar
-          GestureDetector(
-            onTap: widget.onProfileTap,
-            behavior: HitTestBehavior.opaque,
-            child: StreamBuilder<UserProfile>(
-              stream: _userProfileStream,
-              builder: (context, snapshot) {
-                final level = snapshot.data?.level ?? 1;
-                return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: _navy.withValues(alpha: 0.08),
-                        blurRadius: 10,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: _lavLight,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          'Lv.$level',
-                          style: GoogleFonts.nunito(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            color: _navy,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      CircleAvatar(
-                        radius: 13,
-                        backgroundColor: _lavender,
-                        child: Text(
-                          initials,
-                          style: GoogleFonts.nunito(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w900,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 
@@ -656,7 +720,6 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       {'label': 'Needs Help', 'icon': Icons.warning_amber_rounded},
       {'label': 'Needs Home', 'icon': Icons.home_outlined},
       {'label': 'Nearby', 'icon': Icons.near_me_outlined},
-      {'label': 'Resolved', 'icon': Icons.check_circle_outline_rounded},
       {'label': 'Shelters & Vets', 'icon': Icons.health_and_safety_outlined},
     ];
 
@@ -781,7 +844,8 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         if (snapshot.hasError) {
           debugPrint('⚠️ Firestore map streamSightings error: ${snapshot.error}');
         }
-        final sightings = snapshot.data ?? [];
+        final sightings =
+            (snapshot.data ?? []).where((s) => !s.isDeleted).toList();
         final filteredSightings = _filterSightings(sightings);
         final filteredShelters = _filterShelters();
 
@@ -1885,8 +1949,12 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           children: [
             const Icon(Icons.warning_amber_rounded, color: Color(0xFFE53935)),
             const SizedBox(width: 8),
-            Text('Admin: Delete Report',
-                style: GoogleFonts.nunito(fontWeight: FontWeight.w900, color: _navy)),
+            Expanded(
+              child: Text(
+                'Admin: Delete Report',
+                style: GoogleFonts.nunito(fontWeight: FontWeight.w900, color: _navy),
+              ),
+            ),
           ],
         ),
         content: Text(

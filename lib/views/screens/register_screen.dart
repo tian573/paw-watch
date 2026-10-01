@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import '../../services/firebase_service.dart';
 import '../../services/text_moderation_service.dart';
 
 class RegisterScreen extends StatefulWidget {
@@ -81,6 +82,12 @@ class _RegisterScreenState extends State<RegisterScreen>
         password: _passwordCtrl.text,
       );
       await credential.user?.updateDisplayName(_displayNameCtrl.text.trim());
+      if (credential.user != null) {
+        await FirebaseService.instance.ensureUserDoc(
+          credential.user!,
+          displayName: _displayNameCtrl.text.trim(),
+        );
+      }
       if (mounted) {
         final email = FirebaseAuth.instance.currentUser?.email;
         if (email == 'admin@example.com') {
@@ -125,6 +132,13 @@ class _RegisterScreenState extends State<RegisterScreen>
         await GoogleSignIn().signOut();
         _showSnackBar('This Google account is already registered. Please log in instead.');
         return;
+      }
+
+      if (userCredential.user != null) {
+        await FirebaseService.instance.ensureUserDoc(
+          userCredential.user!,
+          displayName: userCredential.user!.displayName,
+        );
       }
 
       if (mounted) {

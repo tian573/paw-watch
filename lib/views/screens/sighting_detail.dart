@@ -68,6 +68,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   String? _validateCommentSpam(String text) {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return 'Please enter a comment.';
+    if (FirebaseService.instance.isCurrentUserAdmin) return null;
     if (trimmed.length < 2) return 'Comment is too short.';
 
     // Content moderation: check profanity, emoji-only, and gibberish spam
@@ -543,7 +544,6 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     final reasons = [
       'Fake cat / re-photographed screen',
       'Fake or inaccurate location',
-      'Cat not here / already gone',
       'Not a cat / wrong animal',
       'Spam or duplicate',
       'Inappropriate / graphic content',
@@ -2153,7 +2153,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       badgeColor: const Color(0xFFE65100),
                       onTap: () {
                         Navigator.pop(ctx);
-                        _showActionProofSheet('sheltered', s);
+                        _showOutcomeConfirmationRequestSheet('sheltered', s);
                       },
                     ),
                     if (rescuerId.isNotEmpty && rescuerId != _uid) ...[
@@ -3812,6 +3812,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           'Your foster custody request for this cat was previously declined by the reporter.');
       return;
     }
+    if (action == 'sheltered') {
+      _showOutcomeConfirmationRequestSheet('sheltered', s);
+      return;
+    }
     final col = _aColor(action);
     final actionLabel = _aLabels[action] ?? action;
     final xp = _aXp[action] ?? 10;
@@ -4567,8 +4571,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               Expanded(
                                 child: Text(
                                   isOnRegisterNewTab
-                                      ? 'You have an unregistered shelter draft. Please press "Register your suggested Shelter" first, or switch to Nearby Shelters to pick an existing one.'
-                                      : 'Please choose a nearby shelter or register a new one.',
+                                      ? 'Please choose a verified shelter partner from the Verified Shelters tab, or submit your suggestion for map verification.'
+                                      : 'Please choose a verified shelter partner from the list. To add a new shelter, please suggest it on the Map radar first.',
                                   style: GoogleFonts.nunito(
                                     fontSize: 11.5,
                                     fontWeight: FontWeight.w700,
@@ -4907,8 +4911,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                           label: 'Shelter');
                                   if (sNameErr != null || shelterNameCtrl.text.trim().isEmpty) {
                                     final msg = isOnRegisterNewTab
-                                        ? 'You have an unregistered shelter draft. Please press "Register your suggested Shelter" first, or pick from Nearby Shelters.'
-                                        : (sNameErr ?? 'Please select a shelter or register a new one first.');
+                                        ? 'Please choose a verified shelter partner from the Verified Shelters tab, or submit your suggestion for map verification.'
+                                        : (sNameErr ?? 'Please select a verified partner shelter from the list. To add a new shelter, suggest it on the Map radar first.');
                                     setSheetState(() {
                                       hasAttemptedSubmit = true;
                                       formValidationError = msg;
@@ -5253,6 +5257,268 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               ],
             ),
           ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdminDeletedReportBanner(Sighting s) {
+    final deletedAtStr = s.deletedAt != null ? _fmtTime(s.deletedAt) : null;
+    final reason = (s.deletedReason?.isNotEmpty == true)
+        ? s.deletedReason!
+        : 'Violated community guidelines';
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFE53935).withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: const Color(0xFFE53935).withValues(alpha: 0.35),
+          width: 1.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE53935).withValues(alpha: 0.15),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.gavel_rounded,
+                    size: 20, color: Color(0xFFE53935)),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          'DELETED BY ADMIN',
+                          style: GoogleFonts.nunito(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w900,
+                            color: const Color(0xFFE53935),
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 5, vertical: 1.5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE53935),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            'MODERATED',
+                            style: GoogleFonts.nunito(
+                              fontSize: 8.5,
+                              fontWeight: FontWeight.w900,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (deletedAtStr != null)
+                      Text(
+                        'Moderated on $deletedAtStr',
+                        style: GoogleFonts.nunito(
+                          fontSize: 10.5,
+                          color: _navy.withValues(alpha: 0.45),
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // Reason Box
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: const Color(0xFFE53935).withValues(alpha: 0.2),
+                width: 1,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.info_outline_rounded,
+                        size: 14, color: Color(0xFFE53935)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Admin Deletion Reason:',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: const Color(0xFFC62828),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  reason,
+                  style: GoogleFonts.nunito(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: _navy,
+                    height: 1.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          // Reporter info box
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            decoration: BoxDecoration(
+              color: _navy.withValues(alpha: 0.04),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.person_outline_rounded,
+                    size: 14, color: _navy.withValues(alpha: 0.6)),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: RichText(
+                    text: TextSpan(
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        color: _navy.withValues(alpha: 0.7),
+                      ),
+                      children: [
+                        const TextSpan(text: 'Originally reported by: '),
+                        TextSpan(
+                          text: s.reporterName,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w800,
+                            color: _navy,
+                          ),
+                        ),
+                        TextSpan(
+                          text: ' (${s.timeAgo})',
+                          style: TextStyle(
+                            color: _navy.withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'This report was removed by an administrator. Community actions and dispatch updates are disabled for this archive.',
+            style: GoogleFonts.nunito(
+              fontSize: 11,
+              color: _navy.withValues(alpha: 0.6),
+              fontWeight: FontWeight.w600,
+              height: 1.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAdminReviewModeNotice() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF673AB7).withValues(alpha: 0.07),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFF673AB7).withValues(alpha: 0.25),
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(7),
+            decoration: BoxDecoration(
+              color: const Color(0xFF673AB7).withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.admin_panel_settings_rounded,
+                size: 20, color: Color(0xFF673AB7)),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      'ADMIN REVIEW MODE',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w900,
+                        color: const Color(0xFF673AB7),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF673AB7),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        'REVIEW ONLY',
+                        style: GoogleFonts.nunito(
+                          fontSize: 8.5,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  'Community rescue actions are hidden for administrators. Use the top-right menu (•••) for moderation actions like deleting reports or moderating users.',
+                  style: GoogleFonts.nunito(
+                    fontSize: 11.5,
+                    color: _navy.withValues(alpha: 0.75),
+                    fontWeight: FontWeight.w600,
+                    height: 1.35,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -6919,6 +7185,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             ),
           );
         }
+        final isAdmin = FirebaseService.instance.isCurrentUserAdmin;
         final isCaretaker = _uid != null &&
             (_uid == s.careTakerId ||
                 _isOwner(s) ||
@@ -6947,6 +7214,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
+                          if (s.isDeleted) ...[
+                            _buildAdminDeletedReportBanner(s),
+                            const SizedBox(height: 12),
+                          ],
                           if (showWaitingOnTop) ...[
                             _buildTopWaitingBoxes(s),
                             const SizedBox(height: 14),
@@ -7079,7 +7350,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           if (!showWaitingOnTop &&
                               s.pendingOutcomeAction != null &&
                               s.pendingOutcomeAction!.isNotEmpty &&
-                              s.urgency != 'resolved') ...[
+                              s.urgency != 'resolved' &&
+                              s.resolvedByAction != 'sheltered' &&
+                              s.resolvedByAction != 'rehomed') ...[
                             _buildOutcomeRequestBanner(s),
                             const SizedBox(height: 16),
                           ],
@@ -7095,7 +7368,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             _buildCommunityCatBanner(s),
                             const SizedBox(height: 16),
                           ],
-                          if (s.urgency != 'resolved') ...[
+                          if (isAdmin) ...[
+                            if (!s.isDeleted) ...[
+                              _buildAdminReviewModeNotice(),
+                              const SizedBox(height: 16),
+                            ],
+                          ] else if (s.isDeleted) ...[
+                            // Do not show rescue actions for deleted report
+                          ] else if (s.urgency != 'resolved') ...[
                             _buildActions(s, showWaitingOnTop),
                             if (_hasActed) ...[
                               const SizedBox(height: 12),
@@ -7107,7 +7387,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           const SizedBox(height: 20),
                           _buildCommunity(s),
                           SizedBox(
-                            height: ((s.urgency != 'resolved') ? 140.0 : 60.0) +
+                            height: ((!isAdmin && !s.isDeleted && s.urgency != 'resolved') ? 140.0 : 60.0) +
                                 MediaQuery.paddingOf(context).bottom,
                           ),
                         ],
@@ -7117,7 +7397,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 ],
               ),
               Positioned(
-                  left: 0, right: 0, bottom: 0, child: _buildRescueBtn(s)),
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  child: (s.isDeleted || isAdmin)
+                      ? const SizedBox.shrink()
+                      : _buildRescueBtn(s)),
             ],
           ),
         );
@@ -9365,7 +9650,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (!s.isAwaitingPostVetDecision) ...[
+          if (_isOwner(s) && !s.isAwaitingPostVetDecision) ...[
             Container(
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -9402,7 +9687,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               s.pendingHandoverRescuerId!.isNotEmpty) ...[
             _buildHandoverRequestBanner(s),
           ] else if (s.pendingOutcomeAction != null &&
-              s.pendingOutcomeAction!.isNotEmpty) ...[
+              s.pendingOutcomeAction!.isNotEmpty &&
+              s.urgency != 'resolved' &&
+              s.resolvedByAction != 'sheltered' &&
+              s.resolvedByAction != 'rehomed') ...[
             _buildOutcomeRequestBanner(s),
           ] else if (s.pendingAdoptionApplicantId != null &&
               s.pendingAdoptionApplicantId!.isNotEmpty) ...[
@@ -9802,7 +10090,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   asset: 'assets/images/shelter.png',
                   sub: '+120 XP',
                   color: const Color(0xFFE65100),
-                  onTap: () => _showActionProofSheet('sheltered', s),
+                  onTap: () => _showOutcomeConfirmationRequestSheet('sheltered', s),
                 ),
                 const SizedBox(width: 10),
                 _buildPostVetActionBox(
@@ -9955,9 +10243,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   ? (s.isPostVetDecisionWindowExpired &&
                                           s.postVetCustody !=
                                               'rescuerInCharge'
-                                      ? '⏳ Decision Window Expired'
-                                      : '⏳ Vet Visit Verified • Rescuer in Charge')
-                                  : '⏳ Awaiting Decision',
+                                      ? 'Decision Window Expired'
+                                      : 'Vet Visit Verified • Rescuer in Charge')
+                                  : 'Awaiting Decision',
                               style: GoogleFonts.nunito(
                                 fontSize: 13.5,
                                 fontWeight: FontWeight.w900,
@@ -10201,10 +10489,11 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
   Widget _buildVetVisitRequestBanner(Sighting s) {
     final isOwner = _isOwner(s);
+    final isAdmin = FirebaseService.instance.isCurrentUserAdmin;
     final rescuerId = s.pendingVetRescuerId ?? '';
     final rescuerName = s.pendingVetRescuerName ?? 'Rescuer';
     final isMeWhoSubmitted = _uid != null && _uid == rescuerId;
-    final canVerify = isOwner && !isMeWhoSubmitted;
+    final canVerify = (isOwner || isAdmin) && !isMeWhoSubmitted;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -10374,7 +10663,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       }
                     },
                     icon: const Icon(Icons.check_circle_rounded, size: 15),
-                    label: Text('Confirm (+100 XP)',
+                    label: Text(
+                        isAdmin && !isOwner
+                            ? 'Verify as Admin (+100 XP)'
+                            : 'Confirm (+100 XP)',
                         style: GoogleFonts.nunito(
                             fontWeight: FontWeight.w800, fontSize: 11.5)),
                   ),
@@ -10422,7 +10714,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
-                          'Your vet report was submitted. Awaiting verification from the reporter (${s.reporterName.isNotEmpty ? s.reporterName : "Reporter"}).',
+                          'Your vet report was submitted. Awaiting verification from the reporter (${s.reporterName.isNotEmpty ? s.reporterName : "Reporter"}) or admin (+100 XP awarded upon confirmation).',
                           style: GoogleFonts.nunito(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
@@ -10511,15 +10803,22 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         ? 'Permanent Rehoming'
         : (isSheltered ? 'Shelter Transfer' : 'Return to Spot');
     final isOwner = _isOwner(s);
-    final canFinalize = isOwner || (_uid != null && _uid == s.careTakerId);
+    final isAdmin = FirebaseService.instance.isCurrentUserAdmin;
+    final canFinalize =
+        isOwner || (_uid != null && _uid == s.careTakerId) || isAdmin;
+    final canCancel =
+        (_uid != null && (_uid == s.careTakerId || _uid == s.reporterId || isOwner)) ||
+            isAdmin;
+    final themeColor =
+        isSheltered ? const Color(0xFFE65100) : const Color(0xFF2E7D32);
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF2E7D32).withValues(alpha: 0.08),
+        color: themeColor.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: const Color(0xFF2E7D32).withValues(alpha: 0.35),
+          color: themeColor.withValues(alpha: 0.35),
           width: 1.5,
         ),
       ),
@@ -10530,14 +10829,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
-                decoration: const BoxDecoration(
-                  color: Color(0xFF2E7D32),
+                decoration: BoxDecoration(
+                  color: themeColor,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                     isRehome
                         ? Icons.celebration
-                        : (isSheltered ? Icons.house : Icons.pets),
+                        : (isSheltered ? Icons.house_rounded : Icons.pets),
                     color: Colors.white,
                     size: 20),
               ),
@@ -10547,15 +10846,19 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Outcome Confirmation: $actionLabel',
+                      isSheltered
+                          ? 'Shelter Transfer • Confirmation'
+                          : 'Outcome Confirmation: $actionLabel',
                       style: GoogleFonts.nunito(
                         fontSize: 14,
                         fontWeight: FontWeight.w900,
-                        color: const Color(0xFF2E7D32),
+                        color: themeColor,
                       ),
                     ),
                     Text(
-                      '${s.careTakerName ?? "Caretaker"} completed the care plan and submitted: $actionLabel',
+                      isSheltered
+                          ? 'Shelter transfer submitted with admission proof. Tap below to confirm and finalize.'
+                          : '${s.careTakerName ?? "Caretaker"} completed the care plan and submitted: $actionLabel',
                       style: GoogleFonts.nunito(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -10567,6 +10870,52 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               ),
             ],
           ),
+          if (isSheltered &&
+              (s.shelterOrClinicName != null && s.shelterOrClinicName!.isNotEmpty)) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: themeColor.withValues(alpha: 0.25)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.home_work_rounded, size: 18, color: themeColor),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          s.shelterOrClinicName!,
+                          style: GoogleFonts.nunito(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: _navy,
+                          ),
+                        ),
+                        if (s.updatedLocationAddress != null &&
+                            s.updatedLocationAddress!.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            s.updatedLocationAddress!,
+                            style: GoogleFonts.nunito(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: _navy.withValues(alpha: 0.65),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           if (s.pendingOutcomeNote != null && s.pendingOutcomeNote!.isNotEmpty) ...[
             const SizedBox(height: 8),
             Container(
@@ -10588,7 +10937,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               ),
             ),
           ],
-          if (s.pendingOutcomeProofUrl != null && s.pendingOutcomeProofUrl!.isNotEmpty) ...[
+          if (s.pendingOutcomeProofUrl != null &&
+              s.pendingOutcomeProofUrl!.isNotEmpty) ...[
             const SizedBox(height: 8),
             PawImage(
               url: s.pendingOutcomeProofUrl!,
@@ -10599,56 +10949,133 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               placeholder: const SizedBox.shrink(),
             ),
           ],
-          if (canFinalize) ...[
+          if (!canFinalize && isSheltered) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: themeColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Color(0xFFE65100),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Waiting for Admin Shelter Verification. Other decision steps are locked while under review.',
+                      style: GoogleFonts.nunito(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFFE65100),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+          if (canFinalize || canCancel) ...[
             const SizedBox(height: 12),
             Row(
               children: [
-                Expanded(
-                  child: ElevatedButton.icon(
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2E7D32),
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      padding: const EdgeInsets.symmetric(vertical: 10),
+                if (canFinalize) ...[
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: themeColor,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      ),
+                      onPressed: () async {
+                        if (!DoubleTapGuard.allow('finalize_outcome_${s.id}')) {
+                          return;
+                        }
+                        try {
+                          if (isSheltered) {
+                            await FirebaseService.instance
+                                .approveOutcomeConfirmation(
+                              sightingId: s.id,
+                              outcomeAction: 'sheltered',
+                              updateId: s.pendingOutcomeUpdateId,
+                            );
+                            _snack(
+                                'Shelter transfer confirmed! Report marked as Sheltered 🏛️🐾');
+                          } else {
+                            await FirebaseService.instance.completeCareOutcome(
+                              sightingId: s.id,
+                              outcomeAction: action,
+                              note: s.pendingOutcomeNote ?? '',
+                            );
+                            _snack('Outcome completed and resolved! 🐾🎉');
+                          }
+                        } catch (e) {
+                          DoubleTapGuard.reset('finalize_outcome_${s.id}');
+                          _snack('❌ Failed to finalize: $e');
+                        }
+                      },
+                      icon: Icon(
+                          isSheltered ? Icons.verified_rounded : Icons.celebration,
+                          size: 16),
+                      label: Text(
+                          isRehome
+                              ? 'Confirm & Finalize Rehomed 🎉'
+                              : (isSheltered
+                                  ? 'Confirm & Finalize Shelter Transfer 🏛️'
+                                  : 'Confirm & Finalize Return 🌿'),
+                          style: GoogleFonts.nunito(
+                              fontWeight: FontWeight.w800, fontSize: 12)),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                ],
+                if (canCancel) ...[
+                  OutlinedButton(
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.red.withValues(alpha: 0.5)),
+                      foregroundColor: Colors.red,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(
+                          vertical: 10, horizontal: 14),
                     ),
                     onPressed: () async {
-                      if (!DoubleTapGuard.allow('finalize_outcome_${s.id}')) return;
-                      await FirebaseService.instance.completeCareOutcome(
-                        sightingId: s.id,
-                        outcomeAction: action,
-                        note: s.pendingOutcomeNote ?? '',
-                      );
-                      _snack('Outcome completed and resolved! 🐾🎉');
+                      if (!DoubleTapGuard.allow('decline_outcome_${s.id}')) {
+                        return;
+                      }
+                      try {
+                        await FirebaseService.instance.declineOutcomeConfirmation(
+                          sightingId: s.id,
+                          updateId: s.pendingOutcomeUpdateId,
+                        );
+                        _snack(isSheltered
+                            ? (isAdmin
+                                ? 'Shelter transfer request rejected.'
+                                : 'Shelter transfer submission cancelled.')
+                            : 'Outcome request cancelled.');
+                      } catch (e) {
+                        DoubleTapGuard.reset('decline_outcome_${s.id}');
+                        _snack('❌ Failed: $e');
+                      }
                     },
-                    icon: const Icon(Icons.celebration, size: 16),
-                    label: Text(
-                        isRehome
-                            ? 'Confirm & Finalize Rehomed 🎉'
-                            : (isSheltered
-                                ? 'Confirm & Finalize Shelter 🏛️'
-                                : 'Confirm & Finalize Return 🌿'),
-                        style: GoogleFonts.nunito(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                    child: Text(
+                        isSheltered
+                            ? (isAdmin ? 'Reject' : 'Cancel Submission')
+                            : 'Cancel',
+                        style: GoogleFonts.nunito(
+                            fontWeight: FontWeight.w800, fontSize: 12)),
                   ),
-                ),
-                const SizedBox(width: 8),
-                OutlinedButton(
-                  style: OutlinedButton.styleFrom(
-                    side: BorderSide(color: Colors.red.withValues(alpha: 0.5)),
-                    foregroundColor: Colors.red,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-                  ),
-                  onPressed: () async {
-                    if (!DoubleTapGuard.allow('decline_outcome_${s.id}')) return;
-                    await FirebaseService.instance.declineOutcomeConfirmation(
-                      sightingId: s.id,
-                      updateId: s.pendingOutcomeUpdateId,
-                    );
-                    _snack('Outcome request cancelled.');
-                  },
-                  child: Text('Cancel',
-                      style: GoogleFonts.nunito(fontWeight: FontWeight.w800, fontSize: 12.5)),
-                ),
+                ],
               ],
             ),
           ],
@@ -11713,8 +12140,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                 Expanded(
                                   child: Text(
                                     isOnRegisterNewTab
-                                        ? 'You have an unregistered shelter draft. Please press "Register your suggested Shelter" first, or switch to Nearby Shelters to pick an existing one.'
-                                        : 'Please choose a nearby shelter or register a new one.',
+                                        ? 'Please choose a verified shelter partner from the Verified Shelters tab, or submit your suggestion for map verification.'
+                                        : 'Please choose a verified shelter partner from the list. To add a new shelter, please suggest it on the Map radar first.',
                                     style: GoogleFonts.nunito(
                                       fontSize: 11.5,
                                       fontWeight: FontWeight.w700,
@@ -12350,8 +12777,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                           label: 'Shelter name');
                                   if (sErr != null || shelterNameCtrl.text.trim().isEmpty) {
                                     final msg = isOnRegisterNewTab
-                                        ? 'You have an unregistered shelter draft. Please press "Register your suggested Shelter" first, or pick from Nearby Shelters.'
-                                        : (sErr ?? 'Please select a shelter or register a new one first.');
+                                        ? 'Please choose a verified shelter partner from the Verified Shelters tab, or submit your suggestion for map verification.'
+                                        : (sErr ?? 'Please select a verified partner shelter from the list. To add a new shelter, suggest it on the Map radar first.');
                                     setSheetState(() {
                                       hasAttemptedSubmit = true;
                                       formValidationError = msg;
@@ -12428,22 +12855,21 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                     outcomeAction: outcomeAction,
                                     note: finalNote.isNotEmpty
                                         ? finalNote
-                                        : (isRehome
-                                            ? 'Rehomed with a loving family!'
-                                            : (isSheltered ? 'Admitted to shelter' : 'Returned safely to spot')),
+                                        : (isSheltered
+                                            ? 'Admitted to shelter partner'
+                                            : (isRehome
+                                                ? 'Rehomed with a loving family!'
+                                                : 'Returned safely to spot')),
                                     proofPhotoFile: proofFile,
                                     proofVideoFile: proofVideoFile,
-                                    updatedLatitude: (isSheltered || outcomeAction == 'returnedToSpot')
-                                        ? shelterLat
-                                        : null,
-                                    updatedLongitude: (isSheltered || outcomeAction == 'returnedToSpot')
-                                        ? shelterLng
-                                        : null,
-                                    updatedLocationAddress: (isSheltered || outcomeAction == 'returnedToSpot') &&
-                                            shelterAddressCtrl.text.trim().isNotEmpty
-                                        ? shelterAddressCtrl.text.trim()
-                                        : null,
-                                    shelterOrClinicName: isSheltered && shelterNameCtrl.text.trim().isNotEmpty
+                                    updatedLatitude: shelterLat,
+                                    updatedLongitude: shelterLng,
+                                    updatedLocationAddress:
+                                        shelterAddressCtrl.text.trim().isNotEmpty
+                                            ? shelterAddressCtrl.text.trim()
+                                            : null,
+                                    shelterOrClinicName: isSheltered &&
+                                            shelterNameCtrl.text.trim().isNotEmpty
                                         ? shelterNameCtrl.text.trim()
                                         : null,
                                   );
@@ -12452,10 +12878,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                     setState(() {
                                       _hasActed = true;
                                     });
-                                    _snack(isRehome
-                                        ? '🎉 Cat successfully marked as permanently rehomed! +$earnedXp XP'
-                                        : (isSheltered
-                                            ? '🏛️ Cat successfully transferred to shelter! +$earnedXp XP'
+                                    _snack(isSheltered
+                                        ? '🏛️ Cat safely admitted to shelter partner! Report marked as Sheltered (+${earnedXp > 0 ? earnedXp : 120} XP)'
+                                        : (isRehome
+                                            ? '🎉 Cat successfully marked as permanently rehomed! +$earnedXp XP'
                                             : '🌿 Cat returned to spot as a protected Community Cat! +$earnedXp XP'));
                                   }
                                 } catch (e) {
@@ -14188,6 +14614,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   Widget _buildActions(Sighting s, [bool showWaitingOnTop = false]) {
+    if (FirebaseService.instance.isCurrentUserAdmin || s.isDeleted) {
+      return const SizedBox.shrink();
+    }
     final allActs = [
       {
         'key': 'vet',
@@ -15184,16 +15613,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
               List<Map<String, dynamic>> getReplies(String parentId) {
                 return updates
-                    .where((r) =>
-                        r['parentId'] == parentId && r['isDeleted'] != true)
+                    .where((r) => r['parentId'] == parentId)
                     .toList();
               }
 
               final top = updates.where((u) {
                 if ((u['parentId'] ?? '') != '') return false;
-                final isDeleted = u['isDeleted'] == true;
-                final childReplies = getReplies(u['id'] ?? '');
-                if (isDeleted && childReplies.isEmpty) return false;
                 return true;
               }).toList();
 
@@ -15222,7 +15647,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             },
           ),
           const SizedBox(height: 14),
-          _buildCommentInput(s.id),
+          _buildCommentInput(s.id, s.isDeleted),
         ]),
       );
 
@@ -15244,8 +15669,19 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     final isAdoptionOpened = type == 'adoptionOpened';
     final isAnon = u['isAnonymous'] == true;
     final isDeleted = u['isDeleted'] == true;
+    final isDeletedByAdmin = isDeleted &&
+        (u['deletedByAdmin'] == true ||
+            u['deletedBy'] == 'admin' ||
+            (u['text']?.toString().toLowerCase().contains('admin') ?? false));
     final isEdited = u['isEdited'] == true;
-    final dName = isAnon ? 'Anonymous' : name;
+    final isAuthorAdmin = !isAnon &&
+        (u['isAdmin'] == true ||
+            u['authorRole'] == 'admin' ||
+            (u['authorName']?.toString().toLowerCase().contains('admin') ?? false) ||
+            (u['authorId'] != null &&
+                FirebaseService.instance.currentUser?.uid == u['authorId'] &&
+                FirebaseService.instance.isCurrentUserAdmin));
+    final dName = isAnon ? 'Anonymous' : (isAuthorAdmin && (name == 'Anonymous' || name.isEmpty) ? 'PawWatch Admin' : name);
     final aCol = isOutcomeResolved || isOutcomeRequest
         ? const Color(0xFF2E7D32)
         : isAdoptionOpened
@@ -15309,6 +15745,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         GestureDetector(
           onTap: () {
+            if (isDeleted) return;
             final authorUid = u['authorId']?.toString() ?? '';
             if (!isAnon && authorUid.isNotEmpty) {
               _showRescuerTrustModal(authorUid, name);
@@ -15318,9 +15755,35 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               width: 34,
               height: 34,
               decoration:
-                  BoxDecoration(color: aCol, shape: BoxShape.circle),
+                  BoxDecoration(
+                      color: isDeletedByAdmin
+                          ? const Color(0xFFE53935).withValues(alpha: 0.12)
+                          : isDeleted
+                              ? _navy.withValues(alpha: 0.08)
+                              : isAuthorAdmin
+                                  ? const Color(0xFF673AB7).withValues(alpha: 0.14)
+                                  : aCol,
+                      shape: BoxShape.circle,
+                      border: isDeletedByAdmin
+                          ? Border.all(color: const Color(0xFFE53935).withValues(alpha: 0.35))
+                          : isAuthorAdmin
+                              ? Border.all(color: const Color(0xFF673AB7).withValues(alpha: 0.35))
+                              : null),
               child: Center(
-                  child: isAdoptionOpened
+                  child: isDeletedByAdmin
+                      ? const Icon(Icons.shield_rounded, size: 16, color: Color(0xFFE53935))
+                      : isDeleted
+                          ? Icon(Icons.delete_outline_rounded, size: 16, color: _navy.withValues(alpha: 0.4))
+                          : isAuthorAdmin
+                              ? ClipOval(
+                                  child: Image.asset(
+                                    'assets/images/admin.png',
+                                    width: 34,
+                                    height: 34,
+                                    fit: BoxFit.cover,
+                                  ),
+                                )
+                              : isAdoptionOpened
                       ? const Icon(Icons.volunteer_activism_rounded,
                           size: 16, color: Colors.white)
                       : isOutcomeResolved || isOutcomeRequest
@@ -15374,6 +15837,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       children: [
                         GestureDetector(
                           onTap: () {
+                            if (isDeleted) return;
                             final authorUid = u['authorId']?.toString() ?? '';
                             if (!isAnon && authorUid.isNotEmpty) {
                               _showRescuerTrustModal(authorUid, name);
@@ -15383,14 +15847,69 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Flexible(
-                                child: Text(dName,
+                                child: Text(
+                                    isDeletedByAdmin
+                                        ? '[Deleted by Admin]'
+                                        : isDeleted
+                                            ? '[Comment deleted]'
+                                            : dName,
                                     overflow: TextOverflow.ellipsis,
                                     style: GoogleFonts.nunito(
                                         fontSize: 13,
                                         fontWeight: FontWeight.w800,
-                                        color: _navy)),
+                                        fontStyle: isDeleted ? FontStyle.italic : FontStyle.normal,
+                                        color: isDeletedByAdmin
+                                            ? const Color(0xFFE53935)
+                                            : isDeleted
+                                                ? _navy.withValues(alpha: 0.45)
+                                                : _navy)),
                               ),
-                              if (!isAnon) ...[
+                              if (isDeletedByAdmin) ...[
+                                const SizedBox(width: 5),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFE53935).withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: const Color(0xFFE53935).withValues(alpha: 0.3)),
+                                  ),
+                                  child: Text(
+                                    'MODERATED',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 8.5,
+                                      fontWeight: FontWeight.w900,
+                                      color: const Color(0xFFE53935),
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ),
+                              ] else if (isAuthorAdmin) ...[
+                                const SizedBox(width: 5),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF673AB7).withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: const Color(0xFF673AB7).withValues(alpha: 0.35)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      const Icon(Icons.shield_rounded, size: 10, color: Color(0xFF673AB7)),
+                                      const SizedBox(width: 2.5),
+                                      Text(
+                                        'ADMIN',
+                                        style: GoogleFonts.nunito(
+                                          fontSize: 8.5,
+                                          fontWeight: FontWeight.w900,
+                                          color: const Color(0xFF673AB7),
+                                          letterSpacing: 0.5,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ] else if (!isAnon && !isDeleted) ...[
                                 const SizedBox(width: 3),
                                 Icon(Icons.shield_outlined,
                                     size: 12, color: _lavender),
@@ -15545,7 +16064,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   fontStyle: FontStyle.italic,
                                   color: _navy.withValues(alpha: 0.35))),
                         ),
-                      if (!isDeleted && !isWayCancelled)
+                      if ((!isDeleted && !isWayCancelled) || FirebaseService.instance.isCurrentUserAdmin)
                         GestureDetector(
                           onTap: () => _showCommentMenu(u, s),
                           child: Padding(
@@ -15560,13 +16079,68 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 ],
               ),
               const SizedBox(height: 2),
-              if (isDeleted)
-                Text('(comment deleted)',
-                    style: GoogleFonts.nunito(
-                        fontSize: 13,
-                        fontStyle: FontStyle.italic,
-                        color: _navy.withValues(alpha: 0.4),
-                        fontWeight: FontWeight.w500))
+              if (isDeletedByAdmin)
+                Container(
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE53935).withValues(alpha: 0.06),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: const Color(0xFFE53935).withValues(alpha: 0.25),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.remove_circle_outline_rounded,
+                          size: 14, color: Color(0xFFE53935)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'This comment has been deleted by an administrator.',
+                          style: GoogleFonts.nunito(
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFFE53935).withValues(alpha: 0.9),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (isDeleted)
+                Container(
+                  margin: const EdgeInsets.symmetric(vertical: 4),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: _navy.withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _navy.withValues(alpha: 0.12),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.delete_outline_rounded,
+                          size: 14, color: _navy.withValues(alpha: 0.4)),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'This comment has been deleted by its author.',
+                          style: GoogleFonts.nunito(
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                            fontWeight: FontWeight.w600,
+                            color: _navy.withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
               else if (isWay && isTripCancelled)
                 Text(
                   '$dName cancelled their rescue trip.',
@@ -15973,7 +16547,18 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ? 'Anonymous'
                         : (r['authorName'] ?? 'Anonymous');
                     final rDeleted = r['isDeleted'] == true;
+                    final rDeletedByAdmin = rDeleted &&
+                        (r['deletedByAdmin'] == true ||
+                            r['deletedBy'] == 'admin' ||
+                            (r['text']?.toString().toLowerCase().contains('admin') ?? false));
                     final rEdited = r['isEdited'] == true;
+                    final rIsAuthorAdmin = !rAnon &&
+                        (r['isAdmin'] == true ||
+                            r['authorRole'] == 'admin' ||
+                            (r['authorName']?.toString().toLowerCase().contains('admin') ?? false) ||
+                            (r['authorId'] != null &&
+                                FirebaseService.instance.currentUser?.uid == r['authorId'] &&
+                                FirebaseService.instance.isCurrentUserAdmin));
                     final isReplyTarget = widget.highlightCommentId != null &&
                         r['id'] == widget.highlightCommentId;
                     return Container(
@@ -16027,26 +16612,104 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   width: 26,
                                   height: 26,
                                   decoration: BoxDecoration(
-                                      color: _avColor(rAnon ? 'Anon' : rName),
-                                      shape: BoxShape.circle),
+                                      color: rDeletedByAdmin
+                                          ? const Color(0xFFE53935).withValues(alpha: 0.12)
+                                          : rDeleted
+                                              ? _navy.withValues(alpha: 0.08)
+                                              : rIsAuthorAdmin
+                                                  ? const Color(0xFF673AB7).withValues(alpha: 0.14)
+                                                  : _avColor(rAnon ? 'Anon' : rName),
+                                      shape: BoxShape.circle,
+                                      border: rDeletedByAdmin
+                                          ? Border.all(color: const Color(0xFFE53935).withValues(alpha: 0.35))
+                                          : rIsAuthorAdmin
+                                              ? Border.all(color: const Color(0xFF673AB7).withValues(alpha: 0.35))
+                                              : null),
                                   child: Center(
-                                      child: Text(
-                                          _ini(rAnon ? 'AN' : rName),
-                                          style: GoogleFonts.nunito(
-                                              fontSize: 9,
-                                              fontWeight: FontWeight.w800,
-                                              color: Colors.white)))),
+                                      child: rDeletedByAdmin
+                                          ? const Icon(Icons.shield_rounded, size: 12, color: Color(0xFFE53935))
+                                          : rDeleted
+                                              ? Icon(Icons.delete_outline_rounded, size: 12, color: _navy.withValues(alpha: 0.4))
+                                              : rIsAuthorAdmin
+                                                  ? ClipOval(
+                                                      child: Image.asset(
+                                                        'assets/images/admin.png',
+                                                        width: 26,
+                                                        height: 26,
+                                                        fit: BoxFit.cover,
+                                                      ),
+                                                    )
+                                                  : Text(
+                                                      _ini(rAnon ? 'AN' : rName),
+                                                      style: GoogleFonts.nunito(
+                                                          fontSize: 9,
+                                                          fontWeight: FontWeight.w800,
+                                                          color: Colors.white)))),
                               const SizedBox(width: 8),
                               Expanded(
                                   child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                     Row(children: [
-                                      Text(rName,
+                                      Text(
+                                          rDeletedByAdmin
+                                              ? '[Deleted by Admin]'
+                                              : rDeleted
+                                                  ? '[Comment deleted]'
+                                                  : (rIsAuthorAdmin && (rName == 'Anonymous' || rName.isEmpty) ? 'PawWatch Admin' : rName),
                                           style: GoogleFonts.nunito(
                                               fontSize: 12,
                                               fontWeight: FontWeight.w800,
-                                              color: _navy)),
+                                              fontStyle: rDeleted ? FontStyle.italic : FontStyle.normal,
+                                              color: rDeletedByAdmin
+                                                  ? const Color(0xFFE53935)
+                                                  : rDeleted
+                                                      ? _navy.withValues(alpha: 0.45)
+                                                      : _navy)),
+                                      if (rDeletedByAdmin) ...[
+                                        const SizedBox(width: 4),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFFE53935).withValues(alpha: 0.12),
+                                            borderRadius: BorderRadius.circular(3),
+                                          ),
+                                          child: Text(
+                                            'MODERATED',
+                                            style: GoogleFonts.nunito(
+                                              fontSize: 7.5,
+                                              fontWeight: FontWeight.w900,
+                                              color: const Color(0xFFE53935),
+                                            ),
+                                          ),
+                                        ),
+                                      ] else if (rIsAuthorAdmin) ...[
+                                        const SizedBox(width: 4),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF673AB7).withValues(alpha: 0.15),
+                                            borderRadius: BorderRadius.circular(3),
+                                            border: Border.all(color: const Color(0xFF673AB7).withValues(alpha: 0.35)),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              const Icon(Icons.shield_rounded, size: 9, color: Color(0xFF673AB7)),
+                                              const SizedBox(width: 2),
+                                              Text(
+                                                'ADMIN',
+                                                style: GoogleFonts.nunito(
+                                                  fontSize: 7.5,
+                                                  fontWeight: FontWeight.w900,
+                                                  color: const Color(0xFF673AB7),
+                                                  letterSpacing: 0.5,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ],
                                       const Spacer(),
                                       Text(_fmtTime(r['createdAt']),
                                           style: GoogleFonts.nunito(
@@ -16062,7 +16725,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                                   fontStyle: FontStyle.italic,
                                                   color: _navy.withValues(alpha: 0.35))),
                                         ),
-                                      if (!rDeleted)
+                                      if (!rDeleted || FirebaseService.instance.isCurrentUserAdmin)
                                         GestureDetector(
                                           onTap: () => _showCommentMenu(r, s),
                                           child: Padding(
@@ -16074,13 +16737,68 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                         ),
                                     ]),
                                     const SizedBox(height: 2),
-                                    if (rDeleted)
-                                      Text('(comment deleted)',
-                                          style: GoogleFonts.nunito(
-                                              fontSize: 12,
-                                              fontStyle: FontStyle.italic,
-                                              color: _navy.withValues(alpha: 0.4),
-                                              fontWeight: FontWeight.w500))
+                                    if (rDeletedByAdmin)
+                                      Container(
+                                        margin: const EdgeInsets.symmetric(vertical: 2),
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFE53935).withValues(alpha: 0.06),
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(
+                                            color: const Color(0xFFE53935).withValues(alpha: 0.25),
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            const Icon(Icons.remove_circle_outline_rounded,
+                                                size: 12, color: Color(0xFFE53935)),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Text(
+                                                'This reply was removed by an administrator.',
+                                                style: GoogleFonts.nunito(
+                                                  fontSize: 11,
+                                                  fontStyle: FontStyle.italic,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: const Color(0xFFE53935).withValues(alpha: 0.9),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      )
+                                    else if (rDeleted)
+                                      Container(
+                                        margin: const EdgeInsets.symmetric(vertical: 2),
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                                        decoration: BoxDecoration(
+                                          color: _navy.withValues(alpha: 0.04),
+                                          borderRadius: BorderRadius.circular(6),
+                                          border: Border.all(
+                                            color: _navy.withValues(alpha: 0.12),
+                                            width: 1,
+                                          ),
+                                        ),
+                                        child: Row(
+                                          children: [
+                                            Icon(Icons.delete_outline_rounded,
+                                                size: 12, color: _navy.withValues(alpha: 0.4)),
+                                            const SizedBox(width: 6),
+                                            Expanded(
+                                              child: Text(
+                                                'This reply was deleted by its author.',
+                                                style: GoogleFonts.nunito(
+                                                  fontSize: 11,
+                                                  fontStyle: FontStyle.italic,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: _navy.withValues(alpha: 0.5),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      )
                                     else
                                       Text(r['text'] ?? '',
                                           style: GoogleFonts.nunito(
@@ -16102,32 +16820,86 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     );
   }
 
-  Widget _buildCommentInput(String sid) {
+  Widget _buildCommentInput(String sid, [bool isReportDeleted = false]) {
+    final isAdmin = FirebaseService.instance.isCurrentUserAdmin;
+    if (isReportDeleted && !isAdmin) {
+      return Container(
+        margin: const EdgeInsets.symmetric(vertical: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: _navy.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: _navy.withValues(alpha: 0.12)),
+        ),
+        child: Row(
+          children: [
+            Icon(Icons.lock_outline_rounded, size: 16, color: _navy.withValues(alpha: 0.4)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Commenting is disabled for deleted reports.',
+                style: GoogleFonts.nunito(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: _navy.withValues(alpha: 0.5),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final isReply = _replyingToId != null;
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (isReportDeleted && isAdmin)
+        Container(
+          margin: const EdgeInsets.only(bottom: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: const Color(0xFF673AB7).withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: const Color(0xFF673AB7).withValues(alpha: 0.25)),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.shield_rounded, size: 14, color: Color(0xFF673AB7)),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  'Admin Note: Posting an official comment on this deleted report.',
+                  style: GoogleFonts.nunito(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFF673AB7),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       if (isReply)
         Container(
           margin: const EdgeInsets.only(bottom: 6),
           padding:
               const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           decoration: BoxDecoration(
-              color: _lavLight,
+              color: isAdmin ? const Color(0xFF673AB7).withValues(alpha: 0.1) : _lavLight,
               borderRadius: BorderRadius.circular(10)),
           child: Row(children: [
-            Icon(Icons.reply, size: 14, color: _lavender),
+            Icon(Icons.reply, size: 14, color: isAdmin ? const Color(0xFF673AB7) : _lavender),
             const SizedBox(width: 6),
             Expanded(
                 child: Text('Replying to $_replyingToName',
                     style: GoogleFonts.nunito(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
-                        color: _lavender))),
+                        color: isAdmin ? const Color(0xFF673AB7) : _lavender))),
             GestureDetector(
                 onTap: () => setState(() {
                       _replyingToId = null;
                       _replyingToName = null;
                     }),
-                child: Icon(Icons.close, size: 14, color: _lavender)),
+                child: Icon(Icons.close, size: 14, color: isAdmin ? const Color(0xFF673AB7) : _lavender)),
           ]),
         ),
       Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -16137,7 +16909,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 color: _cardBg,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
-                    color: _navy.withValues(alpha: 0.1))),
+                    color: isAdmin ? const Color(0xFF673AB7).withValues(alpha: 0.3) : _navy.withValues(alpha: 0.1))),
             child: TextField(
               controller: isReply ? _replyCtrl : _commentCtrl,
               maxLines: 3,
@@ -16148,8 +16920,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   fontWeight: FontWeight.w600),
               decoration: InputDecoration(
                 hintText: isReply
-                    ? 'Write a reply...'
-                    : 'Write a comment...',
+                    ? (isAdmin ? 'Reply as Administrator...' : 'Write a reply...')
+                    : (isAdmin ? 'Post official admin comment / update...' : 'Write a comment...'),
                 hintStyle: GoogleFonts.nunito(
                     fontSize: 13,
                     color: _navy.withValues(alpha: 0.35)),
@@ -16170,8 +16942,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               height: 42,
               decoration: BoxDecoration(
                   color: _isPostingComment
-                      ? _lavender.withValues(alpha: 0.5)
-                      : _lavender,
+                      ? (isAdmin ? const Color(0xFF673AB7).withValues(alpha: 0.5) : _lavender.withValues(alpha: 0.5))
+                      : (isAdmin ? const Color(0xFF673AB7) : _lavender),
                   shape: BoxShape.circle),
               child: _isPostingComment
                   ? const Center(
@@ -16189,33 +16961,52 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         ),
       ]),
       const SizedBox(height: 6),
-      GestureDetector(
-        onTap: () => setState(() => _isAnon = !_isAnon),
-        child: Row(children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            width: 18,
-            height: 18,
-            decoration: BoxDecoration(
-              color: _isAnon ? _lavender : Colors.transparent,
-              borderRadius: BorderRadius.circular(4),
-              border: Border.all(
-                  color: _isAnon
-                      ? _lavender
-                      : _navy.withValues(alpha: 0.25)),
-            ),
-            child: _isAnon
-                ? const Icon(Icons.check, size: 12, color: Colors.white)
-                : null,
+      if (isAdmin)
+        Padding(
+          padding: const EdgeInsets.only(top: 2, left: 2),
+          child: Row(
+            children: [
+              const Icon(Icons.shield_rounded, size: 13, color: Color(0xFF673AB7)),
+              const SizedBox(width: 5),
+              Text(
+                'Commenting officially as Administrator',
+                style: GoogleFonts.nunito(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w800,
+                  color: const Color(0xFF673AB7),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(width: 6),
-          Text('Post anonymously',
-              style: GoogleFonts.nunito(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: _navy.withValues(alpha: 0.55))),
-        ]),
-      ),
+        )
+      else
+        GestureDetector(
+          onTap: () => setState(() => _isAnon = !_isAnon),
+          child: Row(children: [
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              width: 18,
+              height: 18,
+              decoration: BoxDecoration(
+                color: _isAnon ? _lavender : Colors.transparent,
+                borderRadius: BorderRadius.circular(4),
+                border: Border.all(
+                    color: _isAnon
+                        ? _lavender
+                        : _navy.withValues(alpha: 0.25)),
+              ),
+              child: _isAnon
+                  ? const Icon(Icons.check, size: 12, color: Colors.white)
+                  : null,
+            ),
+            const SizedBox(width: 6),
+            Text('Post anonymously',
+                style: GoogleFonts.nunito(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _navy.withValues(alpha: 0.55))),
+          ]),
+        ),
     ]);
   }
 
@@ -16239,7 +17030,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 decoration: BoxDecoration(
                     color: _navy.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(2))),
-            if (own) ...[
+            if (own && !s.isDeleted) ...[
               ListTile(
                 leading: const Icon(Icons.edit_outlined,
                     color: Color(0xFF9B8EC4)),
@@ -16267,7 +17058,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         color: _navy.withValues(alpha: 0.5))),
                 onTap: () => _confirmDelete(s),
               ),
-            ] else ...[
+            ] else if (!s.isDeleted && !FirebaseService.instance.isCurrentUserAdmin) ...[
               ListTile(
                 leading: const Icon(Icons.flag_outlined,
                     color: Color(0xFFE53935)),
@@ -16284,19 +17075,31 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             ],
             if (FirebaseService.instance.isCurrentUserAdmin) ...[
               const Divider(height: 1),
-              ListTile(
-                leading: const Icon(Icons.delete_forever_rounded, color: _urgent),
-                title: Text('Admin: Delete Report',
-                    style: GoogleFonts.nunito(
-                        fontWeight: FontWeight.w800, color: _urgent)),
-                subtitle: Text('Force delete this report as Administrator',
-                    style: GoogleFonts.nunito(
-                        fontSize: 12, color: _navy.withValues(alpha: 0.5))),
-                onTap: () {
-                  Navigator.pop(context);
-                  _adminConfirmDeleteReport(s);
-                },
-              ),
+              if (s.isDeleted)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded, color: Colors.grey),
+                  title: Text('Report Already Deleted',
+                      style: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w800, color: Colors.grey)),
+                  subtitle: Text('This report was deleted by an administrator and is archived',
+                      style: GoogleFonts.nunito(
+                          fontSize: 12, color: _navy.withValues(alpha: 0.5))),
+                  onTap: () => Navigator.pop(context),
+                )
+              else
+                ListTile(
+                  leading: const Icon(Icons.delete_forever_rounded, color: _urgent),
+                  title: Text('Admin: Delete Report',
+                      style: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w800, color: _urgent)),
+                  subtitle: Text('Force delete this report as Administrator',
+                      style: GoogleFonts.nunito(
+                          fontSize: 12, color: _navy.withValues(alpha: 0.5))),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _adminConfirmDeleteReport(s);
+                  },
+                ),
               if (s.reporterId.isNotEmpty)
                 ListTile(
                   leading: const Icon(Icons.shield_rounded, color: Color(0xFF6C3FC5)),
@@ -16329,48 +17132,142 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   void _adminConfirmDeleteReport(Sighting s) {
+    final reasons = [
+      'Fake cat / re-photographed screen',
+      'Fake or inaccurate location',
+      'Not a cat / wrong animal',
+      'Spam or duplicate',
+      'Inappropriate / graphic content',
+      'Other'
+    ];
+    String? sel = reasons[0];
+    final customController = TextEditingController();
+
     showDialog(
       context: context,
-      builder: (dCtx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: Row(
-          children: [
-            const Icon(Icons.warning_amber_rounded, color: Color(0xFFE53935)),
-            const SizedBox(width: 8),
-            Text('Admin: Delete Report',
-                style: GoogleFonts.nunito(fontWeight: FontWeight.w900, color: _navy)),
+      builder: (dCtx) => StatefulBuilder(
+        builder: (c2, ss) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Color(0xFFE53935)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Admin: Delete Report',
+                  style: GoogleFonts.nunito(fontWeight: FontWeight.w900, color: _navy),
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Are you sure you want to delete "${s.displayTitle}"? The report will be marked as "Deleted by Admin" on community feeds and preserved with your moderation reason.',
+                  style: GoogleFonts.nunito(color: _navy.withValues(alpha: 0.7), fontSize: 13),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  'Select Deletion Reason:',
+                  style: GoogleFonts.nunito(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 12.5,
+                    color: _navy,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                ...reasons.map((r) => RadioListTile<String>(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(r,
+                          style: GoogleFonts.nunito(
+                              fontSize: 13, fontWeight: FontWeight.w600, color: _navy)),
+                      value: r,
+                      groupValue: sel,
+                      activeColor: const Color(0xFFE53935),
+                      onChanged: (v) => ss(() => sel = v),
+                    )),
+                const SizedBox(height: 10),
+                Text(
+                  'Additional details (optional):',
+                  style: GoogleFonts.nunito(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w700,
+                    color: _navy,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: customController,
+                  maxLines: 2,
+                  maxLength: 250,
+                  style: GoogleFonts.nunito(fontSize: 12.5, color: _navy),
+                  decoration: InputDecoration(
+                    hintText: 'Explain why this report is being deleted...',
+                    hintStyle: GoogleFonts.nunito(
+                      fontSize: 12,
+                      color: _navy.withValues(alpha: 0.4),
+                    ),
+                    filled: true,
+                    fillColor: Colors.grey.withValues(alpha: 0.06),
+                    contentPadding: const EdgeInsets.all(10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: _navy.withValues(alpha: 0.12)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: _navy.withValues(alpha: 0.12)),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFFE53935), width: 1.5),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dCtx),
+              child: Text('Cancel', style: GoogleFonts.nunito(color: _navy, fontWeight: FontWeight.w700)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFE53935),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () async {
+                final details = customController.text.trim();
+                String finalReason;
+                if (sel == 'Other') {
+                  finalReason = details.isNotEmpty ? details : 'Other';
+                } else if (details.isNotEmpty) {
+                  finalReason = '$sel: $details';
+                } else {
+                  finalReason = sel ?? 'Violated community guidelines';
+                }
+
+                Navigator.pop(dCtx);
+                try {
+                  await FirebaseService.instance.adminDeleteSighting(s.id, reason: finalReason);
+                  if (mounted) {
+                    Navigator.pop(context, true);
+                    _snack('Report marked as deleted by Admin.');
+                  }
+                } catch (e) {
+                  if (mounted) _snack('Failed to delete: $e');
+                }
+              },
+              child: Text('Delete Report', style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
+            ),
           ],
         ),
-        content: Text(
-          'Are you sure you want to delete "${s.displayTitle}"? As an administrator, this will override all protections and permanently remove the report.',
-          style: GoogleFonts.nunito(color: _navy.withValues(alpha: 0.7)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dCtx),
-            child: Text('Cancel', style: GoogleFonts.nunito(color: _navy, fontWeight: FontWeight.w700)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFE53935),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-            onPressed: () async {
-              Navigator.pop(dCtx);
-              try {
-                await FirebaseService.instance.adminDeleteSighting(s.id);
-                if (mounted) {
-                  Navigator.pop(context, true);
-                  _snack('Report deleted by Admin.');
-                }
-              } catch (e) {
-                if (mounted) _snack('Failed to delete: $e');
-              }
-            },
-            child: Text('Delete Report', style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
-          ),
-        ],
       ),
     );
   }
@@ -16729,6 +17626,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   Widget _buildRescueBtn(Sighting s) {
+    if (FirebaseService.instance.isCurrentUserAdmin || s.isDeleted) {
+      return const SizedBox.shrink();
+    }
     final uid = _uid;
     final claimed = s.rescueClaimed;
     final claimedByMe =
@@ -16913,21 +17813,35 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         width: 52,
                         height: 52,
                         decoration: BoxDecoration(
-                          color: profile.trustTierColor.withValues(alpha: 0.2),
+                          color: profile.isAdmin
+                              ? const Color(0xFF673AB7).withValues(alpha: 0.15)
+                              : profile.trustTierColor.withValues(alpha: 0.2),
                           shape: BoxShape.circle,
-                          border:
-                              Border.all(color: profile.trustTierColor, width: 2),
+                          border: Border.all(
+                              color: profile.isAdmin
+                                  ? const Color(0xFF673AB7)
+                                  : profile.trustTierColor,
+                              width: 2),
                         ),
-                        child: Center(
-                          child: Text(
-                            profile.initials,
-                            style: GoogleFonts.nunito(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w800,
-                              color: profile.trustTierColor,
-                            ),
-                          ),
-                        ),
+                        child: profile.isAdmin
+                            ? ClipOval(
+                                child: Image.asset(
+                                  'assets/images/admin.png',
+                                  width: 52,
+                                  height: 52,
+                                  fit: BoxFit.cover,
+                                ),
+                              )
+                            : Center(
+                                child: Text(
+                                  profile.initials,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w800,
+                                    color: profile.trustTierColor,
+                                  ),
+                                ),
+                              ),
                       ),
                       const SizedBox(width: 14),
                       Expanded(
@@ -16950,23 +17864,33 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 8, vertical: 3),
                                   decoration: BoxDecoration(
-                                    color: profile.trustTierColor
-                                        .withValues(alpha: 0.12),
+                                    color: profile.isAdmin
+                                        ? const Color(0xFF673AB7).withValues(alpha: 0.15)
+                                        : profile.trustTierColor.withValues(alpha: 0.12),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(profile.trustTierIcon,
+                                      Icon(
+                                          profile.isAdmin
+                                              ? Icons.shield_rounded
+                                              : profile.trustTierIcon,
                                           size: 12,
-                                          color: profile.trustTierColor),
+                                          color: profile.isAdmin
+                                              ? const Color(0xFF673AB7)
+                                              : profile.trustTierColor),
                                       const SizedBox(width: 4),
                                       Text(
-                                        profile.trustTierTitle,
+                                        profile.isAdmin
+                                            ? 'Administrator'
+                                            : profile.trustTierTitle,
                                         style: GoogleFonts.nunito(
                                           fontSize: 11,
                                           fontWeight: FontWeight.w800,
-                                          color: profile.trustTierColor,
+                                          color: profile.isAdmin
+                                              ? const Color(0xFF673AB7)
+                                              : profile.trustTierColor,
                                         ),
                                       ),
                                     ],

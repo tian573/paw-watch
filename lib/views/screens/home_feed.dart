@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -39,6 +40,11 @@ class _HomeScreenState extends State<HomeScreen>
   String _activeFilter = 'All';
   bool _showNewUserTip = false;
   final Set<String> _dismissedDispatchIds = {};
+  final Set<String> _dismissedAnnouncementIds = {};
+  final Set<String> _readNotificationIds = {};
+  bool _hasUnreadNotificationsState = false;
+  StreamSubscription<List<Map<String, dynamic>>>? _announcementsSub;
+  List<Map<String, dynamic>> _latestAnnouncements = [];
   double? _userLat;
   double? _userLng;
   late AnimationController _arrowAnimController;
@@ -56,7 +62,11 @@ class _HomeScreenState extends State<HomeScreen>
     });
     _sightingsStream = FirebaseService.instance.streamSightings();
     _checkFirstTimeUser();
-    _loadDismissedDispatchIds();
+    _loadNotificationPreferences();
+    _announcementsSub = FirebaseService.instance.streamAnnouncements().listen((announcements) {
+      _latestAnnouncements = announcements;
+      _updateUnreadStatus();
+    });
     _fetchUserLocation();
     _arrowAnimController = AnimationController(
       vsync: this,
@@ -67,21 +77,110 @@ class _HomeScreenState extends State<HomeScreen>
     );
   }
 
-  Future<void> _loadDismissedDispatchIds() async {
+  Future<void> _loadNotificationPreferences() async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
-      final list = prefs.getStringList('dismissed_dispatch_ids_$uid') ?? [];
-      if (mounted && list.isNotEmpty) {
+      final dismissedDispatches = prefs.getStringList('dismissed_dispatch_ids_$uid') ?? [];
+      final dismissedAnnouncements = prefs.getStringList('dismissed_announcement_ids_$uid') ?? [];
+      final readNotifications = prefs.getStringList('read_notification_ids_$uid') ?? [];
+      if (mounted) {
         setState(() {
-          _dismissedDispatchIds.addAll(list);
+          _dismissedDispatchIds.addAll(dismissedDispatches);
+          _dismissedAnnouncementIds.addAll(dismissedAnnouncements);
+          _readNotificationIds.addAll(readNotifications);
         });
+        _updateUnreadStatus();
       }
     } catch (_) {}
   }
 
+  void _updateUnreadStatus() {
+    final activeAnnouncements = _latestAnnouncements.where((a) {
+      final id = a['docId']?.toString();
+      return id != null && !_dismissedAnnouncementIds.contains(id);
+    }).toList();
+
+    final hasUnread = activeAnnouncements.any((a) {
+      final id = a['docId']?.toString();
+      return id != null && !_readNotificationIds.contains(id);
+    });
+
+    if (mounted && _hasUnreadNotificationsState != hasUnread) {
+      setState(() {
+        _hasUnreadNotificationsState = hasUnread;
+      });
+    }
+  }
+
+  Future<void> _markAllNotificationsAsRead() async {
+    final toAdd = <String>[];
+    for (final a in _latestAnnouncements) {
+      final id = a['docId']?.toString();
+      if (id != null && !_dismissedAnnouncementIds.contains(id)) {
+        toAdd.add(id);
+      }
+    }
+
+    if (toAdd.isNotEmpty) {
+      setState(() {
+        _readNotificationIds.addAll(toAdd);
+        _hasUnreadNotificationsState = false;
+      });
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+        await prefs.setStringList('read_notification_ids_$uid', _readNotificationIds.toList());
+      } catch (_) {}
+    } else {
+      if (_hasUnreadNotificationsState) {
+        setState(() {
+          _hasUnreadNotificationsState = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _deleteAnnouncement(String docId) async {
+    setState(() {
+      _dismissedAnnouncementIds.add(docId);
+      _readNotificationIds.add(docId);
+    });
+    _updateUnreadStatus();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+      final list = prefs.getStringList('dismissed_announcement_ids_$uid') ?? [];
+      if (!list.contains(docId)) {
+        list.add(docId);
+        await prefs.setStringList('dismissed_announcement_ids_$uid', list);
+      }
+      final readList = prefs.getStringList('read_notification_ids_$uid') ?? [];
+      if (!readList.contains(docId)) {
+        readList.add(docId);
+        await prefs.setStringList('read_notification_ids_$uid', readList);
+      }
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Notification deleted',
+            style: GoogleFonts.nunito(fontWeight: FontWeight.w700),
+          ),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   Future<void> _dismissDispatch(String sightingId) async {
-    setState(() => _dismissedDispatchIds.add(sightingId));
+    setState(() {
+      _dismissedDispatchIds.add(sightingId);
+      _readNotificationIds.add(sightingId);
+    });
+    _updateUnreadStatus();
     try {
       final prefs = await SharedPreferences.getInstance();
       final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
@@ -90,11 +189,226 @@ class _HomeScreenState extends State<HomeScreen>
         list.add(sightingId);
         await prefs.setStringList('dismissed_dispatch_ids_$uid', list);
       }
+      final readList = prefs.getStringList('read_notification_ids_$uid') ?? [];
+      if (!readList.contains(sightingId)) {
+        readList.add(sightingId);
+        await prefs.setStringList('read_notification_ids_$uid', readList);
+      }
       final currentUid = FirebaseAuth.instance.currentUser?.uid;
       if (currentUid != null) {
         await FirebaseService.instance.dismissDispatchForUser(sightingId);
       }
     } catch (_) {}
+  }
+
+  Future<void> _deleteDispatchNotification(String sightingId) async {
+    await _dismissDispatch(sightingId);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Rescue notification removed',
+            style: GoogleFonts.nunito(fontWeight: FontWeight.w700),
+          ),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<void> _clearAllNotifications() async {
+    final annIds = _latestAnnouncements
+        .map((a) => a['docId']?.toString())
+        .whereType<String>()
+        .toList();
+
+    setState(() {
+      _dismissedAnnouncementIds.addAll(annIds);
+      _readNotificationIds.addAll(annIds);
+      _hasUnreadNotificationsState = false;
+    });
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+      await prefs.setStringList('dismissed_announcement_ids_$uid', _dismissedAnnouncementIds.toList());
+      await prefs.setStringList('read_notification_ids_$uid', _readNotificationIds.toList());
+    } catch (_) {}
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'All announcements cleared',
+            style: GoogleFonts.nunito(fontWeight: FontWeight.w700),
+          ),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  void _confirmDeleteAnnouncement(String docId) {
+    final isAdmin = FirebaseAuth.instance.currentUser?.email == 'admin@example.com';
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.delete_outline_rounded, color: Color(0xFFE53935)),
+            const SizedBox(width: 8),
+            Text(
+              'Delete Notification',
+              style: GoogleFonts.nunito(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: _navy,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          isAdmin
+              ? 'Are you sure you want to delete this announcement? Because you are an admin, it will also be removed for all users.'
+              : 'Are you sure you want to remove this notification from your list?',
+          style: GoogleFonts.nunito(fontSize: 14, color: _navy.withValues(alpha: 0.8)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.nunito(fontWeight: FontWeight.w700, color: _navy.withValues(alpha: 0.6)),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFE53935),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              Navigator.pop(dialogCtx);
+              if (isAdmin) {
+                try {
+                  await FirebaseService.instance.deleteAnnouncement(docId);
+                } catch (_) {}
+              }
+              await _deleteAnnouncement(docId);
+            },
+            child: Text(
+              'Delete',
+              style: GoogleFonts.nunito(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmDeleteDispatchNotification(String sightingId) {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.delete_outline_rounded, color: Color(0xFFE53935)),
+            const SizedBox(width: 8),
+            Text(
+              'Dismiss Dispatch',
+              style: GoogleFonts.nunito(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: _navy,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Remove this urgent rescue dispatch notification from your list?',
+          style: GoogleFonts.nunito(fontSize: 14, color: _navy.withValues(alpha: 0.8)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.nunito(fontWeight: FontWeight.w700, color: _navy.withValues(alpha: 0.6)),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFE53935),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () async {
+              Navigator.pop(dialogCtx);
+              await _deleteDispatchNotification(sightingId);
+            },
+            child: Text(
+              'Remove',
+              style: GoogleFonts.nunito(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmClearAllNotifications() {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.delete_sweep_outlined, color: Color(0xFFE53935)),
+            const SizedBox(width: 8),
+            Text(
+              'Clear Announcements',
+              style: GoogleFonts.nunito(
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                color: _navy,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to clear all announcements? They will be removed from your list.',
+          style: GoogleFonts.nunito(fontSize: 14, color: _navy.withValues(alpha: 0.8)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: Text(
+              'Cancel',
+              style: GoogleFonts.nunito(fontWeight: FontWeight.w700, color: _navy.withValues(alpha: 0.6)),
+            ),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFE53935),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              _clearAllNotifications();
+            },
+            child: Text(
+              'Clear All',
+              style: GoogleFonts.nunito(fontWeight: FontWeight.w800),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _fetchUserLocation() async {
@@ -131,6 +445,7 @@ class _HomeScreenState extends State<HomeScreen>
 
   @override
   void dispose() {
+    _announcementsSub?.cancel();
     _arrowAnimController.dispose();
     super.dispose();
   }
@@ -150,7 +465,9 @@ class _HomeScreenState extends State<HomeScreen>
 
   bool _isInvolvedInWaiting(Sighting s, String? uid) {
     if (uid == null || uid.isEmpty) return false;
-    if (s.urgency == 'resolved' || s.status == 'resolved' || s.category == 'Resolved') {
+    if (s.urgency == 'resolved' || s.status == 'resolved' || s.category == 'Resolved' ||
+        s.category == 'Sheltered' || s.category == 'Rehomed' ||
+        s.resolvedByAction == 'sheltered' || s.resolvedByAction == 'rehomed') {
       return false;
     }
     final isWaiting = s.isPendingVerification ||
@@ -173,6 +490,11 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   int _categoryPriority(Sighting s, [String? currentUid]) {
+    // Deleted sightings sink to the very bottom so they never displace active rescues
+    if (s.isDeleted) {
+      return 99;
+    }
+
     if (s.urgency == 'resolved' || s.status == 'resolved' || s.category == 'Resolved') {
       return 20;
     }
@@ -213,15 +535,16 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   List<Sighting> _filterAndSortSightings(List<Sighting> list, [String? currentUid]) {
+    final activeList = list.where((s) => !s.isDeleted).toList();
     List<Sighting> filtered;
     if (_activeFilter == 'All') {
       filtered = list.where((s) => !s.isAutoArchived).toList();
     } else if (_activeFilter == 'My Cases') {
       filtered = list.where((s) => s.isUserInvolved(currentUid)).toList();
     } else if (_activeFilter == 'Adoption Showcase') {
-      filtered = list.where((s) => s.isAdoptionShowcase && !s.isAutoArchived).toList();
+      filtered = activeList.where((s) => s.isAdoptionShowcase && !s.isAutoArchived).toList();
     } else if (_activeFilter == 'Waiting') {
-      filtered = list
+      filtered = activeList
           .where((s) =>
               (s.isPendingVerification ||
                   s.isAwaitingPostVetDecision ||
@@ -229,17 +552,17 @@ class _HomeScreenState extends State<HomeScreen>
               !s.isAutoArchived)
           .toList();
     } else if (_activeFilter == 'Trapped') {
-      filtered = list.where((s) => s.category == 'Urgent Rescue' && !s.isAutoArchived).toList();
+      filtered = activeList.where((s) => s.category == 'Urgent Rescue' && !s.isAutoArchived).toList();
     } else if (_activeFilter == 'Vulnerable') {
-      filtered = list.where((s) => s.category == 'Kitten' && !s.isAutoArchived).toList();
+      filtered = activeList.where((s) => s.category == 'Kitten' && !s.isAutoArchived).toList();
     } else if (_activeFilter == 'Injured') {
-      filtered = list
+      filtered = activeList
           .where((s) =>
               (s.category == 'Injured' || s.category == 'Needs Vet') &&
               !s.isAutoArchived)
           .toList();
     } else if (_activeFilter == 'Needs Foster') {
-      filtered = list
+      filtered = activeList
           .where((s) =>
               (s.category == 'Needs Foster' ||
                   s.category == 'Needs Home' ||
@@ -247,7 +570,7 @@ class _HomeScreenState extends State<HomeScreen>
               !s.isAutoArchived)
           .toList();
     } else if (_activeFilter == 'Stray') {
-      filtered = list
+      filtered = activeList
           .where((s) =>
               (s.category == 'Stray' ||
                   s.category == 'Feeding Spot' ||
@@ -258,7 +581,7 @@ class _HomeScreenState extends State<HomeScreen>
               !s.isAutoArchived)
           .toList();
     } else if (_activeFilter == 'Resolved') {
-      filtered = list
+      filtered = activeList
           .where((s) =>
               s.category == 'Resolved' ||
               s.status == 'resolved' ||
@@ -311,6 +634,7 @@ class _HomeScreenState extends State<HomeScreen>
                 MapScreen(
                   onNotificationTap: _showNotificationsModal,
                   onProfileTap: () => setState(() => _currentTab = 4),
+                  hasUnreadNotifications: _hasUnreadNotificationsState,
                 ),
                 const SizedBox.shrink(),
                 const ConversationsScreen(),
@@ -345,6 +669,7 @@ class _HomeScreenState extends State<HomeScreen>
                   ? null
                   : allSightings
                       .where((s) =>
+                          !s.isDeleted &&
                           s.rescueClaimed &&
                           s.rescueClaimedBy == currentUid &&
                           s.isRescueClaimActive &&
@@ -355,6 +680,7 @@ class _HomeScreenState extends State<HomeScreen>
                   ? null
                   : allSightings
                       .where((s) =>
+                          !s.isDeleted &&
                           (s.isVetVisitPending || s.isPendingVerification) &&
                           s.urgency != 'resolved' &&
                           (s.pendingVetRescuerId == currentUid ||
@@ -594,27 +920,29 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
               ],
             ),
-            child: Icon(Icons.notifications_outlined, color: _navy, size: 22),
+            child: const Icon(Icons.notifications_outlined, color: _navy, size: 22),
           ),
-          Positioned(
-            top: 6,
-            right: 6,
-            child: Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                color: _lavender,
-                shape: BoxShape.circle,
-                border: Border.all(color: _bgWhite, width: 1.5),
+          if (_hasUnreadNotificationsState)
+            Positioned(
+              top: 6,
+              right: 6,
+              child: Container(
+                width: 9,
+                height: 9,
+                decoration: BoxDecoration(
+                  color: _lavender,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: _bgWhite, width: 1.5),
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
   }
 
   void _showNotificationsModal() {
+    _markAllNotificationsAsRead();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -1096,6 +1424,9 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildSightingCard(Sighting data) {
+    if (data.isDeleted) {
+      return _buildDeletedAdminCard(data);
+    }
     return GestureDetector(
       onTap: () => _openSightingDetail(data),
       child: Container(
@@ -1419,6 +1750,241 @@ class _HomeScreenState extends State<HomeScreen>
         ],
       ),
     ),
+    );
+  }
+
+  Widget _buildDeletedCardImage(Sighting data) {
+    return ClipRRect(
+      borderRadius: const BorderRadius.only(
+        topLeft: Radius.circular(18),
+      ),
+      child: SizedBox(
+        width: 105,
+        height: 125,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (data.photoUrls.isNotEmpty)
+              ColorFiltered(
+                colorFilter: const ColorFilter.matrix(<double>[
+                  0.2126, 0.7152, 0.0722, 0, 0,
+                  0.2126, 0.7152, 0.0722, 0, 0,
+                  0.2126, 0.7152, 0.0722, 0, 0,
+                  0,      0,      0,      1, 0,
+                ]),
+                child: PawImage(
+                  url: data.photoUrls.first,
+                  fit: BoxFit.cover,
+                  placeholder: Container(
+                    color: _lavender.withValues(alpha: 0.15),
+                    child: Center(
+                      child: Icon(Icons.pets,
+                          size: 36, color: _lavender.withValues(alpha: 0.4)),
+                    ),
+                  ),
+                ),
+              )
+            else
+              Container(
+                color: Colors.grey.shade200,
+                child: Center(
+                  child: Icon(Icons.pets,
+                      size: 36, color: Colors.grey.shade400),
+                ),
+              ),
+            Container(
+              color: Colors.black.withValues(alpha: 0.38),
+            ),
+            Center(
+              child: Container(
+                padding: const EdgeInsets.all(7),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE53935).withValues(alpha: 0.9),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.delete_forever_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDeletedAdminCard(Sighting data) {
+    return GestureDetector(
+      onTap: () => _openSightingDetail(data),
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFFF9FAFB),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: const Color(0xFFE53935).withValues(alpha: 0.28),
+            width: 1.2,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: _navy.withValues(alpha: 0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildDeletedCardImage(data),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 10, 10, 8),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            _buildAvatar(data.initials, Colors.grey.shade500),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    data.reporterName,
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w800,
+                                      color: _navy.withValues(alpha: 0.8),
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  Text(
+                                    data.timeAgo,
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 11,
+                                      color: _navy.withValues(alpha: 0.45),
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE53935).withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: const Color(0xFFE53935).withValues(alpha: 0.3),
+                                  width: 1,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.gavel_rounded, size: 10, color: Color(0xFFE53935)),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    'DELETED',
+                                    style: GoogleFonts.nunito(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.w900,
+                                      color: const Color(0xFFE53935),
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          data.displayTitle,
+                          style: GoogleFonts.nunito(
+                            fontSize: 13.5,
+                            fontWeight: FontWeight.w800,
+                            color: _navy.withValues(alpha: 0.6),
+                            decoration: TextDecoration.lineThrough,
+                            decorationColor: const Color(0xFFE53935).withValues(alpha: 0.6),
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        Container(
+                          margin: const EdgeInsets.only(top: 6),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4.5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE53935).withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            children: [
+                              const Icon(Icons.info_outline_rounded, size: 12, color: Color(0xFFD32F2F)),
+                              const SizedBox(width: 5),
+                              Expanded(
+                                child: Text(
+                                  'Reason: ${data.deletedReason ?? "Violated community guidelines"}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w800,
+                                    color: const Color(0xFFC62828),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE53935).withValues(alpha: 0.04),
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(17)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.shield_outlined, size: 12, color: _navy.withValues(alpha: 0.45)),
+                  const SizedBox(width: 4),
+                  Text(
+                    'Deleted',
+                    style: GoogleFonts.nunito(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: _navy.withValues(alpha: 0.55),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    'View Reason & Details',
+                    style: GoogleFonts.nunito(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w800,
+                      color: const Color(0xFFE53935),
+                    ),
+                  ),
+                  const SizedBox(width: 3),
+                  const Icon(Icons.arrow_forward_ios_rounded, size: 10, color: Color(0xFFE53935)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2498,6 +3064,19 @@ class _HomeScreenState extends State<HomeScreen>
                   color: const Color(0xFFE53935),
                 ),
               ),
+              const Spacer(),
+              InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => _confirmDeleteDispatchNotification(s.id),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: Icon(
+                    Icons.delete_outline_rounded,
+                    size: 18,
+                    color: const Color(0xFFE53935).withValues(alpha: 0.7),
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 10),
@@ -2695,25 +3274,42 @@ class _HomeScreenState extends State<HomeScreen>
       children: [
         Container(
           color: _bgWhite,
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+          padding: const EdgeInsets.fromLTRB(12, 14, 16, 12),
           child: Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: _lavender.withValues(alpha: 0.12),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(Icons.notifications_active_rounded,
-                    color: _lavender, size: 20),
+              IconButton(
+                icon: const Icon(Icons.arrow_back_rounded, color: _navy, size: 22),
+                tooltip: 'Back',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                onPressed: () => Navigator.pop(context),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: 8),
               Text(
-                'Dispatch & Activity',
+                'Announcements',
                 style: GoogleFonts.nunito(
                   fontSize: 18,
                   fontWeight: FontWeight.w900,
                   color: _navy,
+                ),
+              ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: _confirmClearAllNotifications,
+                icon: const Icon(Icons.delete_sweep_outlined,
+                    size: 18, color: Color(0xFFE53935)),
+                label: Text(
+                  'Clear All',
+                  style: GoogleFonts.nunito(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFFE53935),
+                  ),
+                ),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
               ),
             ],
@@ -2724,207 +3320,90 @@ class _HomeScreenState extends State<HomeScreen>
           child: StreamBuilder<List<Map<String, dynamic>>>(
             stream: FirebaseService.instance.streamAnnouncements(),
             builder: (context, annSnapshot) {
-              final announcements = annSnapshot.data ?? [];
-              return StreamBuilder<List<Sighting>>(
-                stream: _sightingsStream,
-                builder: (context, snapshot) {
-                  final sightings = snapshot.data ?? [];
-                  final currentUid = FirebaseAuth.instance.currentUser?.uid;
-                  final urgentList = sightings
-                      .where((s) =>
-                          s.isEligibleForRadialDispatch &&
-                          (currentUid == null || s.reporterId != currentUid) &&
-                          !_dismissedDispatchIds.contains(s.id) &&
-                          !s.isDispatchDismissedFor(currentUid))
-                      .toList();
-                  final inCareList =
-                      sightings.where((s) => s.isInCare).toList();
+              final rawAnnouncements = annSnapshot.data ?? [];
+              final announcements = rawAnnouncements
+                  .where((a) =>
+                      a['docId'] != null &&
+                      !_dismissedAnnouncementIds.contains(a['docId'].toString()))
+                  .toList();
 
-                  if (announcements.isEmpty && urgentList.isEmpty && inCareList.isEmpty) {
-                    return Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.done_all_rounded,
-                              size: 48,
-                              color: _lavender.withValues(alpha: 0.4)),
-                          const SizedBox(height: 12),
-                          Text(
-                            'All Quiet on the Front 🐾',
-                            style: GoogleFonts.nunito(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                              color: _navy,
-                            ),
+              if (announcements.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: _lavender.withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
                           ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'No urgent rescue dispatches or announcements.',
-                            style: GoogleFonts.nunito(
-                              fontSize: 12.5,
-                              color: _navy.withValues(alpha: 0.6),
-                            ),
+                          child: Icon(Icons.campaign_outlined,
+                              size: 44,
+                              color: _lavender.withValues(alpha: 0.6)),
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No Announcements Yet 🐾',
+                          style: GoogleFonts.nunito(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                            color: _navy,
                           ),
-                        ],
-                      ),
-                    );
-                  }
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Stay tuned here for community news, clinic dates, adoption drives, and official notices from the team.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.nunito(
+                            fontSize: 13,
+                            color: _navy.withValues(alpha: 0.6),
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
 
-                  return ListView(
-                    padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
+              return ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+                children: [
+                  Row(
                     children: [
-                      if (announcements.isNotEmpty) ...[
-                        Row(
-                          children: [
-                            const Icon(Icons.campaign_rounded,
-                                color: Color(0xFF6C3FC5), size: 17),
-                            const SizedBox(width: 6),
-                            Text(
-                              'OFFICIAL ANNOUNCEMENTS (${announcements.length})',
-                              style: GoogleFonts.nunito(
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w900,
-                                color: const Color(0xFF6C3FC5),
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                          ],
+                      const Icon(Icons.campaign_rounded,
+                          color: Color(0xFF6C3FC5), size: 17),
+                      const SizedBox(width: 6),
+                      Text(
+                        'OFFICIAL ANNOUNCEMENTS (${announcements.length})',
+                        style: GoogleFonts.nunito(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w900,
+                          color: const Color(0xFF6C3FC5),
+                          letterSpacing: 0.5,
                         ),
-                        const SizedBox(height: 10),
-                        ...announcements.map((a) => Padding(
-                              padding: const EdgeInsets.only(bottom: 12),
-                              child: _buildAnnouncementNotificationCard(a),
-                            )),
-                        const SizedBox(height: 10),
-                      ],
-                  if (urgentList.isNotEmpty) ...[
-                    Row(
-                      children: [
-                        const Icon(Icons.emergency_rounded,
-                            color: Color(0xFFE53935), size: 16),
-                        const SizedBox(width: 6),
-                        Text(
-                          'URGENT RESCUE DISPATCHES (${urgentList.length})',
-                          style: GoogleFonts.nunito(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w900,
-                            color: const Color(0xFFE53935),
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    ...urgentList.map((s) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: _buildRadialDispatchAlertBanner(s),
-                        )),
-                    const SizedBox(height: 10),
-                  ],
-                  if (inCareList.isNotEmpty) ...[
-                    Row(
-                      children: [
-                        Icon(Icons.timeline_rounded,
-                            color: _lavender, size: 16),
-                        const SizedBox(width: 6),
-                        Text(
-                          'CATS CURRENTLY IN CARE (${inCareList.length})',
-                          style: GoogleFonts.nunito(
-                            fontSize: 11.5,
-                            fontWeight: FontWeight.w900,
-                            color: _lavender,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 10),
-                    ...inCareList.map((s) => Padding(
-                          padding: const EdgeInsets.only(bottom: 12),
-                          child: GestureDetector(
-                            onTap: () => Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    SightingDetailScreen(sighting: s),
-                              ),
-                            ),
-                            child: Container(
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                    color: _navy.withValues(alpha: 0.08)),
-                              ),
-                              child: Row(
-                                children: [
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(10),
-                                    child: s.photoUrls.isNotEmpty
-                                        ? PawImage(
-                                            url: s.photoUrls.first,
-                                            width: 44,
-                                            height: 44,
-                                            fit: BoxFit.cover,
-                                          )
-                                        : Container(
-                                            width: 44,
-                                            height: 44,
-                                            color: _lavender
-                                                .withValues(alpha: 0.2),
-                                            child: const Icon(Icons.pets,
-                                                color: _lavender, size: 20),
-                                          ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          s.displayTitle,
-                                          style: GoogleFonts.nunito(
-                                            fontSize: 13.5,
-                                            fontWeight: FontWeight.w800,
-                                            color: _navy,
-                                          ),
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                        ),
-                                        Text(
-                                          '${s.careLabel} with ${s.careTakerName ?? "Volunteer"} • ${s.daysInCare}d in care',
-                                          style: GoogleFonts.nunito(
-                                            fontSize: 11.5,
-                                            color: _navy
-                                                .withValues(alpha: 0.6),
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  Icon(Icons.chevron_right,
-                                      color: _navy.withValues(alpha: 0.3),
-                                      size: 18),
-                                ],
-                              ),
-                            ),
-                          ),
-                        )),
-                  ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  ...announcements.map((a) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _buildAnnouncementNotificationCard(a),
+                      )),
                 ],
               );
             },
-          );
-        },
-      ),
-    ),
-  ],
-);
-}
+          ),
+        ),
+      ],
+    );
+  }
 
   Widget _buildAnnouncementNotificationCard(Map<String, dynamic> a) {
+    final docId = a['docId']?.toString() ?? '';
     final title = a['title']?.toString() ?? 'Announcement';
     final body = a['body']?.toString() ?? '';
     final category = a['category']?.toString() ?? 'general';
@@ -2998,6 +3477,19 @@ class _HomeScreenState extends State<HomeScreen>
                       fontSize: 10.5,
                       fontWeight: FontWeight.w600,
                       color: _navy.withValues(alpha: 0.45),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(12),
+                    onTap: () => _confirmDeleteAnnouncement(docId),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.delete_outline_rounded,
+                        size: 16,
+                        color: _navy.withValues(alpha: 0.45),
+                      ),
                     ),
                   ),
                 ],
