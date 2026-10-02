@@ -428,3 +428,4 @@ class _ComicBubblePainter extends CustomPainter {
   bool shouldRepaint(covariant _ComicBubblePainter old) =>
       old.tailWidth != tailWidth;
 }
+

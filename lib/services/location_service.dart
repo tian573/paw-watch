@@ -16,7 +16,7 @@ class LocationResult {
     this.errorMessage,
   });
 
-  // Default fallback (Jakarta, Indonesia)
+
   static const LocationResult defaultJakarta = LocationResult(
     latitude: -6.2615,
     longitude: 106.8106,
@@ -185,3 +185,4 @@ class LocationService {
     return null;
   }
 }
+

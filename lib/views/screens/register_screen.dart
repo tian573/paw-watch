@@ -3,6 +3,8 @@ import 'package:flutter/gestures.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import '../../services/firebase_service.dart';
+import '../../services/text_moderation_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -33,6 +35,8 @@ class _RegisterScreenState extends State<RegisterScreen>
   bool _hasViewedTerms = false;
   bool _isLoading = false;
   bool _isGoogleLoading = false;
+  String? _displayNameError;
+  String? _emailError;
 
   late AnimationController _animController;
   late Animation<double> _fadeAnimation;
@@ -41,6 +45,16 @@ class _RegisterScreenState extends State<RegisterScreen>
   @override
   void initState() {
     super.initState();
+    _displayNameCtrl.addListener(() {
+      if (_displayNameError != null) {
+        setState(() => _displayNameError = null);
+      }
+    });
+    _emailCtrl.addListener(() {
+      if (_emailError != null) {
+        setState(() => _emailError = null);
+      }
+    });
     _animController = AnimationController(
       duration: const Duration(milliseconds: 700),
       vsync: this,
@@ -73,17 +87,66 @@ class _RegisterScreenState extends State<RegisterScreen>
       return;
     }
     setState(() => _isLoading = true);
+
+    final displayName = _displayNameCtrl.text.trim();
+    final email = _emailCtrl.text.trim();
+
+
+    final isNameTaken =
+        await FirebaseService.instance.isDisplayNameTaken(displayName);
+    if (isNameTaken) {
+      if (mounted) {
+        setState(() {
+          _displayNameError = 'This display name is already taken';
+          _isLoading = false;
+        });
+        _formKey.currentState?.validate();
+        _showSnackBar('The display name "$displayName" is already taken. Please choose another.');
+      }
+      return;
+    }
+
+
+    final isEmailTaken =
+        await FirebaseService.instance.isEmailRegistered(email);
+    if (isEmailTaken) {
+      if (mounted) {
+        setState(() {
+          _emailError = 'This email address is already registered';
+          _isLoading = false;
+        });
+        _formKey.currentState?.validate();
+        _showSnackBar('This email address is already registered. Please log in instead.');
+      }
+      return;
+    }
+
     try {
       final credential = await FirebaseAuth.instance
           .createUserWithEmailAndPassword(
-        email: _emailCtrl.text.trim(),
+        email: email,
         password: _passwordCtrl.text,
       );
-      await credential.user?.updateDisplayName(_displayNameCtrl.text.trim());
+      await credential.user?.updateDisplayName(displayName);
+      if (credential.user != null) {
+        await FirebaseService.instance.ensureUserDoc(
+          credential.user!,
+          displayName: displayName,
+        );
+      }
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/home');
+        final curEmail = FirebaseAuth.instance.currentUser?.email;
+        if (curEmail == 'admin@example.com') {
+          Navigator.pushReplacementNamed(context, '/admin');
+        } else {
+          Navigator.pushReplacementNamed(context, '/home');
+        }
       }
     } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        setState(() => _emailError = 'This email address is already registered');
+        _formKey.currentState?.validate();
+      }
       _showSnackBar(_authErrorMessage(e.code));
     } catch (_) {
       _showSnackBar('Something went wrong. Please try again.');
@@ -121,8 +184,20 @@ class _RegisterScreenState extends State<RegisterScreen>
         return;
       }
 
+      if (userCredential.user != null) {
+        await FirebaseService.instance.ensureUserDoc(
+          userCredential.user!,
+          displayName: userCredential.user!.displayName,
+        );
+      }
+
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/home');
+        final email = FirebaseAuth.instance.currentUser?.email;
+        if (email == 'admin@example.com') {
+          Navigator.pushReplacementNamed(context, '/admin');
+        } else {
+          Navigator.pushReplacementNamed(context, '/home');
+        }
       }
     } catch (e, stack) {
       debugPrint('Google Sign-In Error: $e');
@@ -320,7 +395,7 @@ class _RegisterScreenState extends State<RegisterScreen>
         ),
         const SizedBox(height: 6),
         SizedBox(
-          width: MediaQuery.of(context).size.width * 0.55,
+          width: MediaQuery.sizeOf(context).width * 0.55,
           child: Text(
             'Join our community and help make streets kinder for cats.',
             style: GoogleFonts.nunito(
@@ -339,12 +414,13 @@ class _RegisterScreenState extends State<RegisterScreen>
     return _buildInputField(
       controller: _displayNameCtrl,
       label: 'Display name',
-      hint: 'e.g. CatLover99',
+      hint: 'e.g. Sarah Jones',
       icon: Icons.person_outline,
-      helperText: 'This is how others will see you.',
+      helperText: 'Letters only (at least 3 characters). No numbers or symbols.',
       validator: (v) {
-        if (v == null || v.trim().isEmpty) return 'Display name is required';
-        if (v.trim().length < 2) return 'Must be at least 2 characters';
+        final modErr = TextModerationService.validateDisplayName(v);
+        if (modErr != null) return modErr;
+        if (_displayNameError != null) return _displayNameError;
         return null;
       },
     );
@@ -362,6 +438,7 @@ class _RegisterScreenState extends State<RegisterScreen>
         if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,}$').hasMatch(v.trim())) {
           return 'Enter a valid email address';
         }
+        if (_emailError != null) return _emailError;
         return null;
       },
     );
@@ -751,7 +828,7 @@ class _RegisterScreenState extends State<RegisterScreen>
           length: 2,
           initialIndex: initialTab,
           child: Container(
-            height: MediaQuery.of(context).size.height * 0.78,
+            height: MediaQuery.sizeOf(context).height * 0.78,
             decoration: const BoxDecoration(
               color: _bgWhite,
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -884,7 +961,7 @@ class _RegisterScreenState extends State<RegisterScreen>
           ),
           _buildLegalSection(
             '4. Gamification, XP & Badges',
-            'Points, rescue badges, and leaderboard ranks are community incentives and possess no monetary value. Tampering with geolocation to claim false rescues is prohibited.',
+            'Points and rescue badges are community incentives and possess no monetary value. Tampering with geolocation to claim false rescues is prohibited.',
           ),
         ],
       ),
@@ -1158,3 +1235,4 @@ class _GoogleLogoPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
+

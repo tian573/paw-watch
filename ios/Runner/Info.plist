@@ -56,15 +56,16 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>PawWatch requires access to the camera to take photos of stray cat sightings and verification proofs.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>PawWatch requires access to your photo library to select photos of cat sightings.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>PawWatch uses your location to discover nearby community cat sightings and geotag rescue reports.</string>
 </dict>
 </plist>

@@ -3,6 +3,7 @@ import 'package:flutter/gestures.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import '../../services/firebase_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -63,12 +64,31 @@ class _LoginScreenState extends State<LoginScreen>
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
     try {
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
         email: _emailCtrl.text.trim(),
         password: _passwordCtrl.text,
       );
+      if (cred.user != null) {
+        final isBanned = await FirebaseService.instance.isUserBanned(
+          cred.user!.uid,
+          email: cred.user!.email,
+        );
+        if (isBanned) {
+          await FirebaseAuth.instance.signOut();
+          if (mounted) {
+            _showBannedAccountDialog();
+          }
+          return;
+        }
+        await FirebaseService.instance.ensureUserDoc(cred.user!);
+      }
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/home');
+        final email = FirebaseAuth.instance.currentUser?.email;
+        if (email == 'admin@example.com') {
+          Navigator.pushReplacementNamed(context, '/admin');
+        } else {
+          Navigator.pushReplacementNamed(context, '/home');
+        }
       }
     } on FirebaseAuthException catch (e) {
       _showSnackBar(_authErrorMessage(e.code));
@@ -104,8 +124,29 @@ class _LoginScreenState extends State<LoginScreen>
         return;
       }
 
+      if (userCredential.user != null) {
+        final isBanned = await FirebaseService.instance.isUserBanned(
+          userCredential.user!.uid,
+          email: userCredential.user!.email,
+        );
+        if (isBanned) {
+          await FirebaseAuth.instance.signOut();
+          await GoogleSignIn().signOut();
+          if (mounted) {
+            _showBannedAccountDialog();
+          }
+          return;
+        }
+        await FirebaseService.instance.ensureUserDoc(userCredential.user!);
+      }
+
       if (mounted) {
-        Navigator.pushReplacementNamed(context, '/home');
+        final email = FirebaseAuth.instance.currentUser?.email;
+        if (email == 'admin@example.com') {
+          Navigator.pushReplacementNamed(context, '/admin');
+        } else {
+          Navigator.pushReplacementNamed(context, '/home');
+        }
       }
     } catch (e, stack) {
       debugPrint('Google Login Error: $e');
@@ -114,6 +155,48 @@ class _LoginScreenState extends State<LoginScreen>
     } finally {
       if (mounted) setState(() => _isGoogleLoading = false);
     }
+  }
+
+  void _showBannedAccountDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.block_rounded, color: Colors.red, size: 28),
+            const SizedBox(width: 10),
+            Text(
+              'Account Banned',
+              style: GoogleFonts.nunito(
+                fontWeight: FontWeight.w900,
+                color: _navy,
+              ),
+            ),
+          ],
+        ),
+        content: Text(
+          'Your account has been banned by an administrator due to a violation of community guidelines. Access to PawWatch has been revoked.',
+          style: GoogleFonts.nunito(
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+            color: Colors.black87,
+          ),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _navy,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Understood'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _handleForgotPassword() async {
@@ -316,7 +399,7 @@ class _LoginScreenState extends State<LoginScreen>
         ),
         const SizedBox(height: 6),
         SizedBox(
-          width: MediaQuery.of(context).size.width * 0.55,
+          width: MediaQuery.sizeOf(context).width * 0.55,
           child: Text(
             'Log in to continue helping cats and your community.',
             style: GoogleFonts.nunito(
@@ -729,3 +812,4 @@ class _GoogleLogoPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
+
