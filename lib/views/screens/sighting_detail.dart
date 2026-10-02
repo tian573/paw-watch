@@ -71,11 +71,11 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     if (FirebaseService.instance.isCurrentUserAdmin) return null;
     if (trimmed.length < 2) return 'Comment is too short.';
 
-    // Content moderation: check profanity, emoji-only, and gibberish spam
+
     final modError = TextModerationService.validateComment(trimmed);
     if (modError != null) return modError;
 
-    // 1. Anti-spam: Rate-limit cooldown
+
     if (_lastGlobalCommentAt != null) {
       final elapsed = DateTime.now().difference(_lastGlobalCommentAt!);
       if (elapsed < _commentCooldownDuration) {
@@ -84,7 +84,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       }
     }
 
-    // 2. Anti-spam: Duplicate comment filter within 2 minutes
+
     if (_lastGlobalCommentText != null &&
         _lastGlobalCommentText!.toLowerCase() == trimmed.toLowerCase()) {
       if (_lastGlobalCommentAt != null &&
@@ -94,7 +94,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       }
     }
 
-    // 3. Anti-spam: Excessive repeated characters (e.g. 5+ identical consecutive chars)
+
     final repeatedCharRegex = RegExp(r'(.)\1{5,}');
     if (repeatedCharRegex.hasMatch(trimmed)) {
       return '⚠️ Your comment contains repetitive characters. Please write a meaningful message.';
@@ -165,11 +165,11 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     final uid = _uid;
     if (uid == null) return false;
 
-    // 1. Explicitly designated as the vet rescuer
+
     if (s.lastVetRescuerId == uid) return true;
     if (s.pendingVetRescuerId == uid) return true;
 
-    // 2. If a specific different rescuer is recorded, current user is not the vet rescuer
+
     if (s.lastVetRescuerId != null &&
         s.lastVetRescuerId!.isNotEmpty &&
         s.lastVetRescuerId != uid) {
@@ -181,13 +181,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       return false;
     }
 
-    // 3. If someone explicitly claimed the rescue
+
     if (s.rescueClaimedBy.isNotEmpty) {
       return s.rescueClaimedBy == uid;
     }
 
-    // 4. No separate rescuer is recorded. If current user is the reporter,
-    // they provided veterinary care and have physical custody!
+
     if (_isOwner(s)) {
       return true;
     }
@@ -218,7 +217,6 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         (s.rescueClaimed && s.rescueClaimedBy == _uid);
     return isReporter || isRescuer;
   }
-
 
 
   static const _aLabels = {
@@ -1849,7 +1847,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
                 if (!mounted) return;
 
-                // Follow-up question: auto delete comments between reporter and blocked user
+
                 final shouldDeleteComments = await showDialog<bool>(
                   context: context,
                   builder: (fCtx) => AlertDialog(
@@ -2099,7 +2097,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         },
                       ),
                   ] else ...[
-                    // 1. Rescuer in Charge (Delegate placement authority to Rescuer)
+
                     _buildPostVetOptionTile(
                       assetPath: 'assets/images/rescuerincharge.png',
                       color: const Color(0xFF1E88E5),
@@ -2126,7 +2124,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // 2. Take In for Foster Care (Reporter Takes Cat)
+
                     _buildPostVetOptionTile(
                       assetPath: 'assets/images/needshome.png',
                       color: const Color(0xFF673AB7),
@@ -2142,7 +2140,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ),
                     const SizedBox(height: 16),
 
-                    // 3. Transfer to Shelter
+
                     _buildPostVetOptionTile(
                       assetPath: 'assets/images/shelter.png',
                       color: const Color(0xFFE65100),
@@ -2158,7 +2156,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ),
                     if (rescuerId.isNotEmpty && rescuerId != _uid) ...[
                       const SizedBox(height: 16),
-                      // 4. Discuss Next Steps with Rescuer (Coordinate before deciding)
+
                       _buildPostVetOptionTile(
                         assetPath: 'assets/images/cattalking.png',
                         color: const Color(0xFF1E88E5),
@@ -2292,7 +2290,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Drag Handle
+
                   Center(
                     child: Container(
                       width: 40,
@@ -2305,7 +2303,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Header
+
                   Row(
                     children: [
                       Container(
@@ -2349,7 +2347,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Feral Welfare Standard Notice
+
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -2385,7 +2383,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   ),
                   const SizedBox(height: 16),
 
-                  // Location Section
+
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
@@ -2425,7 +2423,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   ),
                   const SizedBox(height: 8),
 
-                  // Location Display Card
+
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -2520,7 +2518,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ),
                   ),
 
-                  // Optional Location Map & GPS Picker
+
                   if (showLocationPicker) ...[
                     const SizedBox(height: 10),
                     Container(
@@ -2683,7 +2681,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   ],
                   const SizedBox(height: 16),
 
-                  // Photo Proof (Mandatory)
+
                   Row(
                     children: [
                       Text(
@@ -2900,7 +2898,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   ],
                   const SizedBox(height: 16),
 
-                  // Release Notes
+
                   Text(
                     'Release Notes',
                     style: GoogleFonts.nunito(
@@ -2962,7 +2960,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   ],
                   const SizedBox(height: 20),
 
-                  // Warning Banner
+
                   if (formValidationError != null) ...[
                     Container(
                       width: double.infinity,
@@ -2994,7 +2992,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     const SizedBox(height: 12),
                   ],
 
-                  // Submit Button
+
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton.icon(
@@ -3476,7 +3474,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // 1. Action Name (Title on top)
+
             Text(
               title,
               textAlign: TextAlign.center,
@@ -3488,7 +3486,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             ),
             const SizedBox(height: 12),
 
-            // 2. Custom icon in the middle
+
             Center(
               child: assetPath != null
                   ? Image.asset(
@@ -3505,7 +3503,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             ),
             const SizedBox(height: 12),
 
-            // 3. Short desc at bottom
+
             Text(
               subtitle,
               textAlign: TextAlign.center,
@@ -5345,7 +5343,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          // Reason Box
+
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -5391,7 +5389,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             ),
           ),
           const SizedBox(height: 10),
-          // Reporter info box
+
           Container(
             width: double.infinity,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -6687,7 +6685,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       if (!await _ensureNoConflictingRescueTrip(s)) return;
       if (!await _ensureNoConflictingVetCare(s)) return;
     final noteCtrl = TextEditingController();
-    String selectedReason = 'roaming'; // 'roaming' or 'helpedOffline'
+    String selectedReason = 'roaming';
     final isOwner = _isOwner(s);
 
     if (!mounted) return;
@@ -6960,7 +6958,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       if (!await _ensureNoConflictingRescueTrip(s)) return;
       if (!await _ensureNoConflictingVetCare(s)) return;
 
-      // Distance check
+
       LocationResult? userLoc;
       try {
         userLoc = await LocationService().getCurrentUserLocation();
@@ -7374,7 +7372,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               const SizedBox(height: 16),
                             ],
                           ] else if (s.isDeleted) ...[
-                            // Do not show rescue actions for deleted report
+
                           ] else if (s.urgency != 'resolved') ...[
                             _buildActions(s, showWaitingOnTop),
                             if (_hasActed) ...[
@@ -7557,7 +7555,6 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               size: 60, color: _lavender.withValues(alpha: 0.4))));
 
 
-
   Widget _buildCommunityCatBanner(Sighting s) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -7667,7 +7664,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Custom logo emblem on the left
+
           Container(
             width: 44,
             height: 44,
@@ -7684,7 +7681,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ),
           const SizedBox(width: 12),
 
-          // Informative text
+
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -7941,7 +7938,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // Custom logo emblem on the left
+
           Container(
             width: 44,
             height: 44,
@@ -7958,7 +7955,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ),
           const SizedBox(width: 12),
 
-          // Informative text in the middle
+
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -7998,7 +7995,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ),
           const SizedBox(width: 8),
 
-          // Metadata tag on the right (DONE if finished/resolved, else ONE-TIME or ONGOING)
+
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
             decoration: BoxDecoration(
@@ -8657,7 +8654,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Title on top
+
           Text(
             'Care Progress Lifecycle',
             textAlign: TextAlign.center,
@@ -8669,7 +8666,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ),
           const SizedBox(height: 10),
 
-          // Custom logo in the middle
+
           Center(
             child: Image.asset(
               'assets/images/warmhavenfoster.png',
@@ -8679,7 +8676,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ),
           const SizedBox(height: 10),
 
-          // In care with ... (short desc on the bottom)
+
           Text(
             'In care with ${s.careTakerName ?? "Caretaker"} • ${s.completedMilestoneCount} of ${s.effectiveDurationDays} days completed',
             textAlign: TextAlign.center,
@@ -9372,7 +9369,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ],
                     const SizedBox(height: 16),
 
-                    // Optional Video Section
+
                     Row(
                       children: [
                         Text(
@@ -10416,7 +10413,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            // 1. Action Name (Title on top)
+
             SizedBox(
               height: 32,
               child: Center(
@@ -10435,7 +10432,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               ),
             ),
             const SizedBox(height: 6),
-            // 2. Center box with custom logo
+
             Container(
               width: double.infinity,
               height: 84,
@@ -10464,7 +10461,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               ),
             ),
             const SizedBox(height: 6),
-            // 3. Short desc at bottom
+
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
@@ -12599,7 +12596,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     ],
                     const SizedBox(height: 16),
 
-                    // Optional Video Section
+
                     Row(
                       children: [
                         Text(
@@ -14040,7 +14037,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     padding: EdgeInsets.fromLTRB(
                         16, 0, 16, 20 + MediaQuery.of(ctx).padding.bottom),
                     itemCount: applicants.length,
-                    separatorBuilder: (_, __) =>
+                    separatorBuilder: (context, index) =>
                         const SizedBox(height: 10),
                     itemBuilder: (_, i) {
                       final a = applicants[i];
@@ -14421,7 +14418,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 1. Title on top
+
           Text(
             'Adoption Showcase Profile',
             textAlign: TextAlign.center,
@@ -14433,7 +14430,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ),
           const SizedBox(height: 14),
 
-          // 2. Custom logo in the middle
+
           Center(
             child: Image.asset(
               'assets/images/review.png',
@@ -14476,7 +14473,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ],
           const SizedBox(height: 12),
 
-          // 3. Short desc at the bottom
+
           Text(
             'Facility: $facilityName • Health verified under care supervision',
             textAlign: TextAlign.center,
@@ -14789,7 +14786,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // 1. Title on top
+
           Text(
             'Cat is Off-Street (${s.careLabel})',
             textAlign: TextAlign.center,
@@ -14801,7 +14798,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ),
           const SizedBox(height: 10),
 
-          // 2. Custom logo in middle
+
           Center(
             child: Image.asset(
               'assets/images/needshome.png',
@@ -14811,7 +14808,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ),
           const SizedBox(height: 10),
 
-          // 3. Short desc on bottom
+
           Text(
             'In active care with ${s.careTakerName?.isNotEmpty == true ? s.careTakerName : "a caregiver"}. Street visits & check-ins are paused.',
             textAlign: TextAlign.center,
@@ -15709,7 +15706,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      // 1. Action Name (Title at top)
+
                       Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
@@ -15751,7 +15748,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       ),
                       const SizedBox(height: 8),
 
-                      // 2. Big box with custom icon in the center
+
                       AnimatedContainer(
                         duration: const Duration(milliseconds: 200),
                         width: 110,
@@ -15846,7 +15843,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       ),
                       const SizedBox(height: 7),
 
-                      // 3. Short desc at bottom
+
                       Text(
                         isDeclinedTookIn
                             ? 'Not available (Declined)'
@@ -15994,7 +15991,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 1. Title on top
+
           Text(
             resolutionTitle,
             textAlign: TextAlign.center,
@@ -16006,7 +16003,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ),
           const SizedBox(height: 10),
 
-          // 2. Custom logo in middle
+
           Center(
             child: Image.asset(
               customAsset,
@@ -16016,7 +16013,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ),
           const SizedBox(height: 10),
 
-          // 3. Short desc on bottom
+
           Text(
             resolutionMsg,
             textAlign: TextAlign.center,
@@ -18074,7 +18071,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         claimed && uid != null && s.rescueClaimedBy == uid;
     final canCancel = claimed && (claimedByMe || _isOwner(s));
 
-    // Hide if resolved, already in care, has vet visit, pending verification, awaiting post-vet decision, or if unclaimed and current user is the reporter
+
     if (s.urgency == 'resolved' ||
         s.isInCare ||
         s.hasVetVisit ||
@@ -18501,3 +18498,4 @@ class _AllPhotosScreenState extends State<_AllPhotosScreen> {
         ),
       );
 }
+

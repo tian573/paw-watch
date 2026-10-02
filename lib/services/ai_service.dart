@@ -40,7 +40,7 @@ class RescueActionValidationResult {
 }
 
 class AiValidationService {
-  // Action-specific proof visual keywords
+
   static final Set<String> _feedingKeywords = {
     'food', 'pet food', 'cat food', 'bowl', 'dish', 'plate', 'tin', 'can',
     'saucer', 'eating', 'feed', 'meal', 'tableware', 'crockery', 'kitchen utensil',
@@ -79,7 +79,7 @@ class AiValidationService {
     'parking lot', 'alley', 'urban', 'neighborhood',
   };
 
-  // Pure feline keywords (Exact cat/kitten/feline breeds)
+
   static final Set<String> _strictCatKeywords = {
     'cat',
     'kitten',
@@ -112,7 +112,7 @@ class AiValidationService {
     'whiskers',
   };
 
-  // Synthetic / Non-living cat objects (Plushies, Cartoon, Drawings, Dolls)
+
   static final Set<String> _syntheticKeywords = {
     'toy',
     'stuffed toy',
@@ -133,7 +133,7 @@ class AiValidationService {
     'anime',
   };
 
-  // Screen / Monitor Recapture (Taking photos of computer, TV, or phone screens)
+
   static final Set<String> _screenRecaptureKeywords = {
     'computer monitor',
     'monitor',
@@ -151,7 +151,7 @@ class AiValidationService {
     'webpage',
   };
 
-  // Specific Non-Cat Small Mammals (Ferrets, Weasels, Rodents, Rabbits)
+
   static final Set<String> _nonCatSmallMammals = {
     'ferret',
     'weasel',
@@ -186,7 +186,7 @@ class AiValidationService {
     'rat',
   };
 
-  // Distinct Canines (Dogs/Puppies)
+
   static final Set<String> _dogKeywords = {
     'dog',
     'puppy',
@@ -203,7 +203,7 @@ class AiValidationService {
     'labrador retriever',
   };
 
-  // Contextual rescue indicators that give boost to cat verification
+
   static final Set<String> _rescueContextKeywords = {
     'box',
     'cardboard',
@@ -267,7 +267,7 @@ class AiValidationService {
         final textLower = label.label.toLowerCase().trim();
         detectedNames.add('${label.label} (${(label.confidence * 100).toStringAsFixed(0)}%)');
 
-        // 1. Strict Feline Check
+
         for (final catKey in _strictCatKeywords) {
           if (textLower == catKey ||
               textLower.contains(catKey) ||
@@ -280,7 +280,7 @@ class AiValidationService {
           }
         }
 
-        // 2. Synthetic (Toy, Cartoon, Plush)
+
         for (final synthKey in _syntheticKeywords) {
           if (textLower == synthKey || textLower.contains(synthKey)) {
             syntheticFound = true;
@@ -291,7 +291,7 @@ class AiValidationService {
           }
         }
 
-        // 3. Non-Cat Small Mammals (Ferret, Hamster, Rabbit)
+
         for (final mammalKey in _nonCatSmallMammals) {
           if (textLower == mammalKey || textLower.contains(mammalKey)) {
             nonCatSmallMammalFound = true;
@@ -302,7 +302,7 @@ class AiValidationService {
           }
         }
 
-        // 4. Dogs
+
         for (final dogKey in _dogKeywords) {
           if (textLower == dogKey || textLower.contains(dogKey)) {
             dogFound = true;
@@ -313,7 +313,7 @@ class AiValidationService {
           }
         }
 
-        // 5. Screen / Monitor Recapture
+
         for (final screenKey in _screenRecaptureKeywords) {
           if (textLower == screenKey || textLower.contains(screenKey)) {
             screenRecaptureFound = true;
@@ -324,7 +324,7 @@ class AiValidationService {
           }
         }
 
-        // 6. Rescue Context (Box, Cardboard, Fur, Ear)
+
         for (final contextKey in _rescueContextKeywords) {
           if (textLower == contextKey || textLower.contains(contextKey)) {
             rescueContextFound = true;
@@ -332,7 +332,7 @@ class AiValidationService {
         }
       }
 
-      // Check 0: Reject Screen Recapture / Photos of digital monitors
+
       if (screenRecaptureFound && highestScreenConf >= 0.55 && highestScreenConf > highestCatConf) {
         return CatValidationResult(
           isCat: false,
@@ -344,7 +344,7 @@ class AiValidationService {
         );
       }
 
-      // Check 1: Reject Synthetic / Toys / Cartoons
+
       if (syntheticFound && highestSyntheticConf >= 0.40) {
         return CatValidationResult(
           isCat: false,
@@ -356,8 +356,7 @@ class AiValidationService {
         );
       }
 
-      // Check 2: Reject Ferrets / Hamsters / Rabbits
-      // Even if generic 'whiskers' or 'mammal' is present, if ferret/hamster is identified, reject it!
+
       if (nonCatSmallMammalFound && (highestNonCatMammalConf >= 0.35 || highestNonCatMammalConf > highestCatConf)) {
         return CatValidationResult(
           isCat: false,
@@ -369,7 +368,7 @@ class AiValidationService {
         );
       }
 
-      // Check 3: Reject Clear Dogs (Unless cat/kitten is also detected in rescue context like black kittens in box)
+
       if (dogFound && !strictCatFound && highestDogConf >= 0.45) {
         return CatValidationResult(
           isCat: false,
@@ -381,7 +380,7 @@ class AiValidationService {
         );
       }
 
-      // Check 4: Success on Feline Match (Supports black kittens in cardboard boxes, rescue angles)
+
       if (strictCatFound && (highestCatConf >= _minCatConfidence || (rescueContextFound && highestCatConf >= 0.30))) {
         return CatValidationResult(
           isCat: true,
@@ -392,7 +391,7 @@ class AiValidationService {
         );
       }
 
-      // Fallback: No cat found
+
       final topDetections = labels.take(3).map((l) => l.label).join(', ');
       return CatValidationResult(
         isCat: false,
@@ -415,7 +414,7 @@ class AiValidationService {
     }
   }
 
-  /// Verifies both the presence of a living cat AND action-specific proof (e.g. food/bowl for feeding, clinic for vet, carrier for shelter)
+
   Future<RescueActionValidationResult> validateRescueActionProof(
       File imageFile, String action) async {
     ImageLabeler? labeler;
@@ -460,7 +459,7 @@ class AiValidationService {
       String matchedDogLabel = '';
       String matchedScreenLabel = '';
 
-      // Action-specific matching
+
       bool actionCuesFound = false;
       String matchedActionCue = '';
 
@@ -506,7 +505,7 @@ class AiValidationService {
         detectedNames.add(
             '${label.label} (${(label.confidence * 100).toStringAsFixed(0)}%)');
 
-        // 1. Strict Feline Check
+
         for (final catKey in _strictCatKeywords) {
           if (textLower == catKey ||
               textLower.contains(catKey) ||
@@ -519,7 +518,7 @@ class AiValidationService {
           }
         }
 
-        // 2. Synthetic (Toy, Cartoon, Plush)
+
         for (final synthKey in _syntheticKeywords) {
           if (textLower == synthKey || textLower.contains(synthKey)) {
             syntheticFound = true;
@@ -530,7 +529,7 @@ class AiValidationService {
           }
         }
 
-        // 3. Non-Cat Small Mammals
+
         for (final mammalKey in _nonCatSmallMammals) {
           if (textLower == mammalKey || textLower.contains(mammalKey)) {
             nonCatSmallMammalFound = true;
@@ -541,7 +540,7 @@ class AiValidationService {
           }
         }
 
-        // 4. Dogs
+
         for (final dogKey in _dogKeywords) {
           if (textLower == dogKey || textLower.contains(dogKey)) {
             dogFound = true;
@@ -552,7 +551,7 @@ class AiValidationService {
           }
         }
 
-        // 5. Screen / Monitor Recapture
+
         for (final screenKey in _screenRecaptureKeywords) {
           if (textLower == screenKey || textLower.contains(screenKey)) {
             screenRecaptureFound = true;
@@ -563,14 +562,14 @@ class AiValidationService {
           }
         }
 
-        // 6. Rescue Context
+
         for (final contextKey in _rescueContextKeywords) {
           if (textLower == contextKey || textLower.contains(contextKey)) {
             rescueContextFound = true;
           }
         }
 
-        // 7. Action-specific match
+
         for (final actionKey in targetActionSet) {
           if (textLower == actionKey || textLower.contains(actionKey)) {
             actionCuesFound = true;
@@ -579,7 +578,7 @@ class AiValidationService {
         }
       }
 
-      // Check 0: Reject Screen Recapture / Photos of digital monitors
+
       if (screenRecaptureFound && highestScreenConf >= 0.55 && highestScreenConf > highestCatConf) {
         return RescueActionValidationResult(
           isValid: false,
@@ -594,7 +593,7 @@ class AiValidationService {
         );
       }
 
-      // Check 1: Reject Synthetic / Toys / Cartoons
+
       if (syntheticFound && highestSyntheticConf >= 0.38) {
         return RescueActionValidationResult(
           isValid: false,
@@ -609,7 +608,7 @@ class AiValidationService {
         );
       }
 
-      // Check 2: Reject Non-Cat Animals
+
       if (nonCatSmallMammalFound &&
           (highestNonCatMammalConf >= 0.35 ||
               highestNonCatMammalConf > highestCatConf)) {
@@ -626,7 +625,7 @@ class AiValidationService {
         );
       }
 
-      // Check 3: Reject Clear Dogs
+
       if (dogFound && !strictCatFound && highestDogConf >= 0.45) {
         return RescueActionValidationResult(
           isValid: false,
@@ -641,7 +640,7 @@ class AiValidationService {
         );
       }
 
-      // Check 4: Cat verification
+
       final isCatVerified = strictCatFound &&
           (highestCatConf >= 0.30 ||
               (rescueContextFound && highestCatConf >= 0.25));
@@ -661,7 +660,7 @@ class AiValidationService {
         );
       }
 
-      // Check 5: Action proof matched
+
       final detail = actionCuesFound
           ? '$actionName detected ($matchedActionCue)'
           : '$matchedCatLabel in rescue scene';
@@ -696,3 +695,4 @@ class AiValidationService {
     }
   }
 }
+

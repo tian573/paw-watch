@@ -5,8 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
-/// A modern Instagram Reels / TikTok style auto-playing, auto-repeating video player
-/// with support for full-screen immersive playback and seeking.
+
 class ReelVideoPlayer extends StatefulWidget {
   final String? videoUrl;
   final File? videoFile;
@@ -367,7 +366,7 @@ class _ReelVideoPlayerState extends State<ReelVideoPlayer>
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Main Video with gesture tap to play/pause
+
           GestureDetector(
             onTap: _togglePlayPause,
             child: AspectRatio(
@@ -376,7 +375,7 @@ class _ReelVideoPlayerState extends State<ReelVideoPlayer>
             ),
           ),
 
-          // Center Tap Play / Pause Animated Icon Overlay
+
           if (_showPlayPauseOverlay)
             IgnorePointer(
               child: ScaleTransition(
@@ -397,7 +396,7 @@ class _ReelVideoPlayerState extends State<ReelVideoPlayer>
               ),
             ),
 
-          // Top Header Overlay: Clean Controls (No reel badge decoration)
+
           Positioned(
             top: 10,
             left: 10,
@@ -405,7 +404,7 @@ class _ReelVideoPlayerState extends State<ReelVideoPlayer>
             child: Row(
               children: [
                 const Spacer(),
-                // Mute / Unmute Button
+
                 GestureDetector(
                   onTap: _toggleMute,
                   child: Container(
@@ -429,7 +428,7 @@ class _ReelVideoPlayerState extends State<ReelVideoPlayer>
                   ),
                 ),
                 const SizedBox(width: 8),
-                // Fullscreen Button
+
                 GestureDetector(
                   onTap: _openFullScreen,
                   child: Container(
@@ -473,7 +472,7 @@ class _ReelVideoPlayerState extends State<ReelVideoPlayer>
             ),
           ),
 
-          // Bottom IG Reels Progress Bar
+
           Positioned(
             bottom: 0,
             left: 0,
@@ -502,8 +501,7 @@ class _ReelVideoPlayerState extends State<ReelVideoPlayer>
   }
 }
 
-/// Full screen immersive video player modal with scrubbing seek bar,
-/// play/pause, mute, and time indicators.
+
 class FullScreenVideoPage extends StatefulWidget {
   final String? videoUrl;
   final File? videoFile;
@@ -664,7 +662,7 @@ class _FullScreenVideoPageState extends State<FullScreenVideoPage> {
           child: Stack(
             fit: StackFit.expand,
             children: [
-              // Main Video Centered Display
+
               if (_isInitialized && _controller != null)
                 Center(
                   child: AspectRatio(
@@ -709,7 +707,7 @@ class _FullScreenVideoPageState extends State<FullScreenVideoPage> {
                   ),
                 ),
 
-              // Tap overlay to toggle controls or double-tap to play/pause
+
               Positioned.fill(
                 child: GestureDetector(
                   behavior: HitTestBehavior.opaque,
@@ -719,7 +717,7 @@ class _FullScreenVideoPageState extends State<FullScreenVideoPage> {
                 ),
               ),
 
-              // Animated Controls Overlay
+
               AnimatedOpacity(
                 opacity: _showControls ? 1.0 : 0.0,
                 duration: const Duration(milliseconds: 200),
@@ -727,7 +725,7 @@ class _FullScreenVideoPageState extends State<FullScreenVideoPage> {
                   ignoring: !_showControls,
                   child: Stack(
                     children: [
-                      // Top Bar Gradient
+
                       Positioned(
                         top: 0,
                         left: 0,
@@ -778,7 +776,7 @@ class _FullScreenVideoPageState extends State<FullScreenVideoPage> {
                         ),
                       ),
 
-                      // Center Play / Pause button
+
                       if (_isInitialized && _controller != null)
                         Center(
                           child: GestureDetector(
@@ -801,7 +799,7 @@ class _FullScreenVideoPageState extends State<FullScreenVideoPage> {
                           ),
                         ),
 
-                      // Bottom Controls Gradient & Seek Bar
+
                       if (_isInitialized && _controller != null)
                         Positioned(
                           bottom: 0,
@@ -930,3 +928,4 @@ class _FullScreenVideoPageState extends State<FullScreenVideoPage> {
     );
   }
 }
+

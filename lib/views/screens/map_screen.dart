@@ -53,12 +53,12 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   final TextEditingController _searchCtrl = TextEditingController();
   final LocationService _locationService = LocationService();
 
-  ll.LatLng _centerLocation = const ll.LatLng(-6.2615, 106.8106); // Default South Jakarta
+  ll.LatLng _centerLocation = const ll.LatLng(-6.2615, 106.8106);
   ll.LatLng? _userLocation;
   bool _isLoadingGps = true;
   double _currentZoom = 14.0;
 
-  String _activeFilter = 'All'; // 'All', 'Needs Help', 'Needs Home', 'Nearby', 'Shelters & Vets'
+  String _activeFilter = 'All';
   double _radiusFilterKm = 5.0;
   bool _includeShelters = true;
 
@@ -220,12 +220,12 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       final lng = s.updatedLongitude ?? s.longitude;
       final distKm = _getDistanceKm(lat, lng);
 
-      // Distance / Search Radius filter applies specifically to Cat Reports
+
       if (distKm > _radiusFilterKm) {
         return false;
       }
 
-      // Prioritize active cases (needs help, needs home, urgent): exclude resolved from map
+
       if (s.urgency == 'resolved' && s.id != widget.initialFocusedSighting?.id) {
         return false;
       }
@@ -238,7 +238,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         case 'Nearby':
           return distKm <= min(_radiusFilterKm, 3.0);
         case 'Shelters & Vets':
-          return false; // Show only shelters & clinics in this mode
+          return false;
         case 'All':
         default:
           return true;
@@ -251,7 +251,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     if (_activeFilter == 'Needs Home') return [];
     if (!_includeShelters && _activeFilter != 'Shelters & Vets') return [];
 
-    // Shelters & clinics remain visible as landmarks, controlled by their toggle switch
+
     return ShelterClinic.partnerDirectory;
   }
 
@@ -271,10 +271,10 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       body: SafeArea(
         child: Stack(
           children: [
-            // Map Layer
+
             _buildMapLayer(),
 
-            // Top Header & Floating Search Bar
+
             Positioned(
               top: 0,
               left: 0,
@@ -282,14 +282,14 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
               child: _buildTopOverlay(),
             ),
 
-            // Floating Map Controls (Recenter, Zoom)
+
             Positioned(
               right: 16,
               bottom: isSelectedSightingVisible || isSelectedShelterVisible ? 220 : 100,
               child: _buildMapActionButtons(),
             ),
 
-            // Callout Preview Card
+
             if (isSelectedSightingVisible)
               Positioned(
                 left: 16,
@@ -310,9 +310,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Top Branded Header & Search Bar
-  // ---------------------------------------------------------------------------
+
   Widget _buildTopOverlay() {
     return Container(
       decoration: BoxDecoration(
@@ -330,18 +328,18 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // PawWatch Top App Bar (Branded)
+
           _buildBrandedHeader(),
           const SizedBox(height: 6),
 
-          // Floating Search Bar
+
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: _buildSearchBar(),
           ),
           const SizedBox(height: 8),
 
-          // Horizontal Filter Chips
+
           _buildFilterPills(),
           if (_activeFilter == 'Shelters & Vets') ...[
             const SizedBox(height: 6),
@@ -732,7 +730,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         separatorBuilder: (_, index) => const SizedBox(width: 8),
         itemBuilder: (context, i) {
           if (i == filters.length) {
-            // Standalone action pill to suggest a clinic/shelter outside filters
+
             return GestureDetector(
               onTap: _showSuggestClinicModal,
               child: Container(
@@ -834,9 +832,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // FlutterMap Layer
-  // ---------------------------------------------------------------------------
+
   Widget _buildMapLayer() {
     return StreamBuilder<List<Sighting>>(
       stream: _sightingsStream,
@@ -851,7 +847,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
 
         final markers = <Marker>[];
 
-        // 1. User Location Marker
+
         if (_userLocation != null) {
           markers.add(
             Marker(
@@ -896,23 +892,22 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           );
         }
 
-        // 2. Sighting Markers (Sorted by Z-Index priority and dispersed if overlapping)
-        // Resolved reports are painted underneath, Urgent and Needs Help are on TOP.
+
         final sortedSightings = List<Sighting>.from(filteredSightings);
         sortedSightings.sort((a, b) {
           if (a.id == _selectedSighting?.id) return 1;
           if (b.id == _selectedSighting?.id) return -1;
 
           int rank(Sighting s) {
-            if (s.urgency == 'resolved') return 0; // painted bottom
-            if (s.urgency == 'urgent') return 3;   // painted on top of active cases
-            return 1;                              // Active cases: Needs Help & Needs Home (equal layer)
+            if (s.urgency == 'resolved') return 0;
+            if (s.urgency == 'urgent') return 3;
+            return 1;
           }
 
           return rank(a).compareTo(rank(b));
         });
 
-        // Detect coordinate collisions within ~15m and disperse slightly in a neat spiral/circle
+
         final clusterMap = <String, List<Sighting>>{};
         for (final s in sortedSightings) {
           final lat = s.updatedLatitude ?? s.latitude;
@@ -937,7 +932,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
               final baseLat = s.updatedLatitude ?? s.latitude;
               final baseLng = s.updatedLongitude ?? s.longitude;
               final angle = (2 * pi * i) / count;
-              const spread = 0.00018; // ~18-20m visible separation on map
+              const spread = 0.00018;
               pointMap[s.id] = ll.LatLng(
                 baseLat + spread * sin(angle),
                 baseLng + spread * cos(angle),
@@ -946,27 +941,21 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           }
         }
 
-        // 3. Proximity-Based Fading Hierarchy (3-Tier Model):
-        // Tier 3 (Top):    🚨 Urgent (NEVER faded, always 100% opacity)
-        // Tier 2 (Active):  ⚠️ Needs Help & 🏠 Needs Home (Equal peers! Never fade each other)
-        // Tier 1 (Bottom):  ✓ Resolved (Faded when touching active cases)
-        //
-        // Only when a higher-tier pin actually touches/overlaps a lower-tier pin (within ~22m),
-        // does the lower-tier pin fade and become semi-transparent.
+
         final opacityMap = <String, double>{};
         final scaleMap = <String, double>{};
         const double touchingThresholdMeters = 22.0;
 
         int getTier(Sighting s) {
-          if (s.urgency == 'urgent') return 3; // Top: Urgent
-          if (s.urgency == 'resolved') return 1; // Bottom: Resolved
-          return 2; // Equal peers: Needs Help (orange) & Needs Home (purple)
+          if (s.urgency == 'urgent') return 3;
+          if (s.urgency == 'resolved') return 1;
+          return 2;
         }
 
         for (final s in sortedSightings) {
           final myTier = getTier(s);
 
-          // Urgent pins and selected pin are ALWAYS 100% full opacity and never faded
+
           if (s.id == _selectedSighting?.id || myTier == 3) {
             opacityMap[s.id] = 1.0;
             scaleMap[s.id] = 1.0;
@@ -976,18 +965,18 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           final sLat = s.updatedLatitude ?? s.latitude;
           final sLng = s.updatedLongitude ?? s.longitude;
 
-          // Tracks if any higher-tier pin is physically touching this pin
+
           int higherNearbyTier = 0;
 
           for (final other in sortedSightings) {
             if (other.id == s.id) continue;
             final otherTier = getTier(other);
-            if (otherTier <= myTier) continue; // Equal tiers (Needs Help & Needs Home) NEVER fade each other!
+            if (otherTier <= myTier) continue;
 
             final oLat = other.updatedLatitude ?? other.latitude;
             final oLng = other.updatedLongitude ?? other.longitude;
 
-            // Fast bounding box check (~30m)
+
             if ((sLat - oLat).abs() > 0.0003 || (sLng - oLng).abs() > 0.0003) continue;
 
             final dist = Geolocator.distanceBetween(sLat, sLng, oLat, oLng);
@@ -999,15 +988,15 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           }
 
           if (higherNearbyTier == 3) {
-            // Touches an Urgent pin: fade lower tier so Urgent stands out
+
             opacityMap[s.id] = 0.42;
             scaleMap[s.id] = 0.88;
           } else if (higherNearbyTier == 2) {
-            // Touches an active case (Needs Help or Needs Home): fade resolved
+
             opacityMap[s.id] = 0.55;
             scaleMap[s.id] = 0.92;
           } else {
-            // Not touching any higher-tier pin: FULL 100% OPACITY!
+
             opacityMap[s.id] = 1.0;
             scaleMap[s.id] = 1.0;
           }
@@ -1048,7 +1037,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           );
         }
 
-        // 3. Partner Shelter / Clinic Markers
+
         for (final sc in filteredShelters) {
           final isSelected = _selectedShelter?.id == sc.id;
 
@@ -1103,9 +1092,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Custom Map Markers (matching MapPage.png)
-  // ---------------------------------------------------------------------------
+
   Widget _buildSightingPin(
     Sighting s,
     bool isSelected, {
@@ -1124,7 +1111,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     double elevationAlpha;
 
     if (isUrgent) {
-      // 1. URGENT: Most standout (single exclamation icon, glowing radar ripple, largest avatar)
+
       badgeColor = _urgent;
       badgeText = 'Urgent';
       badgeIcon = Icons.priority_high_rounded;
@@ -1132,7 +1119,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       borderWidth = 3.2;
       elevationAlpha = 0.55;
     } else if (isResolved) {
-      // 4. RESOLVED: Least standout (kept modest, flat, smaller footprint)
+
       badgeColor = _resolved;
       badgeText = 'Resolved';
       badgeIcon = Icons.check_rounded;
@@ -1140,7 +1127,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       borderWidth = 1.8;
       elevationAlpha = 0.18;
     } else if (isNeedsHome) {
-      // 3. NEEDS HOME: Less standout than Needs Help and Urgent (soft purple, medium-compact)
+
       badgeColor = _needsHome;
       badgeText = 'Needs Home';
       badgeIcon = Icons.home_rounded;
@@ -1148,7 +1135,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
       borderWidth = 2.0;
       elevationAlpha = 0.22;
     } else {
-      // 2. NEEDS HELP (Stray feeding community & strays needing help): More standout than Needs Home, less than Urgent
+
       badgeColor = _needsHelp;
       badgeText = 'Needs Help';
       badgeIcon = Icons.warning_amber_rounded;
@@ -1162,7 +1149,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     final pinBody = Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Status Pill Badge (Top)
+
         Container(
           padding: EdgeInsets.symmetric(
             horizontal: isUrgent ? 8 : (isResolved ? 5 : 6),
@@ -1200,8 +1187,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         ),
         const SizedBox(height: 2),
 
-        // Avatar Thumbnail with Standout Outer Border / Radar
-        // Fixed SizedBox ensures radar expansion NEVER causes vertical layout overflows
+
         SizedBox(
           width: avatarSize + 16,
           height: avatarSize + 16,
@@ -1209,7 +1195,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
             alignment: Alignment.center,
             clipBehavior: Clip.none,
             children: [
-              // If Urgent: Animated Pulsing Halo / Radar ripple (contained via OverflowBox)
+
               if (isUrgent)
                 AnimatedBuilder(
                   animation: _pulseAnimation,
@@ -1234,7 +1220,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                   },
                 ),
 
-              // Photo Circle
+
               Container(
                 width: avatarSize,
                 height: avatarSize,
@@ -1276,7 +1262,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           ),
         ),
 
-        // Pointer triangle
+
         CustomPaint(
           size: Size(isUrgent ? 11 : 9, isUrgent ? 6.5 : 5),
           painter: _TrianglePainter(color: isSelected ? _coral : badgeColor),
@@ -1307,7 +1293,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Pill Badge
+
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
           decoration: BoxDecoration(
@@ -1333,7 +1319,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         ),
         const SizedBox(height: 2),
 
-        // Shield/Circular Pin
+
         Container(
           width: isSelected ? 44 : 38,
           height: isSelected ? 44 : 38,
@@ -1357,7 +1343,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           ),
         ),
 
-        // Pointer
+
         CustomPaint(
           size: const Size(8, 5),
           painter: _TrianglePainter(color: isSelected ? _navy : pinColor),
@@ -1366,14 +1352,12 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Floating Map Controls (Right Side)
-  // ---------------------------------------------------------------------------
+
   Widget _buildMapActionButtons() {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Suggest Clinic / Shelter Button (standalone on map)
+
         _buildCircleButton(
           icon: const Icon(
             Icons.add_business_rounded,
@@ -1385,7 +1369,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         ),
         const SizedBox(height: 10),
 
-        // GPS Recenter Button
+
         _buildCircleButton(
           icon: _isLoadingGps
               ? const SizedBox(
@@ -1399,7 +1383,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         ),
         const SizedBox(height: 10),
 
-        // Zoom In
+
         _buildCircleButton(
           icon: const Icon(Icons.add_rounded, color: _navy, size: 22),
           tooltip: 'Zoom In',
@@ -1412,7 +1396,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         ),
         const SizedBox(height: 10),
 
-        // Zoom Out
+
         _buildCircleButton(
           icon: const Icon(Icons.remove_rounded, color: _navy, size: 22),
           tooltip: 'Zoom Out',
@@ -1457,9 +1441,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Floating Callout Preview Cards (matching MapPage.png)
-  // ---------------------------------------------------------------------------
+
   Widget _buildSightingCalloutCard(Sighting s) {
     final photoUrl = s.photoUrls.isNotEmpty ? s.photoUrls.first : '';
     final lat = s.updatedLatitude ?? s.latitude;
@@ -1505,7 +1487,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Photo with Urgency Badge Overlay
+
               Stack(
                 children: [
                   ClipRRect(
@@ -1550,12 +1532,12 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
               ),
               const SizedBox(width: 14),
 
-              // Sighting Info
+
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Title & Close Button
+
                     Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1587,7 +1569,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     ),
                     const SizedBox(height: 4),
 
-                    // Time Ago & Distance
+
                     Row(
                       children: [
                         Icon(Icons.access_time_rounded, size: 13, color: _navy.withValues(alpha: 0.5)),
@@ -1604,7 +1586,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     ),
                     const SizedBox(height: 5),
 
-                    // Description snippet
+
                     Text(
                       s.description.isNotEmpty ? s.description : s.locationAddress,
                       maxLines: 2,
@@ -1623,7 +1605,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           ),
           const SizedBox(height: 12),
 
-          // View Details Action Button (Coral/Red Accent)
+
           SizedBox(
             width: double.infinity,
             height: 42,
@@ -1706,7 +1688,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header Row: Icon, Name, Close
+
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1798,7 +1780,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           ),
           const SizedBox(height: 10),
 
-          // Operating Hours & Address
+
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
@@ -1852,7 +1834,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
           ),
           const SizedBox(height: 12),
 
-          // Action Buttons: Call & Directions
+
           Row(
             children: [
               Expanded(
@@ -2002,9 +1984,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Advanced Filter Modal Bottom Sheet
-  // ---------------------------------------------------------------------------
+
   void _showAdvancedFilterModal() {
     showModalBottomSheet(
       context: context,
@@ -2081,7 +2061,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     const Divider(),
                     const SizedBox(height: 10),
 
-                    // Radius Slider
+
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -2127,7 +2107,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     ),
                     const SizedBox(height: 10),
 
-                    // Toggle Partner Shelters & Clinics
+
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: Text(
@@ -2154,7 +2134,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     ),
                     const SizedBox(height: 20),
 
-                    // Apply Button
+
                     SizedBox(
                       width: double.infinity,
                       height: 48,
@@ -2192,11 +2172,9 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Suggest Vet Clinic or Shelter Modal Bottom Sheet (User Use Case)
-  // ---------------------------------------------------------------------------
+
   void _showSuggestClinicModal() {
-    String type = 'clinic'; // 'clinic' or 'shelter'
+    String type = 'clinic';
     final nameCtrl = TextEditingController();
     final addressCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
@@ -2336,7 +2314,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     ),
                     const Divider(height: 24),
 
-                    // Facility Type Selector: 2 cards matching report outcome/action design
+
                     Text(
                       'Facility Category *',
                       style: GoogleFonts.nunito(
@@ -2348,7 +2326,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        // Vet Clinic Card (matching report action box design)
+
                         Expanded(
                           child: GestureDetector(
                             onTap: () {
@@ -2362,7 +2340,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                // 1. Title on top
+
                                 SizedBox(
                                   height: 28,
                                   child: Center(
@@ -2380,7 +2358,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                                   ),
                                 ),
                                 const SizedBox(height: 6),
-                                // 2. Center box with custom logo
+
                                 AnimatedContainer(
                                   duration: const Duration(milliseconds: 200),
                                   width: double.infinity,
@@ -2415,7 +2393,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                                   ),
                                 ),
                                 const SizedBox(height: 6),
-                                // 3. Subtitle / description pill at bottom
+
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
                                   decoration: BoxDecoration(
@@ -2443,7 +2421,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                         ),
                         const SizedBox(width: 14),
 
-                        // Rescue Shelter Card (matching report action box design)
+
                         Expanded(
                           child: GestureDetector(
                             onTap: () {
@@ -2457,7 +2435,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                               mainAxisSize: MainAxisSize.min,
                               crossAxisAlignment: CrossAxisAlignment.center,
                               children: [
-                                // 1. Title on top
+
                                 SizedBox(
                                   height: 28,
                                   child: Center(
@@ -2475,7 +2453,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                                   ),
                                 ),
                                 const SizedBox(height: 6),
-                                // 2. Center box with custom logo
+
                                 AnimatedContainer(
                                   duration: const Duration(milliseconds: 200),
                                   width: double.infinity,
@@ -2510,7 +2488,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                                   ),
                                 ),
                                 const SizedBox(height: 6),
-                                // 3. Subtitle / description pill at bottom
+
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2.5),
                                   decoration: BoxDecoration(
@@ -2540,7 +2518,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     ),
                     const SizedBox(height: 18),
 
-                    // Name Field
+
                     Text(
                       type == 'clinic' ? 'Vet Clinic / Hospital Name *' : 'Shelter / Rescue Center Name *',
                       style: GoogleFonts.nunito(
@@ -2605,7 +2583,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     ],
                     const SizedBox(height: 14),
 
-                    // Phone Field
+
                     Text(
                       'Emergency Contact / WhatsApp Phone *',
                       style: GoogleFonts.nunito(
@@ -2669,7 +2647,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     ],
                     const SizedBox(height: 14),
 
-                    // Address Field with GPS Auto-fill
+
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -2781,7 +2759,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     ],
                     const SizedBox(height: 8),
 
-                    // Interactive Mini-Map (Matching Sighting Detail Outcome Form)
+
                     ClipRRect(
                       borderRadius: BorderRadius.circular(14),
                       child: Container(
@@ -2887,7 +2865,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     ),
                     const SizedBox(height: 14),
 
-                    // 24-Hours Switch
+
                     SwitchListTile(
                       contentPadding: EdgeInsets.zero,
                       title: Text(
@@ -2933,7 +2911,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                       const SizedBox(height: 14),
                     ],
 
-                    // Services / Tags
+
                     Text(
                       'Services & Facilities (Optional)',
                       style: GoogleFonts.nunito(fontSize: 12.5, fontWeight: FontWeight.w800, color: _navy),
@@ -2970,7 +2948,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     ),
                     const SizedBox(height: 14),
 
-                    // Additional Notes
+
                     Text(
                       'Notes or Description (Optional)',
                       style: GoogleFonts.nunito(fontSize: 12.5, fontWeight: FontWeight.w800, color: _navy),
@@ -3030,7 +3008,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                     ],
                     const SizedBox(height: 20),
 
-                    // Warning Banner
+
                     if (formValidationError != null) ...[
                       Container(
                         width: double.infinity,
@@ -3060,7 +3038,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
                       const SizedBox(height: 12),
                     ],
 
-                    // Submit Button
+
                     SizedBox(
                       width: double.infinity,
                       height: 48,
@@ -3213,9 +3191,7 @@ class _MapScreenState extends State<MapScreen> with SingleTickerProviderStateMix
   }
 }
 
-// -----------------------------------------------------------------------------
-// Small Triangle Painter for Map Pins
-// -----------------------------------------------------------------------------
+
 class _TrianglePainter extends CustomPainter {
   final Color color;
   const _TrianglePainter({required this.color});
@@ -3238,3 +3214,4 @@ class _TrianglePainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _TrianglePainter oldDelegate) => oldDelegate.color != color;
 }
+

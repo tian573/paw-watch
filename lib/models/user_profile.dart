@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 enum TrustTier {
-  community,        // Level 1: Open community actions (Feed, check-in, update pin, report)
-  verifiedRescuer,  // Level 2: Physical rescue missions, vet trips, temporary rescue claims
-  trustedFoster,    // Level 3: In-home foster custody, vulnerable kitten intakes
+  community,
+  verifiedRescuer,
+  trustedFoster,
 }
 
 class UserProfile {
@@ -16,18 +16,18 @@ class UserProfile {
   final String city;
   final int totalXp;
   final int level;
-  final double trustScore; // 0.0 - 5.0
+  final double trustScore;
   final int totalRescues;
   final int successfulRescues;
   final int completedFosters;
   final int activeFosters;
-  final double checkInRate; // Percentage e.g. 96.0
+  final double checkInRate;
   final int flagCount;
   final TrustTier trustTier;
   final DateTime joinedAt;
   final List<String> badges;
   final List<Map<String, dynamic>> reviews;
-  final String role; // 'user' or 'admin'
+  final String role;
   final bool isBanned;
   final bool isSuspended;
   final String? suspendReason;
@@ -108,11 +108,11 @@ class UserProfile {
   Color get trustTierColor {
     switch (trustTier) {
       case TrustTier.trustedFoster:
-        return const Color(0xFF673AB7); // Deep Purple
+        return const Color(0xFF673AB7);
       case TrustTier.verifiedRescuer:
-        return const Color(0xFF2E7D32); // Emerald Green
+        return const Color(0xFF2E7D32);
       case TrustTier.community:
-        return const Color(0xFF9B8EC4); // Lavender
+        return const Color(0xFF9B8EC4);
     }
   }
 
@@ -210,7 +210,7 @@ class UserProfile {
         ? (data['successfulRescues'] as num).toInt()
         : 0;
 
-    // Auto-derive trust tier if not explicitly saved:
+
     if (tierStr == null) {
       if (succRescues >= 10 && (data['completedFosters'] ?? 0) >= 3) {
         tier = TrustTier.trustedFoster;
@@ -260,3 +260,4 @@ class UserProfile {
     );
   }
 }
+

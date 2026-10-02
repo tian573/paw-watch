@@ -22,7 +22,7 @@ class FirebaseService {
 
   User? get currentUser => _auth.currentUser;
 
-  /// Uploads a list of local photo files to Firebase Storage
+
   Future<List<String>> uploadPhotos(List<File> photoFiles, String sightingId) async {
     final List<String> urls = [];
 
@@ -44,7 +44,7 @@ class FirebaseService {
         debugPrint('Firebase Storage photo upload notice: $e');
         try {
           final bytes = await photoFiles[i].readAsBytes();
-          // Under 1MB: base64 data URI enables cross-device & cross-platform rendering
+
           if (bytes.lengthInBytes <= 900 * 1024) {
             urls.add('data:image/jpeg;base64,${base64Encode(bytes)}');
           } else {
@@ -59,7 +59,7 @@ class FirebaseService {
     return urls;
   }
 
-  /// Uploads a local video file (MP4) to Firebase Storage
+
   Future<String?> uploadVideo(File videoFile, String sightingId) async {
     try {
       final timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -80,12 +80,12 @@ class FirebaseService {
       return downloadUrl;
     } catch (e) {
       debugPrint('Firebase Storage video upload notice: $e');
-      // Fallback to local path so video attachment is not lost if upload fails or is in offline test
+
       return videoFile.path;
     }
   }
 
-  /// Automatically categorizes the sighting based on description and urgency
+
   String _determineCategory(String description, String urgency) {
     final desc = description.toLowerCase();
     if (desc.contains('kitten') || desc.contains('baby') || desc.contains('anak kucing')) {
@@ -111,7 +111,7 @@ class FirebaseService {
     return 'Spotted';
   }
 
-  /// Creates a new sighting in Cloud Firestore, uploads photos, and awards +50 XP
+
   Future<Sighting> createSighting({
     required String title,
     required List<File> photos,
@@ -128,7 +128,7 @@ class FirebaseService {
     final docRef = _firestore.collection('sightings').doc();
     final sightingId = docRef.id;
 
-    // 1. Upload photos to Firebase Storage
+
     List<String> photoUrls = [];
     if (photos.isNotEmpty) {
       photoUrls = await uploadPhotos(photos, sightingId);
@@ -173,10 +173,10 @@ class FirebaseService {
       healthTags: tags,
     );
 
-    // 2. Write to Cloud Firestore
+
     await docRef.set(sighting.toMap());
 
-    // 3. Award +50 XP to the reporting user in Firestore
+
     if (user != null) {
       try {
         final userRef = _firestore.collection('users').doc(user.uid);
@@ -194,7 +194,7 @@ class FirebaseService {
     return sighting;
   }
 
-  /// Streams all sightings in real-time from Cloud Firestore
+
   Stream<List<Sighting>> streamSightings() {
     return _firestore
         .collection('sightings')
@@ -207,7 +207,7 @@ class FirebaseService {
     });
   }
 
-  /// Stream a single sighting document by ID
+
   Stream<Sighting?> streamSightingById(String sightingId) {
     return _firestore
         .collection('sightings')
@@ -216,7 +216,7 @@ class FirebaseService {
         .map((doc) => doc.exists ? Sighting.fromFirestore(doc) : null);
   }
 
-  /// Stream comments (and action-auto-posts) for a sighting, sorted by time
+
   Stream<List<Map<String, dynamic>>> streamCommunityUpdates(String sightingId) {
     return _firestore
         .collection('sightings')
@@ -231,7 +231,7 @@ class FirebaseService {
             }).toList());
   }
 
-  /// Add a comment / reply to a sighting with spam protection & cooldown
+
   Future<void> addComment({
     required String sightingId,
     required String text,
@@ -245,7 +245,7 @@ class FirebaseService {
     final uid = user?.uid ?? 'anon';
     final isAdmin = isCurrentUserAdmin;
 
-    // Anti-spam: Rate-limit cooldown (bypass for admins)
+
     if (!isAdmin) {
       final lastTime = _commentCooldowns[uid];
       if (lastTime != null) {
@@ -256,7 +256,7 @@ class FirebaseService {
         }
       }
 
-      // Anti-spam: Duplicate comment filter
+
       final lastText = _commentLastTexts[uid];
       if (lastText != null &&
           lastText.toLowerCase() == trimmed.toLowerCase() &&
@@ -293,21 +293,21 @@ class FirebaseService {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
-    // Increment commentCount on the sighting
+
     final sightingRef = _firestore.collection('sightings').doc(sightingId);
     batch.update(sightingRef, {'commentCount': FieldValue.increment(1)});
 
     await batch.commit();
 
-    // Update cooldown records
+
     _commentCooldowns[uid] = DateTime.now();
     _commentLastTexts[uid] = trimmed;
   }
 
-  /// Log a rescue action (Fed, Vet Visit, Took In, etc.) with verified photo proof
+
   Future<int> logRescueAction({
     required String sightingId,
-    required String action, // 'fed', 'vet', 'tookIn', 'sheltered', 'rehomed', 'stillHere', 'moved', 'notHere', 'holding', 'helpedOffline'
+    required String action,
     bool anonymous = false,
     File? proofPhotoFile,
     String? proofPhotoUrl,
@@ -330,7 +330,7 @@ class FirebaseService {
             ? user!.displayName!
             : (user?.email?.split('@').first ?? 'PawWatcher'));
 
-    // Rescuer focus rule: cannot log actions on another cat while "On My Way" or managing pending vet care
+
     if (uid != 'anon') {
       final activeTrip = await getActiveRescueTrip(uid);
       if (activeTrip != null && activeTrip.id != sightingId) {
@@ -424,7 +424,7 @@ class FirebaseService {
       docData['updatedLocationAddress'] = updatedLocationAddress;
     }
 
-    // 2. Update parent Sighting document with In-Care custody and last-seen state
+
     String reporterId = '';
     try {
       final sightingDoc =
@@ -458,7 +458,7 @@ class FirebaseService {
           }
         }
 
-        // Custody State Transitions:
+
         final isReporter = uid == reporterId;
         if (action == 'vet') {
           if (isReporter) {
@@ -495,7 +495,7 @@ class FirebaseService {
           if (customMilestoneTitles != null && customMilestoneTitles.isNotEmpty) {
             updateFields['customMilestoneTitles'] = customMilestoneTitles;
           }
-          // Clear physical rescue dispatch claim
+
           updateFields['rescueClaimed'] = false;
           updateFields['rescueClaimedBy'] = FieldValue.delete();
           updateFields['rescueClaimedByName'] = FieldValue.delete();
@@ -601,14 +601,14 @@ class FirebaseService {
       debugPrint('Parent sighting update notice: $e');
     }
 
-    // 4. Calculate XP and check if direct award (reporter / agreed TNR return) or pending confirmation
+
     final isOngoingAction = action == 'fed' || action == 'stillHere' || action == 'moved' || action == 'notHere';
     final isReporter = uid == reporterId;
     final isDirectlyConfirmed = isReporter || action == 'returnedToSpot';
     int effectiveXp = xp;
     Map<String, dynamic> existingCooldowns = {};
 
-    // Check 2-hour spot cooldown on ongoing actions (feeding / presence checks)
+
     if (user != null && !anonymous) {
       try {
         final userDoc = await _firestore.collection('users').doc(uid).get();
@@ -626,7 +626,7 @@ class FirebaseService {
 
         if (lastSpotUpdate != null && DateTime.now().difference(lastSpotUpdate).inMinutes < 120) {
           if (isOngoingAction) {
-            effectiveXp = 0; // On 2-hour cooldown for this spot
+            effectiveXp = 0;
           }
         }
       } catch (e) {
@@ -634,7 +634,7 @@ class FirebaseService {
       }
     }
 
-    // Attach confirmation state and pending XP to the update document
+
     docData['isReporterConfirmed'] = isDirectlyConfirmed;
     docData['pendingXp'] = effectiveXp;
     if (isDirectlyConfirmed) {
@@ -642,7 +642,7 @@ class FirebaseService {
       docData['confirmedAt'] = FieldValue.serverTimestamp();
     }
 
-    // 1. Post update to community feed
+
     final updateDocRef = await _firestore
         .collection('sightings')
         .doc(sightingId)
@@ -655,7 +655,7 @@ class FirebaseService {
       });
     }
 
-    // If reporter logged their own action OR action is directly confirmed (e.g. TNR colony return): award immediately
+
     if (user != null && !anonymous && isDirectlyConfirmed) {
       try {
         final userDocRef = _firestore.collection('users').doc(uid);
@@ -683,7 +683,7 @@ class FirebaseService {
     return isReporter ? effectiveXp : 0;
   }
 
-  /// Reporter confirms a community rescue action with a verified checkmark & awards pending XP
+
   Future<int> confirmRescueAction(String sightingId, String updateId) async {
     final user = _auth.currentUser;
     if (user == null) return 0;
@@ -714,14 +714,14 @@ class FirebaseService {
                       ? 150
                       : (action == 'rehomed' ? 200 : 15))));
 
-      // 1. Mark as verified by reporter
+
       await updateRef.update({
         'isReporterConfirmed': true,
         'confirmedBy': user.uid,
         'confirmedAt': FieldValue.serverTimestamp(),
       });
 
-      // 2. Award pending XP, update trust stats, and apply spot cooldown
+
       if (authorId.isNotEmpty && authorId != 'anon') {
         final authorDoc =
             await _firestore.collection('users').doc(authorId).get();
@@ -742,7 +742,7 @@ class FirebaseService {
           updates['completedFosters'] = FieldValue.increment(1);
         }
 
-        // Trust tier progression calculation
+
         final int currentSucc =
             ((authorData['successfulRescues'] is num)
                 ? (authorData['successfulRescues'] as num).toInt()
@@ -800,7 +800,7 @@ class FirebaseService {
     }
   }
 
-  /// Request Foster Custody Handover (when rescuer is not yet auto-certified Trusted Foster)
+
   Future<void> requestCustodyHandover({
     required String sightingId,
     required String customNote,
@@ -837,7 +837,7 @@ class FirebaseService {
         ? carePlanGoal!.trim()
         : 'Foster & Welfare Care';
 
-    // 1. Post Handover Request update
+
     final updateRef = await _firestore
         .collection('sightings')
         .doc(sightingId)
@@ -858,11 +858,11 @@ class FirebaseService {
       'text':
           'offered to take this cat into Foster Care for $carePlanDurationDays days ($effectiveGoal). Awaiting reporter confirmation. 🐾',
       'customNote': customNote.trim(),
-      'status': 'pending', // 'pending', 'approved', 'declined'
+      'status': 'pending',
       'createdAt': FieldValue.serverTimestamp(),
     });
 
-    // 2. Set pending handover on sighting doc
+
     await _firestore.collection('sightings').doc(sightingId).update({
       'pendingHandoverRescuerId': uid,
       'pendingHandoverRescuerName': name,
@@ -874,7 +874,7 @@ class FirebaseService {
     });
   }
 
-  /// Reporter approves Foster Custody Handover
+
   Future<void> approveCustodyHandover({
     required String sightingId,
     String? updateId,
@@ -888,7 +888,7 @@ class FirebaseService {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    // 1. Mark request update approved if updateId exists
+
     if (updateId != null && updateId.isNotEmpty) {
       try {
         await _firestore
@@ -902,7 +902,7 @@ class FirebaseService {
           'approvedAt': FieldValue.serverTimestamp(),
         });
       } catch (_) {
-        // Document might not exist or ID format differs
+
       }
     }
 
@@ -934,13 +934,13 @@ class FirebaseService {
       updateData['customMilestoneTitles'] = customMilestoneTitles;
     }
 
-    // 2. Transition Sighting to inCare_foster with rescuer custody
+
     await _firestore
         .collection('sightings')
         .doc(sightingId)
         .update(updateData);
 
-    // 3. Post approved notice to feed
+
     await _firestore
         .collection('sightings')
         .doc(sightingId)
@@ -954,7 +954,7 @@ class FirebaseService {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
-    // 4. Award XP (+150 XP) and increment active fosters on rescuer
+
     await _firestore.collection('users').doc(rescuerUid).set({
       'xp': FieldValue.increment(150),
       'totalXp': FieldValue.increment(150),
@@ -964,7 +964,7 @@ class FirebaseService {
     }, SetOptions(merge: true));
   }
 
-  /// Reporter declines Foster Custody Handover
+
   Future<void> declineCustodyHandover({
     required String sightingId,
     String? updateId,
@@ -1001,7 +1001,7 @@ class FirebaseService {
     await _firestore.collection('sightings').doc(sightingId).update(updateData);
   }
 
-  /// Submit Day 1, Day 3, or Day 7 Care Milestone Check-In
+
   Future<int> submitCareMilestoneCheckIn({
     required String sightingId,
     required int milestoneDay,
@@ -1030,7 +1030,7 @@ class FirebaseService {
 
     final int xp = milestoneDay == 1 ? 30 : (milestoneDay == 3 ? 40 : 60);
 
-    // 1. Post to updates feed
+
     await _firestore
         .collection('sightings')
         .doc(sightingId)
@@ -1051,14 +1051,14 @@ class FirebaseService {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
-    // 2. Update sighting doc
+
     await _firestore.collection('sightings').doc(sightingId).update({
       'latestCondition': conditionStatus,
       'lastCheckInAt': FieldValue.serverTimestamp(),
       'completedMilestones': FieldValue.arrayUnion([milestoneDay]),
     });
 
-    // 3. Award XP to caretaker
+
     await _firestore.collection('users').doc(uid).set({
       'xp': FieldValue.increment(xp),
       'totalXp': FieldValue.increment(xp),
@@ -1068,7 +1068,7 @@ class FirebaseService {
     return xp;
   }
 
-  /// Returns the sighting if the given user currently has an active "On My Way" rescue trip
+
   Future<Sighting?> getActiveRescueTrip(String uid) async {
     try {
       final snap = await _firestore
@@ -1088,7 +1088,7 @@ class FirebaseService {
     }
   }
 
-  /// Returns the sighting if the given user currently has a pending vet verification or awaiting post-vet decision
+
   Future<Sighting?> getActiveVetCareSighting(String uid) async {
     try {
       final snap = await _firestore
@@ -1127,7 +1127,7 @@ class FirebaseService {
     }
   }
 
-  /// Claim "I'm on my way" rescue button
+
   Future<void> claimRescue(String sightingId) async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -1135,7 +1135,7 @@ class FirebaseService {
         ? user.displayName!
         : (user.email?.split('@').first ?? 'PawWatcher');
 
-    // Rescuer focus rule: cannot claim On My Way on a new cat while already On My Way or managing pending vet care
+
     final activeTrip = await getActiveRescueTrip(user.uid);
     if (activeTrip != null && activeTrip.id != sightingId) {
       throw Exception(
@@ -1157,7 +1157,7 @@ class FirebaseService {
       'rescuerUserIds': FieldValue.arrayUnion([user.uid]),
     });
 
-    // Post auto-update
+
     await _firestore
         .collection('sightings')
         .doc(sightingId)
@@ -1173,7 +1173,7 @@ class FirebaseService {
     });
   }
 
-  /// Rescuer clicks "Can't Help" on an urgent dispatch notification
+
   Future<void> dismissDispatchForUser(String sightingId) async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -1184,7 +1184,7 @@ class FirebaseService {
     } catch (_) {}
   }
 
-  /// Check and expire a rescue claim that timed out past 45 mins without action
+
   Future<void> checkAndExpireRescueClaim(String sightingId) async {
     try {
       final doc = await _firestore.collection('sightings').doc(sightingId).get();
@@ -1205,9 +1205,9 @@ class FirebaseService {
       }
 
       final diff = DateTime.now().difference(parsedClaimedAt);
-      if (diff.inMinutes < 45) return; // Still within 45m window
+      if (diff.inMinutes < 45) return;
 
-      // 1. Release the spot
+
       await _firestore.collection('sightings').doc(sightingId).update({
         'rescueClaimed': false,
         'rescueClaimedBy': '',
@@ -1215,7 +1215,7 @@ class FirebaseService {
         'rescueClaimedAt': null,
       });
 
-      // 2. Invalidate onMyWay updates
+
       final updatesSnap = await _firestore
           .collection('sightings')
           .doc(sightingId)
@@ -1232,7 +1232,7 @@ class FirebaseService {
         }
       }
 
-      // 3. Post timeout notice to community feed
+
       await _firestore
           .collection('sightings')
           .doc(sightingId)
@@ -1247,7 +1247,7 @@ class FirebaseService {
         'createdAt': FieldValue.serverTimestamp(),
       });
 
-      // 4. Ghosting accountability: deduct 30 XP from abandoned claimant
+
       if (claimerUid.isNotEmpty) {
         await _firestore.collection('users').doc(claimerUid).set({
           'xp': FieldValue.increment(-30),
@@ -1260,7 +1260,7 @@ class FirebaseService {
     }
   }
 
-  /// Cancel "I'm on my way" claim (by claimant or reporter)
+
   Future<void> cancelRescueClaim(String sightingId) async {
     final user = _auth.currentUser;
     final name = user?.displayName?.isNotEmpty == true
@@ -1274,7 +1274,7 @@ class FirebaseService {
       'rescueClaimedAt': null,
     });
 
-    // 1. Mark existing active onMyWay updates for this sighting as cancelled
+
     try {
       final updatesSnap = await _firestore
           .collection('sightings')
@@ -1295,7 +1295,7 @@ class FirebaseService {
       debugPrint('Cancel updates notice: $e');
     }
 
-    // 2. Post a clear community notice that the trip was cancelled
+
     await _firestore
         .collection('sightings')
         .doc(sightingId)
@@ -1311,7 +1311,7 @@ class FirebaseService {
     });
   }
 
-  /// Delete a sighting (owner only, disallowed if active community care, vet visit, or foster custody exists unless force is true)
+
   Future<void> deleteSighting(String sightingId, {bool force = false}) async {
     final docSnap =
         await _firestore.collection('sightings').doc(sightingId).get();
@@ -1336,7 +1336,7 @@ class FirebaseService {
     await _firestore.collection('sightings').doc(sightingId).delete();
   }
 
-  /// Revokes foster/rescue custody from a rescuer (e.g. if reported by reporter/admin for uploading another cat or fake update)
+
   Future<void> revokeRescueCustody({
     required String sightingId,
     required String rescuerUid,
@@ -1347,7 +1347,7 @@ class FirebaseService {
         ? user!.displayName!
         : 'Report Author';
 
-    // 1. Reset custody fields on sighting
+
     await _firestore.collection('sightings').doc(sightingId).update({
       'careTakerId': FieldValue.delete(),
       'careTakerName': FieldValue.delete(),
@@ -1362,7 +1362,7 @@ class FirebaseService {
       'urgency': 'urgent',
     });
 
-    // 2. Post notice in updates feed
+
     await _firestore
         .collection('sightings')
         .doc(sightingId)
@@ -1379,7 +1379,7 @@ class FirebaseService {
     });
   }
 
-  /// Update sighting title and/or description (owner only)
+
   Future<void> updateSighting(String sightingId, {String? title, String? description}) async {
     final data = <String, dynamic>{};
     if (title != null) data['title'] = title.trim();
@@ -1389,7 +1389,7 @@ class FirebaseService {
     }
   }
 
-  /// Update cat temperament / socialization type (e.g. after clinic vet assessment)
+
   Future<void> updateCatTemperament({
     required String sightingId,
     required String temperament,
@@ -1434,7 +1434,7 @@ class FirebaseService {
     });
   }
 
-  /// Flag a sighting as inappropriate
+
   Future<void> flagSighting(
     String sightingId,
     String reason, {
@@ -1455,7 +1455,7 @@ class FirebaseService {
     });
   }
 
-  /// Report an unwanted or inappropriate chat message or photo
+
   Future<void> reportChatMessage({
     required String chatId,
     required String messageId,
@@ -1491,7 +1491,7 @@ class FirebaseService {
     }, SetOptions(merge: true));
   }
 
-  /// Edit a comment or reply (author only)
+
   Future<void> editComment({
     required String sightingId,
     required String commentId,
@@ -1509,7 +1509,7 @@ class FirebaseService {
     });
   }
 
-  /// Edit custom note of a community update post or comment (author only)
+
   Future<void> editCommunityUpdateNote({
     required String sightingId,
     required String updateId,
@@ -1531,7 +1531,7 @@ class FirebaseService {
       'editedAt': FieldValue.serverTimestamp(),
     };
 
-    // If it's a plain comment, also update text
+
     if (type == 'comment') {
       updateFields['text'] = newCustomNote.trim();
     }
@@ -1539,7 +1539,7 @@ class FirebaseService {
     await updateRef.update(updateFields);
   }
 
-  /// Soft-delete a comment or reply (author only)
+
   Future<void> deleteComment({
     required String sightingId,
     required String commentId,
@@ -1562,7 +1562,7 @@ class FirebaseService {
       'deletedAt': FieldValue.serverTimestamp(),
     });
 
-    // Safely decrement comment count on sighting doc (never negative)
+
     final sightingRef = _firestore.collection('sightings').doc(sightingId);
     final sightingSnap = await sightingRef.get();
     final currentCount = (sightingSnap.data()?['commentCount'] as num?)?.toInt() ?? 0;
@@ -1575,7 +1575,7 @@ class FirebaseService {
     await batch.commit();
   }
 
-  /// Report/flag a comment or reply
+
   Future<void> flagComment({
     required String sightingId,
     required String commentId,
@@ -1598,7 +1598,7 @@ class FirebaseService {
     });
   }
 
-  /// Report/flag a user review or endorsement for admin review
+
   Future<void> flagReview({
     required String targetUserId,
     required String reviewerName,
@@ -1623,7 +1623,7 @@ class FirebaseService {
     });
   }
 
-  /// Block a user from viewing a specific sighting report details
+
   Future<void> blockUserFromSighting({
     required String sightingId,
     required String blockedUid,
@@ -1633,7 +1633,7 @@ class FirebaseService {
     });
   }
 
-  /// Delete all comments from both the reporter and blocked user on this sighting
+
   Future<void> deleteCommentsBetweenUsers({
     required String sightingId,
     required String userA,
@@ -1659,7 +1659,7 @@ class FirebaseService {
     await batch.commit();
   }
 
-  /// Stream UserProfile with real-time trust score, trust tier, and XP progress
+
   Stream<UserProfile> streamUserProfile(String uid) {
     return _firestore.collection('users').doc(uid).snapshots().map((doc) {
       if (!doc.exists) {
@@ -1675,7 +1675,7 @@ class FirebaseService {
     });
   }
 
-  /// Get a single UserProfile once
+
   Future<UserProfile?> getUserProfile(String uid) async {
     final doc = await _firestore.collection('users').doc(uid).get();
     if (doc.exists && doc.data() != null) {
@@ -1684,10 +1684,10 @@ class FirebaseService {
     return null;
   }
 
-  /// Submit a reporter review & rating for a rescuer after handover or rescue
+
   Future<void> submitRescuerReview({
     required String rescuerUid,
-    required double rating, // 1.0 - 5.0
+    required double rating,
     required String comment,
     required String sightingId,
   }) async {
@@ -1714,7 +1714,7 @@ class FirebaseService {
         'createdAt': Timestamp.now(),
       });
 
-      // Recalculate average trust score
+
       double sum = 0.0;
       for (final r in reviews) {
         sum += (r['rating'] as num?)?.toDouble() ?? 5.0;
@@ -1727,7 +1727,7 @@ class FirebaseService {
           ? (data['completedFosters'] as num).toInt()
           : 0;
 
-      // Check trust tier upgrade:
+
       String newTier = 'community';
       if (succRescues >= 10 && compFosters >= 3 && newAvg >= 4.7) {
         newTier = 'trustedFoster';
@@ -1743,7 +1743,7 @@ class FirebaseService {
     });
   }
 
-  /// Update user profile details
+
   Future<void> updateUserProfile({
     required String uid,
     String? displayName,
@@ -1768,7 +1768,7 @@ class FirebaseService {
     }
   }
 
-  /// Sample seed sightings for initial empty state display
+
   static List<Sighting> get sampleSightings => [
         Sighting(
           id: 'seed_1',
@@ -1842,17 +1842,13 @@ class FirebaseService {
         ),
       ];
 
-  // =========================================================================
-  // DIRECT COORDINATION CHAT & CONVERSATIONS INBOX
-  // =========================================================================
 
-  /// Generate a consistent chatId for a sighting and two participants
   String getCoordinationChatId(String sightingId, String user1, String user2) {
     final list = [user1, user2]..sort();
     return '${sightingId}_${list[0]}_${list[1]}';
   }
 
-  /// Stream messages in a coordination chat thread
+
   Stream<List<ChatMessage>> streamChatMessages(String chatId) {
     return _firestore
         .collection('coordinationChats')
@@ -1864,7 +1860,7 @@ class FirebaseService {
             snap.docs.map((d) => ChatMessage.fromFirestore(d)).toList());
   }
 
-  /// Stream all conversations for a user, sorted newest first
+
   Stream<List<Map<String, dynamic>>> streamUserChatThreads(String userId) {
     return _firestore
         .collection('coordinationChats')
@@ -1888,12 +1884,12 @@ class FirebaseService {
         });
   }
 
-  /// Stream the coordination chat document itself (for participants and block status)
+
   Stream<DocumentSnapshot<Map<String, dynamic>>> streamChatDoc(String chatId) {
     return _firestore.collection('coordinationChats').doc(chatId).snapshots();
   }
 
-  /// Delete a coordination chat thread and its messages
+
   Future<void> deleteChatThread(String chatId) async {
     final chatDocRef = _firestore.collection('coordinationChats').doc(chatId);
     final messagesSnap = await chatDocRef.collection('messages').get();
@@ -1905,14 +1901,14 @@ class FirebaseService {
     await batch.commit();
   }
 
-  /// Delete multiple coordination chat threads and their messages
+
   Future<void> deleteMultipleChatThreads(List<String> chatIds) async {
     for (final chatId in chatIds) {
       await deleteChatThread(chatId);
     }
   }
 
-  /// Edit a coordination chat message text
+
   Future<void> editChatMessage({
     required String chatId,
     required String messageId,
@@ -1945,7 +1941,7 @@ class FirebaseService {
     }
   }
 
-  /// Mark a single coordination chat message as deleted
+
   Future<void> deleteChatMessage({
     required String chatId,
     required String messageId,
@@ -1976,7 +1972,7 @@ class FirebaseService {
     }
   }
 
-  /// Block a user in the chat thread
+
   Future<void> blockUserInChat({
     required String chatId,
     required String targetUserId,
@@ -2000,7 +1996,7 @@ class FirebaseService {
     });
   }
 
-  /// Unblock a user in the chat thread
+
   Future<void> unblockUserInChat({
     required String chatId,
     required String targetUserId,
@@ -2024,7 +2020,7 @@ class FirebaseService {
     });
   }
 
-  /// Send a message in a coordination chat
+
   Future<void> sendChatMessage({
     required String chatId,
     required String sightingId,
@@ -2048,20 +2044,20 @@ class FirebaseService {
     final chatDocRef =
         _firestore.collection('coordinationChats').doc(chatId);
 
-    // Check if chat is currently blocked
+
     if (!isSystemMessage) {
       final docSnap = await chatDocRef.get();
       if (docSnap.exists) {
         final data = docSnap.data();
         final blockedBy = (data?['blockedBy'] as List<dynamic>?)?.cast<String>() ?? [];
         if (blockedBy.isNotEmpty) {
-          // Chat is blocked, do not allow sending
+
           return;
         }
       }
     }
 
-    // Ensure participants list
+
     final List<String> parts = [senderId];
     if (otherUserId != null && otherUserId.isNotEmpty && otherUserId != senderId) {
       parts.add(otherUserId);
@@ -2096,7 +2092,7 @@ class FirebaseService {
 
     await chatDocRef.set(metadata, SetOptions(merge: true));
 
-    // Add message
+
     final msgData = <String, dynamic>{
       'senderId': senderId,
       'senderName': senderName,
@@ -2112,7 +2108,7 @@ class FirebaseService {
     await chatDocRef.collection('messages').add(msgData);
   }
 
-  /// Mark a chat thread as read for a given user
+
   Future<void> markChatAsRead({
     required String chatId,
     required String userId,
@@ -2129,20 +2125,20 @@ class FirebaseService {
     }
   }
 
-  /// Check if a chat thread has unread messages for a given user
+
   static bool isChatUnread(Map<String, dynamic> chat, String? currentUid) {
     if (currentUid == null || currentUid.isEmpty) return false;
     final lastSenderId = chat['lastSenderId']?.toString();
-    // If current user is the last sender, they wrote it -> read
+
     if (lastSenderId == currentUid) return false;
 
-    // Check explicit unreadBy array
+
     if (chat.containsKey('unreadBy') && chat['unreadBy'] is List) {
       final unreadList = (chat['unreadBy'] as List).map((e) => e.toString()).toList();
       return unreadList.contains(currentUid);
     }
 
-    // Fallback for legacy chats: compare lastRead_$currentUid timestamp with lastUpdatedAt
+
     final lastRead = chat['lastRead_$currentUid'];
     final lastUpdatedAt = chat['lastUpdatedAt'];
     if (lastRead != null && lastUpdatedAt != null) {
@@ -2151,19 +2147,14 @@ class FirebaseService {
       }
     }
 
-    // If last message exists and was sent by another user, and no read record exists
+
     return lastSenderId != null && lastSenderId.isNotEmpty && lastSenderId != currentUid;
   }
 
-  // =========================================================================
-  // CARETAKER OUTCOME CONFIRMATION & RESOLUTION (Rehomed / Sheltered / Return)
-  // =========================================================================
 
-  /// Caretaker directly completes and resolves care outcome (Rehomed, Sheltered, Returned TNR)
-  /// without requiring reporter confirmation since caretaker has full custody.
   Future<int> completeCareOutcome({
     required String sightingId,
-    required String outcomeAction, // 'rehomed', 'sheltered', 'returnedToSpot'
+    required String outcomeAction,
     required String note,
     File? proofPhotoFile,
     File? proofVideoFile,
@@ -2194,7 +2185,7 @@ class FirebaseService {
         ? 200
         : (outcomeAction == 'sheltered' ? 120 : 100);
 
-    // 1. Post celebration announcement update to feed
+
     final actionText = outcomeAction == 'rehomed'
         ? 'successfully rehomed this cat with a loving forever family! 🏡🎉'
         : (outcomeAction == 'sheltered'
@@ -2237,7 +2228,7 @@ class FirebaseService {
         .collection('updates')
         .add(updateDocData);
 
-    // 2. Award XP to caretaker & increment rescue count
+
     final userUpdates = <String, dynamic>{
       'xp': FieldValue.increment(earnedXp),
       'totalXp': FieldValue.increment(earnedXp),
@@ -2250,7 +2241,7 @@ class FirebaseService {
     }
     await _firestore.collection('users').doc(uid).set(userUpdates, SetOptions(merge: true));
 
-    // 3. Mark sighting outcome (TNR transitions to Community Cat, others to Resolved)
+
     final isTnr = outcomeAction == 'returnedToSpot';
     final updateFields = <String, dynamic>{
       'urgency': isTnr ? 'communityCare' : 'resolved',
@@ -2307,7 +2298,7 @@ class FirebaseService {
     return earnedXp;
   }
 
-  /// Caretaker completes foster milestones or decides to open cat for adoption
+
   Future<int> openCatForAdoption({
     required String sightingId,
     required String note,
@@ -2329,7 +2320,7 @@ class FirebaseService {
 
     const int earnedXp = 100;
 
-    // 1. Post adoption announcement to feed
+
     final fullText = note.trim().isNotEmpty
         ? 'officially opened this cat for adoption! 🏡🐾 "${note.trim()}"'
         : 'officially opened this cat for adoption! 🏡🐾';
@@ -2350,14 +2341,14 @@ class FirebaseService {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
-    // 2. Award XP to caretaker
+
     await _firestore.collection('users').doc(uid).set({
       'xp': FieldValue.increment(earnedXp),
       'totalXp': FieldValue.increment(earnedXp),
       'lastActive': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
 
-    // 3. Update sighting category to 'Needs Home' and save adoption showcase profile
+
     final updateFields = <String, dynamic>{
       'category': 'Needs Home',
       'isOpenForAdoption': true,
@@ -2391,7 +2382,7 @@ class FirebaseService {
     return earnedXp;
   }
 
-  /// Prospective adopter submits adoption application / request to the caretaker
+
   Future<void> submitAdoptionApplication({
     required String sightingId,
     required String message,
@@ -2421,7 +2412,7 @@ class FirebaseService {
       'createdAt': FieldValue.serverTimestamp(),
     });
 
-    // Read current sighting to decide whether to set the "spotlight" applicant
+
     final sDoc =
         await _firestore.collection('sightings').doc(sightingId).get();
     final data = sDoc.data() ?? {};
@@ -2434,7 +2425,7 @@ class FirebaseService {
       'adoptionApplicantIds': FieldValue.arrayUnion([uid]),
     };
 
-    // Only set the "spotlight" applicant fields if there isn't one already
+
     if (!hasExistingApplicant) {
       updateData['pendingAdoptionApplicantId'] = uid;
       updateData['pendingAdoptionApplicantName'] = name;
@@ -2449,8 +2440,7 @@ class FirebaseService {
         .update(updateData);
   }
 
-  /// Returns true if the current user has already submitted an adoption
-  /// application for the given sighting (regardless of its current status).
+
   Future<bool> hasUserAlreadyRequestedAdoption(String sightingId) async {
     final user = _auth.currentUser;
     if (user == null) return false;
@@ -2465,7 +2455,7 @@ class FirebaseService {
     return snap.docs.isNotEmpty;
   }
 
-  /// Returns all pending adoption applications for a sighting, ordered newest first.
+
   Future<List<Map<String, dynamic>>> getAdoptionApplicants(
       String sightingId) async {
     final snap = await _firestore
@@ -2482,7 +2472,7 @@ class FirebaseService {
         })
         .where((d) => d['status'] == 'pending')
         .toList();
-    // Sort newest first (createdAt may be a Timestamp or null)
+
     results.sort((a, b) {
       final aTs = a['createdAt'] as Timestamp?;
       final bTs = b['createdAt'] as Timestamp?;
@@ -2494,7 +2484,7 @@ class FirebaseService {
     return results;
   }
 
-  /// Caretaker / reporter approves adoption application and rehomes the cat
+
   Future<void> approveAdoption({
     required String sightingId,
     String? updateId,
@@ -2567,9 +2557,7 @@ class FirebaseService {
     });
   }
 
-  /// Caretaker / reporter declines adoption application.
-  /// If there are other pending applicants, the next one is promoted
-  /// into the "spotlight" fields shown on the pending adoption banner.
+
   Future<void> declineAdoption({
     required String sightingId,
     String? updateId,
@@ -2584,7 +2572,7 @@ class FirebaseService {
           .update({'status': 'declined'});
     }
 
-    // Check for remaining pending applicants to promote
+
     final remaining = await _firestore
         .collection('sightings')
         .doc(sightingId)
@@ -2606,7 +2594,7 @@ class FirebaseService {
         'pendingAdoptionUpdateId': next.id,
       });
     } else {
-      // No remaining applicants — clear the spotlight
+
       await _firestore.collection('sightings').doc(sightingId).update({
         'pendingAdoptionApplicantId': FieldValue.delete(),
         'pendingAdoptionApplicantName': FieldValue.delete(),
@@ -2617,10 +2605,10 @@ class FirebaseService {
     }
   }
 
-  /// Caretaker / rescuer requests outcome confirmation (shelter transfer, rehome, TNR return)
+
   Future<void> requestOutcomeConfirmation({
     required String sightingId,
-    required String outcomeAction, // 'rehomed', 'returnedToSpot', 'sheltered'
+    required String outcomeAction,
     required String note,
     File? proofPhotoFile,
     File? proofVideoFile,
@@ -2696,7 +2684,7 @@ class FirebaseService {
         .update(sightingUpdates);
   }
 
-  /// Reporter / Admin approves the outcome confirmation
+
   Future<void> approveOutcomeConfirmation({
     required String sightingId,
     required String outcomeAction,
@@ -2727,8 +2715,8 @@ class FirebaseService {
         customNote: 'Adopted and permanently rehomed! 🎉',
       );
     } else if (outcomeAction == 'sheltered') {
-      // Admin-approved shelter transfer: update sighting directly to avoid
-      // completeCareOutcome using the admin's UID for XP and authorship.
+
+
       final sDoc =
           await _firestore.collection('sightings').doc(sightingId).get();
       final sData = sDoc.data() ?? {};
@@ -2741,7 +2729,7 @@ class FirebaseService {
       final caretakerUid = sData['careTakerId']?.toString();
       final caretakerName = sData['careTakerName']?.toString() ?? 'Caretaker';
 
-      // Post celebration update to the sighting's update feed
+
       final celebrationData = <String, dynamic>{
         'type': 'outcomeResolved',
         'action': 'sheltered',
@@ -2772,7 +2760,7 @@ class FirebaseService {
           .collection('updates')
           .add(celebrationData);
 
-      // Award XP to the original caretaker (not the admin)
+
       if (caretakerUid != null && caretakerUid.isNotEmpty) {
         try {
           await _firestore
@@ -2789,7 +2777,7 @@ class FirebaseService {
         } catch (_) {}
       }
 
-      // Mark sighting as resolved with all necessary fields
+
       final sightingResolveFields = <String, dynamic>{
         'urgency': 'resolved',
         'resolvedByAction': 'sheltered',
@@ -2861,7 +2849,7 @@ class FirebaseService {
     });
   }
 
-  /// Reporter declines outcome confirmation
+
   Future<void> declineOutcomeConfirmation({
     required String sightingId,
     String? updateId,
@@ -2888,7 +2876,7 @@ class FirebaseService {
     });
   }
 
-  /// Update Adoption Showcase profile (health badges, shelter name, contact)
+
   Future<void> updateAdoptionShowcaseProfile({
     required String sightingId,
     required List<String> healthTags,
@@ -2908,7 +2896,7 @@ class FirebaseService {
     await _firestore.collection('sightings').doc(sightingId).update(updateData);
   }
 
-  /// Reporter approves a pending vet visit confirmation
+
   Future<void> approveVetVisitConfirmation({
     required String sightingId,
     required String rescuerId,
@@ -2918,7 +2906,7 @@ class FirebaseService {
     final user = _auth.currentUser;
     if (user == null) return;
 
-    // 1. Mark update as approved if updateId exists
+
     if (updateId != null && updateId.isNotEmpty) {
       try {
         await _firestore
@@ -2937,7 +2925,7 @@ class FirebaseService {
       } catch (_) {}
     }
 
-    // 2. Award XP to rescuer
+
     try {
       await _firestore.collection('users').doc(rescuerId).set({
         'xp': FieldValue.increment(xp),
@@ -2949,7 +2937,7 @@ class FirebaseService {
       debugPrint('Error awarding rescuer vet XP: $e');
     }
 
-    // 3. Update sighting: hasVetVisit = true, clear pending fields, demote urgent to needsHelp
+
     final sightingDoc =
         await _firestore.collection('sightings').doc(sightingId).get();
     final currentUrgency = sightingDoc.data()?['urgency']?.toString();
@@ -2986,7 +2974,7 @@ class FirebaseService {
         .update(updateData);
   }
 
-  /// Reporter delegates post-vet custody to the rescuer to manage placement
+
   Future<void> delegatePostVetCustodyToRescuer(String sightingId) async {
     final user = _auth.currentUser;
     if (user == null) return;
@@ -3021,7 +3009,7 @@ class FirebaseService {
     });
   }
 
-  /// Rescuer completed vet visit but cannot foster; requests community foster
+
   Future<void> requestCommunityFoster({
     required String sightingId,
     String? note,
@@ -3052,7 +3040,7 @@ class FirebaseService {
     });
   }
 
-  /// Reporter declines a pending vet visit confirmation
+
   Future<void> declineVetVisitConfirmation({
     required String sightingId,
     String? updateId,
@@ -3081,10 +3069,10 @@ class FirebaseService {
     });
   }
 
-  /// Community suggestion for a new vet clinic or rescue shelter (Admin verifies)
+
   Future<void> submitClinicSuggestion({
     required String name,
-    required String type, // 'clinic' or 'shelter'
+    required String type,
     required String address,
     required double latitude,
     required double longitude,
@@ -3113,20 +3101,18 @@ class FirebaseService {
       'notes': notes?.trim() ?? '',
       'submittedBy': uid,
       'submittedByName': userName,
-      'status': 'pending', // Pending review for "Verify Clinic Suggestion" use case
+      'status': 'pending',
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
-  // ─────────────── ADMIN METHODS ───────────────
 
-  /// Check if current user is admin
   bool get isCurrentUserAdmin {
     final email = _auth.currentUser?.email;
     return email == 'admin@example.com';
   }
 
-  /// Stream all flags (pending) for admin review
+
   Stream<List<Map<String, dynamic>>> streamPendingFlags() {
     return _firestore
         .collection('flags')
@@ -3141,7 +3127,7 @@ class FirebaseService {
         .handleError((_) => <Map<String, dynamic>>[]);
   }
 
-  /// Stream all flags for admin (no status filter, fallback if index missing)
+
   Stream<List<Map<String, dynamic>>> streamAllFlags() {
     return _firestore
         .collection('flags')
@@ -3156,7 +3142,7 @@ class FirebaseService {
         .handleError((_) => <Map<String, dynamic>>[]);
   }
 
-  /// Stream pending clinic/shelter suggestions
+
   Stream<List<Map<String, dynamic>>> streamPendingClinicSuggestions() {
     return _firestore
         .collection('clinic_suggestions')
@@ -3171,7 +3157,7 @@ class FirebaseService {
         .handleError((_) => <Map<String, dynamic>>[]);
   }
 
-  /// Stream all clinic suggestions
+
   Stream<List<Map<String, dynamic>>> streamAllClinicSuggestions() {
     return _firestore
         .collection('clinic_suggestions')
@@ -3186,7 +3172,7 @@ class FirebaseService {
         .handleError((_) => <Map<String, dynamic>>[]);
   }
 
-  /// Ban a user
+
   Future<void> banUser(String targetUid, {String? reason}) async {
     String userEmail = '';
     try {
@@ -3201,7 +3187,7 @@ class FirebaseService {
       'banReason': reason ?? 'Violation of community guidelines',
     }, SetOptions(merge: true));
 
-    // Record in banned_users collection so ban persists even if deleted from users
+
     await _firestore.collection('banned_users').doc(targetUid).set({
       'uid': targetUid,
       'email': userEmail,
@@ -3210,7 +3196,7 @@ class FirebaseService {
     }, SetOptions(merge: true));
   }
 
-  /// Unban a user
+
   Future<void> unbanUser(String targetUid) async {
     await _firestore.collection('users').doc(targetUid).set({
       'isBanned': false,
@@ -3224,28 +3210,28 @@ class FirebaseService {
     } catch (_) {}
   }
 
-  /// Delete / remove a user from the users collection (frees up space in user management)
+
   Future<void> deleteUserDocument(String targetUid) async {
     await _firestore.collection('users').doc(targetUid).delete();
   }
 
-  /// Check if a user is currently banned
+
   Future<bool> isUserBanned(String targetUid, {String? email}) async {
     try {
-      // 1. Check users collection
+
       final userDoc = await _firestore.collection('users').doc(targetUid).get();
       if (userDoc.exists && userDoc.data()?['isBanned'] == true) {
         return true;
       }
 
-      // 2. Check banned_users collection by UID
+
       final bannedDoc =
           await _firestore.collection('banned_users').doc(targetUid).get();
       if (bannedDoc.exists) {
         return true;
       }
 
-      // 3. Check banned_users by email if provided
+
       if (email != null && email.isNotEmpty) {
         final emailSnap = await _firestore
             .collection('banned_users')
@@ -3262,8 +3248,7 @@ class FirebaseService {
     }
   }
 
-  /// Checks if a displayName is already taken in the users collection.
-  /// Optionally exclude a specific UID (useful when editing own profile).
+
   Future<bool> isDisplayNameTaken(String name, {String? excludeUid}) async {
     final trimmed = name.trim().toLowerCase();
     if (trimmed.isEmpty) return false;
@@ -3283,7 +3268,7 @@ class FirebaseService {
     }
   }
 
-  /// Checks if an email is already registered in Firestore users or banned_users
+
   Future<bool> isEmailRegistered(String email) async {
     final trimmed = email.trim().toLowerCase();
     if (trimmed.isEmpty) return false;
@@ -3308,7 +3293,7 @@ class FirebaseService {
     }
   }
 
-  /// Suspend a user temporarily
+
   Future<void> suspendUser(String targetUid, {String? reason, int days = 7}) async {
     await _firestore.collection('users').doc(targetUid).update({
       'isSuspended': true,
@@ -3319,7 +3304,7 @@ class FirebaseService {
     });
   }
 
-  /// Unsuspend a user
+
   Future<void> unsuspendUser(String targetUid) async {
     await _firestore.collection('users').doc(targetUid).update({
       'isSuspended': false,
@@ -3330,7 +3315,7 @@ class FirebaseService {
     });
   }
 
-  /// Admin: delete a comment (hard override, works for any comment type)
+
   Future<void> adminDeleteComment({
     required String sightingId,
     required String commentId,
@@ -3361,7 +3346,7 @@ class FirebaseService {
     await batch.commit();
   }
 
-  /// Admin: delete a sighting/report with reason
+
   Future<void> adminDeleteSighting(String sightingId, {String? reason}) async {
     await _firestore.collection('sightings').doc(sightingId).update({
       'isDeleted': true,
@@ -3372,7 +3357,7 @@ class FirebaseService {
     });
   }
 
-  /// Admin: verify a clinic/shelter suggestion
+
   Future<void> verifyClinicSuggestion(String docId) async {
     String? shelterName;
     try {
@@ -3411,8 +3396,7 @@ class FirebaseService {
     }
   }
 
-  /// Self-healing check: automatically resolve any sightings whose requested shelter
-  /// or rehoming outcome has been submitted or verified.
+
   Future<void> autoResolveVerifiedShelterSightings() async {
     try {
       final pendingSightings = await _firestore
@@ -3432,7 +3416,7 @@ class FirebaseService {
       debugPrint('Error in autoResolveVerifiedShelterSightings: $e');
     }
 
-    // Clean up any lingering custody for sightings that are resolved/sheltered/rehomed
+
     try {
       final resolvedSightings = await _firestore
           .collection('sightings')
@@ -3462,7 +3446,7 @@ class FirebaseService {
     }
   }
 
-  /// Admin: reject a clinic/shelter suggestion
+
   Future<void> rejectClinicSuggestion(String docId, {String? reason}) async {
     await _firestore.collection('clinic_suggestions').doc(docId).update({
       'status': 'rejected',
@@ -3472,7 +3456,7 @@ class FirebaseService {
     });
   }
 
-  /// Admin: resolve/dismiss a flag
+
   Future<void> resolveFlag(String flagDocId, {String action = 'dismissed'}) async {
     await _firestore.collection('flags').doc(flagDocId).update({
       'status': action,
@@ -3481,12 +3465,12 @@ class FirebaseService {
     });
   }
 
-  /// Admin: delete a specific flag document
+
   Future<void> deleteFlag(String flagDocId) async {
     await _firestore.collection('flags').doc(flagDocId).delete();
   }
 
-  /// Admin: clear all resolved/dismissed flags to free up space
+
   Future<int> clearResolvedFlags() async {
     final snap = await _firestore
         .collection('flags')
@@ -3501,7 +3485,7 @@ class FirebaseService {
     return snap.docs.length;
   }
 
-  /// Admin: create an announcement (appears in all users' notifications)
+
   Future<void> createAnnouncement({
     required String title,
     required String body,
@@ -3519,7 +3503,7 @@ class FirebaseService {
     });
   }
 
-  /// Stream announcements (for all users' notification tab)
+
   Stream<List<Map<String, dynamic>>> streamAnnouncements() {
     return _firestore
         .collection('announcements')
@@ -3535,7 +3519,7 @@ class FirebaseService {
         .handleError((_) => <Map<String, dynamic>>[]);
   }
 
-  /// Admin: delete/deactivate an announcement
+
   Future<void> deleteAnnouncement(String docId) async {
     await _firestore.collection('announcements').doc(docId).update({
       'isActive': false,
@@ -3543,7 +3527,7 @@ class FirebaseService {
     });
   }
 
-  /// Admin: create a new badge definition
+
   Future<void> createBadge({
     required String title,
     required String description,
@@ -3561,7 +3545,7 @@ class FirebaseService {
     });
   }
 
-  /// Stream all badge definitions
+
   Stream<List<Map<String, dynamic>>> streamBadgeDefinitions() {
     return _firestore
         .collection('badge_definitions')
@@ -3575,7 +3559,7 @@ class FirebaseService {
         .handleError((_) => <Map<String, dynamic>>[]);
   }
 
-  /// Ensures a Firestore user document exists for an authenticated user
+
   Future<void> ensureUserDoc(User user, {String? displayName}) async {
     try {
       if (await isUserBanned(user.uid, email: user.email)) {
@@ -3639,22 +3623,21 @@ class FirebaseService {
     }
   }
 
-  /// Discovers any user IDs from sightings, updates, and current auth state
-  /// that are missing from the `users` collection, and auto-creates their user documents.
+
   Future<void> syncMissingUsersFromActivity() async {
     try {
-      // 1. Ensure current authenticated user exists
+
       if (_auth.currentUser != null) {
         await ensureUserDoc(_auth.currentUser!);
       }
 
-      // 2. Fetch all existing user IDs
+
       final usersSnap = await _firestore.collection('users').get();
       final existingUids = usersSnap.docs.map((d) => d.id).toSet();
 
-      // 3. Collect user references from sightings
+
       final sightingsSnap = await _firestore.collection('sightings').get();
-      final missingUsers = <String, String>{}; // uid -> name
+      final missingUsers = <String, String>{};
 
       for (final sDoc in sightingsSnap.docs) {
         final data = sDoc.data();
@@ -3687,7 +3670,7 @@ class FirebaseService {
         }
       }
 
-      // 4. Batch create missing users so they appear in admin management
+
       for (final entry in missingUsers.entries) {
         final uid = entry.key;
         final name = entry.value;
@@ -3720,7 +3703,7 @@ class FirebaseService {
     }
   }
 
-  /// Stream all users for admin user management
+
   Stream<List<UserProfile>> streamAllUsers() {
     return _firestore
         .collection('users')
@@ -3739,32 +3722,32 @@ class FirebaseService {
         });
   }
 
-  /// Get user count
+
   Future<int> getUserCount() async {
     final snap = await _firestore.collection('users').count().get();
     return snap.count ?? 0;
   }
 
-  /// Get sighting count
+
   Future<int> getSightingCount() async {
     final snap = await _firestore.collection('sightings').count().get();
     return snap.count ?? 0;
   }
 
-  /// Get flag count
+
   Future<int> getFlagCount() async {
     final snap = await _firestore.collection('flags').count().get();
     return snap.count ?? 0;
   }
 
-  /// Admin manually adds or registers a user document into Firestore
+
   Future<void> adminAddUser({
     required String displayName,
     required String email,
     String role = 'user',
   }) async {
     final sanitizedEmail = email.trim().toLowerCase();
-    // Check if user with this email already exists
+
     final existingSnap = await _firestore
         .collection('users')
         .where('email', isEqualTo: sanitizedEmail)
@@ -3803,3 +3786,4 @@ class FirebaseService {
     }, SetOptions(merge: true));
   }
 }
+

@@ -18,7 +18,7 @@ class CoordinationChatScreen extends StatefulWidget {
   final Sighting sighting;
   final String otherUserId;
   final String otherUserName;
-  final String? otherUserRole; // 'Foster Volunteer' or 'Reporter'
+  final String? otherUserRole;
 
   const CoordinationChatScreen({
     super.key,
@@ -115,7 +115,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
     }
 
     final replyMsg = _replyingToMessage;
-    // Synchronously clear immediately to prevent double submission
+
     if (textToSend == null) {
       _msgCtrl.clear();
     }
@@ -799,7 +799,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
               ),
               const SizedBox(height: 14),
 
-              // Reply option for both sender and recipient
+
               ListTile(
                 leading: Container(
                   padding: const EdgeInsets.all(8),
@@ -1729,7 +1729,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
           ),
           body: Column(
             children: [
-              // Sighting Context Header (Tappable -> Opens SightingDetail)
+
               Material(
                 color: Colors.white,
                 child: InkWell(
@@ -1797,7 +1797,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                 ),
               ),
 
-              // Message Stream
+
               Expanded(
                 child: RepaintBoundary(
                   child: StreamBuilder<List<ChatMessage>>(
@@ -1856,7 +1856,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                         final msg = messages[index];
                         final isMe = msg.senderId == _myUid;
 
-                        // System Message Pill
+
                         if (msg.isSystemMessage) {
                           return Align(
                             alignment: Alignment.center,
@@ -1903,7 +1903,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
               ),
             ),
 
-              // Bottom Section: Quick Chips + Input OR Blocked Banner
+
               if (isBlockedByMe)
                 Container(
                   width: double.infinity,
@@ -1995,7 +1995,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                   ),
                 )
               else ...[
-                // Quick Action Suggestion Chips
+
                 Container(
                   height: 38,
                   margin: const EdgeInsets.only(bottom: 6),
@@ -2078,7 +2078,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                     ),
                   ),
 
-                // Input Bar
+
                 Builder(
                   builder: (context) {
                     final bottomInset = MediaQuery.viewInsetsOf(context).bottom;
@@ -2345,7 +2345,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
           crossAxisAlignment:
               isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            // Sender name for other user
+
             if (!isMe)
               GestureDetector(
                 onTap: () => _showUserTrustCard(msg.senderId, msg.senderName),
@@ -2373,7 +2373,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                 ),
               ),
 
-            // Message Container
+
             Container(
               decoration: BoxDecoration(
                 color: isMe ? _lavender : Colors.white,
@@ -2398,7 +2398,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // REPLY PREVIEW BANNER
+
                   if (msg.replyToText != null && msg.replyToText!.isNotEmpty)
                     Container(
                       margin: const EdgeInsets.fromLTRB(8, 8, 8, 2),
@@ -2446,7 +2446,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                       ),
                     ),
 
-                  // PHOTO SECTION
+
                   if (hasPhoto) ...[
                     if (shouldShield)
                       Container(
@@ -2527,7 +2527,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                               ),
                             ),
                           ),
-                          // Tap to view hint overlay
+
                           Positioned(
                             bottom: 8,
                             right: 8,
@@ -2556,7 +2556,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                               ),
                             ),
                           ),
-                          // Report button on received photos
+
                           if (!isMe)
                             Positioned(
                               top: 8,
@@ -2581,7 +2581,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                       ),
                   ],
 
-                  // TEXT SECTION (if not photo-only or if caption exists)
+
                   if (!isPhotoOnly && msg.text.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
@@ -2596,7 +2596,7 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
                       ),
                     ),
 
-                  // FOOTER: Timestamp + (edited) + checkmark
+
                   Padding(
                     padding: const EdgeInsets.fromLTRB(12, 2, 12, 8),
                     child: Row(
@@ -2648,3 +2648,4 @@ class _CoordinationChatScreenState extends State<CoordinationChatScreen> {
   );
   }
 }
+

@@ -1,7 +1,7 @@
 class ShelterClinic {
   final String id;
   final String name;
-  final String type; // 'shelter' or 'clinic'
+  final String type;
   final double latitude;
   final double longitude;
   final String address;
@@ -141,3 +141,4 @@ class ShelterClinic {
         ),
       ];
 }
+

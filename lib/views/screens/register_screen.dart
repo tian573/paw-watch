@@ -91,7 +91,7 @@ class _RegisterScreenState extends State<RegisterScreen>
     final displayName = _displayNameCtrl.text.trim();
     final email = _emailCtrl.text.trim();
 
-    // Check if display name is already taken
+
     final isNameTaken =
         await FirebaseService.instance.isDisplayNameTaken(displayName);
     if (isNameTaken) {
@@ -106,7 +106,7 @@ class _RegisterScreenState extends State<RegisterScreen>
       return;
     }
 
-    // Check if email is already registered
+
     final isEmailTaken =
         await FirebaseService.instance.isEmailRegistered(email);
     if (isEmailTaken) {
@@ -961,7 +961,7 @@ class _RegisterScreenState extends State<RegisterScreen>
           ),
           _buildLegalSection(
             '4. Gamification, XP & Badges',
-            'Points, rescue badges, and leaderboard ranks are community incentives and possess no monetary value. Tampering with geolocation to claim false rescues is prohibited.',
+            'Points and rescue badges are community incentives and possess no monetary value. Tampering with geolocation to claim false rescues is prohibited.',
           ),
         ],
       ),
@@ -1235,3 +1235,4 @@ class _GoogleLogoPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
+

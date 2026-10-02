@@ -310,7 +310,7 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
             .where((id) => id.isNotEmpty)
             .toList();
 
-        // Prune any selectedChatIds that no longer exist
+
         if (_selectedChatIds.isNotEmpty) {
           _selectedChatIds.removeWhere((id) => !allChatIds.contains(id));
         }
@@ -925,3 +925,4 @@ class _ConversationsScreenState extends State<ConversationsScreen> {
     );
   }
 }
+

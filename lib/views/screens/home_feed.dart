@@ -527,7 +527,7 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   int _categoryPriority(Sighting s, [String? currentUid]) {
-    // Deleted sightings sink to the very bottom so they never displace active rescues
+
     if (s.isDeleted) {
       return 99;
     }
@@ -536,7 +536,7 @@ class _HomeScreenState extends State<HomeScreen>
       return 20;
     }
 
-    // Pinned to absolute top (Priority 0) specifically for involved users (reporter / rescuer)
+
     if (currentUid != null && _isInvolvedInWaiting(s, currentUid)) {
       return 0;
     }
@@ -551,23 +551,23 @@ class _HomeScreenState extends State<HomeScreen>
 
     switch (s.category) {
       case 'Urgent Rescue':
-        return 1 + baseOffset; // Top 1: Trapped (Unclaimed = 1, Claimed = 6)
+        return 1 + baseOffset;
       case 'Kitten':
-        return 2 + baseOffset; // Priority 2: Vulnerable Kitten (Unclaimed = 2, Claimed = 7)
+        return 2 + baseOffset;
       case 'Injured':
       case 'Needs Vet':
-        return 3 + baseOffset; // Priority 3: Injured / Sick (Unclaimed = 3, Claimed = 8)
+        return 3 + baseOffset;
       case 'Needs Foster':
       case 'Needs Home':
       case 'Rehomed':
-        return 4 + baseOffset; // Priority 4: Needs Foster (Unclaimed = 4, Claimed = 9)
+        return 4 + baseOffset;
       case 'Stray':
       case 'Feeding Spot':
       case 'Spotted':
       case 'Community Cat':
       case 'Community Care':
       default:
-        return 5 + baseOffset; // Priority 5: Stray / Feeding (Unclaimed = 5, Claimed = 10)
+        return 5 + baseOffset;
     }
   }
 
@@ -630,14 +630,14 @@ class _HomeScreenState extends State<HomeScreen>
     }
 
     filtered.sort((a, b) {
-      // 1. Prioritize by Category Order (Priority 0 for involved waiting reports)
+
       final pA = _categoryPriority(a, currentUid);
       final pB = _categoryPriority(b, currentUid);
       if (pA != pB) {
         return pA.compareTo(pB);
       }
 
-      // 2. Prioritize by Closest Distance to the user
+
       final distA = a.calculateDistanceInMeters(_userLat, _userLng);
       final distB = b.calculateDistanceInMeters(_userLat, _userLng);
       final distDiff = (distA - distB).abs();
@@ -645,7 +645,7 @@ class _HomeScreenState extends State<HomeScreen>
         return distA.compareTo(distB);
       }
 
-      // 3. Fallback to newest timestamp
+
       return b.createdAt.compareTo(a.createdAt);
     });
 
@@ -2387,7 +2387,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
 
-
   Widget _buildReportFab() {
     return GestureDetector(
       onTap: _openReportForm,
@@ -3853,3 +3852,4 @@ class _HomeScreenState extends State<HomeScreen>
     return parts[0][0].toUpperCase();
   }
 }
+

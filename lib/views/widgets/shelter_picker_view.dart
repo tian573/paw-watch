@@ -8,12 +8,7 @@ import '../../services/location_service.dart';
 import '../../services/firebase_service.dart';
 import '../../services/text_moderation_service.dart';
 
-/// Reusable Shelter Directory & Registration component.
-/// Provides:
-/// 1. Closest/nearby shelters sorted by distance to the cat sighting/user.
-/// 2. Search tab/bar to filter shelters by name, area, or services.
-/// 3. Option to register/suggest a new shelter consistent with the map page.
-/// 4. Auto-fills selected shelter details and coordinates.
+
 class ShelterPickerView extends StatefulWidget {
   final double referenceLat;
   final double referenceLng;
@@ -21,8 +16,8 @@ class ShelterPickerView extends StatefulWidget {
   final String? initialShelterAddress;
   final ValueChanged<ShelterClinic> onShelterSelected;
   final VoidCallback? onClearSelection;
-  /// Fires with `true` when the user switches to the Register New tab,
-  /// and `false` when they switch back to Nearby Shelters.
+
+
   final ValueChanged<bool>? onRegisterTabActiveChanged;
   final Color themeColor;
 
@@ -47,20 +42,20 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
   static const Color _urgent = Color(0xFFE53935);
   static const Color _lavLight = Color(0xFFF3F1F8);
 
-  // Tab mode: 0 = Choose Nearby Shelter, 1 = Register New Shelter
+
   int _activeTab = 0;
 
-  // Search
+
   final TextEditingController _searchCtrl = TextEditingController();
   String _searchQuery = '';
 
-  // Shelters list
+
   List<ShelterClinic> _allShelters = [];
   bool _isLoadingShelters = true;
   ShelterClinic? _selectedShelter;
   bool _isPickerExpanded = false;
 
-  // New shelter registration controllers
+
   final TextEditingController _regNameCtrl = TextEditingController();
   final TextEditingController _regPhoneCtrl = TextEditingController();
   final TextEditingController _regAddressCtrl = TextEditingController();
@@ -111,10 +106,10 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
     setState(() => _isLoadingShelters = true);
 
     final List<ShelterClinic> list = [];
-    // 1. Load static partner shelters
+
     list.addAll(ShelterClinic.partnerDirectory.where((s) => s.isShelter));
 
-    // 2. Load approved/submitted shelter suggestions from Firestore
+
     try {
       final snap = await FirebaseFirestore.instance
           .collection('clinic_suggestions')
@@ -123,12 +118,12 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
 
       for (final doc in snap.docs) {
         final d = doc.data();
-        // Shelters entered must be verified by admin before appearing in available list
+
         if (d['status'] != 'verified') continue;
         final id = doc.id;
         final name = d['name']?.toString() ?? '';
         if (name.isEmpty) continue;
-        // Avoid duplicates if same name exists
+
         if (list.any((s) => s.name.toLowerCase() == name.toLowerCase())) {
           continue;
         }
@@ -160,7 +155,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
       }
     } catch (_) {}
 
-    // Sort by proximity to reference coordinates (closest first!)
+
     list.sort((a, b) {
       final distA = _calculateDistKm(a.latitude, a.longitude);
       final distB = _calculateDistKm(b.latitude, b.longitude);
@@ -356,7 +351,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Header
+
         Row(
           children: [
             Container(
@@ -400,11 +395,11 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
         ),
         const SizedBox(height: 10),
 
-        // If a shelter is selected and picker is not expanded, show selected card
+
         if (_selectedShelter != null && !_isPickerExpanded) ...[
           _buildSelectedShelterCard(),
         ] else ...[
-          // Segmented Tabs: [ Nearby Shelters ] | [ Register New Shelter ]
+
           Container(
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
@@ -511,7 +506,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
           ),
           const SizedBox(height: 12),
 
-          // Tab content
+
           if (_activeTab == 0) _buildNearbySheltersTab() else _buildRegisterNewShelterTab(),
 
           if (_selectedShelter != null) ...[
@@ -737,7 +732,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Search bar
+
         Container(
           decoration: BoxDecoration(
             color: _lavLight,
@@ -768,7 +763,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
         ),
         const SizedBox(height: 8),
 
-        // Count / Distance Note
+
         Row(
           children: [
             Icon(Icons.sort_rounded, size: 13, color: _navy.withValues(alpha: 0.5)),
@@ -785,7 +780,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
         ),
         const SizedBox(height: 8),
 
-        // Shelters List
+
         if (filtered.isEmpty) ...[
           Container(
             padding: const EdgeInsets.all(16),
@@ -870,7 +865,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Radio check
+
                       Container(
                         margin: const EdgeInsets.only(top: 2),
                         width: 20,
@@ -889,7 +884,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
                       ),
                       const SizedBox(width: 10),
 
-                      // Info
+
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1010,7 +1005,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Registration Header
+
           Row(
             children: [
               Container(
@@ -1082,7 +1077,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
           ),
           const Divider(height: 18),
 
-          // Shelter Name
+
           Text(
             'Shelter / Organization Name *',
             style: GoogleFonts.nunito(fontSize: 12.5, fontWeight: FontWeight.w800, color: _navy),
@@ -1127,7 +1122,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
           ],
           const SizedBox(height: 10),
 
-          // Emergency Phone
+
           Text(
             'Emergency Contact Phone *',
             style: GoogleFonts.nunito(fontSize: 12.5, fontWeight: FontWeight.w800, color: _navy),
@@ -1173,13 +1168,13 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
           ],
           const SizedBox(height: 10),
 
-          // Address
+
           Text(
             'Facility Address *',
             style: GoogleFonts.nunito(fontSize: 12.5, fontWeight: FontWeight.w800, color: _navy),
           ),
           const SizedBox(height: 5),
-          // Search address input
+
           Row(
             children: [
               Expanded(
@@ -1267,7 +1262,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
           ),
           const SizedBox(height: 6),
 
-          // Mini Map for Pinning Shelter
+
           ClipRRect(
             borderRadius: BorderRadius.circular(12),
             child: SizedBox(
@@ -1338,7 +1333,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
           ),
           const SizedBox(height: 6),
 
-          // Address field display
+
           TextField(
             controller: _regAddressCtrl,
             maxLines: 2,
@@ -1376,7 +1371,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
           ],
           const SizedBox(height: 10),
 
-          // 24h & Operating hours
+
           Row(
             children: [
               Expanded(
@@ -1416,7 +1411,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
             const SizedBox(height: 10),
           ],
 
-          // Services chips
+
           Text(
             'Shelter Services Offered',
             style: GoogleFonts.nunito(fontSize: 12.5, fontWeight: FontWeight.w800, color: _navy),
@@ -1458,7 +1453,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
           ),
           const SizedBox(height: 10),
 
-          // Volunteer Notes (Optional)
+
           Text(
             'Volunteer Notes / Intake Guidelines (Optional)',
             style: GoogleFonts.nunito(fontSize: 12.5, fontWeight: FontWeight.w800, color: _navy),
@@ -1486,7 +1481,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
           ),
           const SizedBox(height: 12),
 
-          // Error banner if any
+
           if (_regValidationError != null) ...[
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -1515,7 +1510,7 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
             const SizedBox(height: 10),
           ],
 
-          // Submit & Select Button
+
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
@@ -1541,3 +1536,4 @@ class _ShelterPickerViewState extends State<ShelterPickerView> {
     );
   }
 }
+

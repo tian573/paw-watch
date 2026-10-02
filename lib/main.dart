@@ -1,7 +1,10 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'firebase_options.dart';
 import 'views/screens/landing_screen.dart';
 import 'views/screens/register_screen.dart';
@@ -10,12 +13,21 @@ import 'views/screens/login_screen.dart';
 import 'views/screens/admin_home_screen.dart';
 import 'services/firebase_service.dart';
 
+const bool kUseFirebaseEmulator = bool.fromEnvironment('USE_EMULATOR', defaultValue: false);
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await Firebase.initializeApp(
     options: DefaultFirebaseOptions.currentPlatform,
   );
+
+  if (kUseFirebaseEmulator) {
+    final host = defaultTargetPlatform == TargetPlatform.android ? '10.0.2.2' : 'localhost';
+    await FirebaseAuth.instance.useAuthEmulator(host, 9099);
+    FirebaseFirestore.instance.useFirestoreEmulator(host, 8080);
+    await FirebaseStorage.instance.useStorageEmulator(host, 9199);
+  }
 
   await SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
@@ -68,11 +80,11 @@ class _AuthGate extends StatelessWidget {
         }
         if (snapshot.hasData && snapshot.data != null) {
           final user = snapshot.data!;
-          // Route admin to admin panel
+
           if (user.email == 'admin@example.com') {
             return const AdminHomeScreen();
           }
-          // Route regular user through ban verification gate
+
           return _UserGate(user: user);
         }
         return const LandingScreen();
@@ -104,7 +116,7 @@ class _UserGate extends StatelessWidget {
         if (snapshot.data == true) {
           return _BannedUserScreen(user: user);
         }
-        // Ensure Firestore user doc exists for active valid user
+
         FirebaseService.instance.ensureUserDoc(user);
         return const HomeScreen();
       },

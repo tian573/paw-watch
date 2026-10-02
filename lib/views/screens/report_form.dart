@@ -37,8 +37,8 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
   final List<File> _photos = [];
   bool _isScanningPhoto = false;
 
-  String _reportType = 'needsHelp'; // 'needsHelp' or 'resolved'
-  String? _selectedCategory; // null = completely neutral start
+  String _reportType = 'needsHelp';
+  String? _selectedCategory;
   final TextEditingController _titleController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
   final TextEditingController _searchController = TextEditingController();
@@ -52,7 +52,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
   bool _isGpsAutoFilled = false;
   bool _hasAttemptedSubmit = false;
   String? _formValidationError;
-  String _resolvedPlacement = 'adopted'; // 'adopted' or 'shelter'
+  String _resolvedPlacement = 'adopted';
   String? _selectedShelterName;
   String? _selectedShelterAddress;
   bool _isRegisterTabActive = false;
@@ -1044,7 +1044,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 1. Title on top
+
           Text(
             cat['label'] as String,
             textAlign: TextAlign.center,
@@ -1057,7 +1057,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 8),
-          // 2. Big box with custom icon in the center
+
           AnimatedContainer(
             duration: const Duration(milliseconds: 200),
             width: 110,
@@ -1119,7 +1119,7 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
             ),
           ),
           const SizedBox(height: 7),
-          // 3. Short description at the bottom
+
           Text(
             cat['sublabel'] as String,
             textAlign: TextAlign.center,
@@ -2331,14 +2331,14 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
       );
 
       if (mounted) {
-        Navigator.pop(context); // Dismiss loading dialog
+        Navigator.pop(context);
         _showSnackBar('🎉 Sighting published live! +50 XP Earned 🐾');
-        Navigator.pop(context, true); // Return to home feed
+        Navigator.pop(context, true);
       }
     } catch (e) {
       DoubleTapGuard.reset('submit_report');
       if (mounted) {
-        Navigator.pop(context); // Dismiss loading dialog
+        Navigator.pop(context);
         setState(() => _isSubmitting = false);
         _showSnackBar('Failed to submit report: $e');
       }
@@ -2360,3 +2360,4 @@ class _ReportFormScreenState extends State<ReportFormScreen> {
     );
   }
 }
+

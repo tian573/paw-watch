@@ -115,7 +115,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
   int _currentTab = 0;
   String _flagFilter = 'all';
-  String _flagStatusTab = 'pending'; // 'pending' | 'resolved'
+  String _flagStatusTab = 'pending';
 
   final Map<String, Future<Sighting?>> _sightingCache = {};
   final Map<String, Future<Map<String, dynamic>?>> _commentCache = {};
@@ -127,11 +127,11 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   @override
   void initState() {
     super.initState();
-    // Pre-populate with sample seed sightings immediately (0ms)
+
     for (final s in FirebaseService.sampleSightings) {
       _sightingMap[s.id] = s;
     }
-    // Stream live sightings into _sightingMap
+
     _sightingsSub =
         FirebaseService.instance.streamSightings().listen((sightings) {
       if (mounted) {
@@ -142,7 +142,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         });
       }
     });
-    // Auto-discover and ensure all active/registered users have Firestore documents
+
     FirebaseService.instance.syncMissingUsersFromActivity();
   }
 
@@ -155,7 +155,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   void _ensureCommentLoaded(String sightingId, String commentId) {
     final key = '$sightingId/$commentId';
     if (_commentTextMap.containsKey(key)) return;
-    _commentTextMap[key] = ''; // mark as requested
+    _commentTextMap[key] = '';
     _getCachedComment(sightingId, commentId).then((data) {
       if (data != null && mounted) {
         final text = data['text']?.toString().trim() ??
@@ -191,7 +191,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     if (raw == 'review' || raw == 'review_flag') return 'review';
     if (raw == 'chat_message' || raw == 'chat' || raw == 'chat_flag') return 'chat_message';
 
-    // Heuristics if type field was omitted or formatted differently
+
     if (f['commentId'] != null && f['commentId'].toString().trim().isNotEmpty) {
       return 'comment';
     }
@@ -212,7 +212,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     if (trimmedId.isEmpty) return Future.value(null);
 
     return _sightingCache.putIfAbsent(trimmedId, () async {
-      // 1. Query Firestore first to fetch real-time state and deletion flags
+
       try {
         final doc = await FirebaseFirestore.instance
             .collection('sightings')
@@ -226,7 +226,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         debugPrint('Error loading sighting $trimmedId: $e');
       }
 
-      // 2. Fallback to in-memory sample seed sightings if not in Firestore
+
       try {
         final sample = FirebaseService.sampleSightings
             .where((s) => s.id == trimmedId)
@@ -378,7 +378,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               onProfileTap: () => setState(() => _currentTab = 4),
               isAdmin: true,
             ),
-            const SizedBox.shrink(), // Placeholder for FAB
+            const SizedBox.shrink(),
             _buildUsersTab(),
             _buildAdminProfileTab(),
           ],
@@ -390,7 +390,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
-  // ─────────────── DASHBOARD TAB ───────────────
 
   Widget _buildDashboardTab() {
     return DefaultTabController(
@@ -398,7 +397,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       child: Column(
         children: [
           _buildAdminAppBar('Dashboard'),
-          // Live platform stats banner
+
           Container(
             margin: const EdgeInsets.fromLTRB(16, 12, 16, 10),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -437,7 +436,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               },
             ),
           ),
-          // Tab bar for notifications
+
           Container(
             margin: const EdgeInsets.symmetric(horizontal: 16),
             decoration: BoxDecoration(
@@ -592,7 +591,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
-  // ─────────────── USERS TAB ───────────────
 
   Widget _buildUsersTab() {
     return Column(
@@ -803,7 +801,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
         ),
         child: Row(
           children: [
-            // Avatar
+
             Container(
               width: 44,
               height: 44,
@@ -871,7 +869,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               ),
             ),
             const SizedBox(width: 8),
-            // Status badge
+
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
               decoration: BoxDecoration(
@@ -888,7 +886,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               ),
             ),
             const SizedBox(width: 4),
-            // Level badge
+
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
               decoration: BoxDecoration(
@@ -947,7 +945,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
           child: StatefulBuilder(
             builder: (ctx, setSheetState) => Column(
             children: [
-              // Handle
+
               const SizedBox(height: 10),
               Container(
                 width: 40,
@@ -958,7 +956,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              // User info
+
               Container(
                 width: 70,
                 height: 70,
@@ -1011,7 +1009,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                     color: _navy.withValues(alpha: 0.5)),
               ),
               const SizedBox(height: 16),
-              // Stats row
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Row(
@@ -1038,7 +1036,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 ),
               ),
               const SizedBox(height: 16),
-              // Badges
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Column(
@@ -1073,7 +1071,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 ),
               ),
               const Spacer(),
-              // Admin actions
+
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Column(
@@ -1217,7 +1215,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
-  // ─────────────── ADMIN PROFILE TAB ───────────────
 
   Widget _buildAdminProfileTab() {
     final user = FirebaseAuth.instance.currentUser;
@@ -1230,7 +1227,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
             padding: const EdgeInsets.all(20),
             child: Column(
               children: [
-                // Profile card
+
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(24),
@@ -1324,7 +1321,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // Badges & Achievements Section
+
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(20),
@@ -1336,7 +1333,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      // Section Header
+
                       Row(
                         children: [
                           Container(
@@ -1398,7 +1395,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 ),
                 const SizedBox(height: 24),
 
-                // Logout button
+
                 GestureDetector(
                   onTap: () async {
                     final confirm = await _confirmAction(
@@ -1550,7 +1547,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
-  // ─────────────── ADMIN APP BAR ───────────────
 
   Widget _buildAdminAppBar(String title, {List<Widget>? actions}) {
     return Container(
@@ -1601,7 +1597,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
-  // ─────────────── BOTTOM NAV ───────────────
 
   Widget _buildBottomNav() {
     return BottomAppBar(
@@ -1669,7 +1664,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
-  // ─────────────── ANNOUNCEMENT FAB ───────────────
 
   Widget _buildAnnouncementFab() {
     return GestureDetector(
@@ -1697,7 +1691,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 
-  // ─────────────── MODALS & SHEETS ───────────────
 
   void _showAnnouncementSheet() {
     final titleCtrl = TextEditingController();
@@ -1905,7 +1898,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
 
         return Column(
           children: [
-            // Status Sub-Tab Switcher: Pending Review vs Resolved History
+
             Container(
               margin: const EdgeInsets.fromLTRB(16, 10, 16, 4),
               padding: const EdgeInsets.all(4),
@@ -2036,7 +2029,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
               ),
             ),
 
-            // If in resolved tab: retention banner and clear button
+
             if (!isViewingPending)
               Container(
                 margin: const EdgeInsets.fromLTRB(16, 6, 16, 4),
@@ -2090,7 +2083,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 ),
               ),
 
-            // Horizontal filter chips
+
             Container(
               padding: const EdgeInsets.symmetric(vertical: 6),
               child: SingleChildScrollView(
@@ -2111,7 +2104,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 ),
               ),
             ),
-            // Flagged items list
+
             Expanded(
               child: filteredFlags.isEmpty
                   ? _buildEmptyTab(
@@ -2140,7 +2133,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                         final sightingId = f['sightingId']?.toString().trim() ?? '';
                         final commentId = f['commentId']?.toString().trim() ?? '';
 
-                        // Reactive cache lookup
+
                         final sighting = sightingId.isNotEmpty ? _sightingMap[sightingId] : null;
                         if (sightingId.isNotEmpty && sighting == null) {
                           _ensureSightingLoaded(sightingId);
@@ -2320,7 +2313,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                // Top row: Icon, Report Title, Type Pill, Status Pill
+
                                 Row(
                                   children: [
                                     Icon(
@@ -2381,7 +2374,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                 ),
                                 const SizedBox(height: 5),
 
-                                // Report Type & Meta info
+
                                 Text(
                                   metaInfo,
                                   style: GoogleFonts.nunito(
@@ -2393,7 +2386,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
 
-                                // Short description (for sightings/reports)
+
                                 if (shortDesc != null && shortDesc.isNotEmpty) ...[
                                   const SizedBox(height: 5),
                                   Text(
@@ -2409,7 +2402,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                   ),
                                 ],
 
-                                // Literal comment (for comments/reviews/chats)
+
                                 if (literalContent != null && literalContent.isNotEmpty) ...[
                                   const SizedBox(height: 6),
                                   Container(
@@ -2467,7 +2460,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                   ),
                                 ],
 
-                                // Reason & timestamp line
+
                                 const SizedBox(height: 6),
                                 Row(
                                   children: [
@@ -2500,7 +2493,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                                   ],
                                 ),
 
-                                // Action buttons (Resolve / Dismiss / Open)
+
                                 if (isPending) ...[
                                   const SizedBox(height: 10),
                                   Row(
@@ -3300,7 +3293,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
                 ),
               ],
               const SizedBox(height: 20),
-              // Action buttons
+
               Row(
                 children: [
                   Expanded(
@@ -3469,9 +3462,6 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 
 
-
-  // ─────────────── HELPERS ───────────────
-
   void _snack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -3525,3 +3515,4 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     );
   }
 }
+

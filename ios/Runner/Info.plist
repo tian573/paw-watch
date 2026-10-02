@@ -61,5 +61,11 @@
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
 	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>PawWatch requires access to the camera to take photos of stray cat sightings and verification proofs.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>PawWatch requires access to your photo library to select photos of cat sightings.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>PawWatch uses your location to discover nearby community cat sightings and geotag rescue reports.</string>
 </dict>
 </plist>

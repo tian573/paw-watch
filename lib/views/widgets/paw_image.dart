@@ -2,11 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 
-/// A universal image widget for PawWatch that reliably renders:
-/// 1. Base64 data URIs ('data:image/...;base64,...' or 'base64,...')
-/// 2. Remote HTTP / HTTPS URLs ('https://...')
-/// 3. Local filesystem paths ('/data/user/0/...' or 'C:\...')
-/// 4. Raw Base64 string fallback
+
 class PawImage extends StatelessWidget {
   final String url;
   final double? width;
@@ -62,7 +58,7 @@ class PawImage extends StatelessWidget {
       return _defaultFallback();
     }
 
-    // 1. Base64 data URI format (e.g. data:image/jpeg;base64,/9j/...)
+
     if (trimmed.startsWith('data:image') || trimmed.startsWith('base64,')) {
       try {
         final commaIdx = trimmed.indexOf(',');
@@ -82,7 +78,7 @@ class PawImage extends StatelessWidget {
       }
     }
 
-    // 2. HTTP / HTTPS network image
+
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
       return Image.network(
         trimmed,
@@ -90,7 +86,7 @@ class PawImage extends StatelessWidget {
         height: height,
         fit: fit,
         errorBuilder: (ctx, err, stack) {
-          // If network failed, check if the string happens to be a valid local file
+
           try {
             final file = File(trimmed);
             if (file.existsSync()) {
@@ -102,7 +98,7 @@ class PawImage extends StatelessWidget {
       );
     }
 
-    // 3. Local filesystem file
+
     try {
       final file = File(trimmed);
       if (file.existsSync()) {
@@ -116,7 +112,7 @@ class PawImage extends StatelessWidget {
       }
     } catch (_) {}
 
-    // 4. Raw base64 string fallback (no data URI prefix, but valid base64 payload)
+
     if (trimmed.length > 100 &&
         !trimmed.startsWith('/') &&
         !trimmed.contains('\\') &&
@@ -137,3 +133,4 @@ class PawImage extends StatelessWidget {
     return _defaultFallback();
   }
 }
+

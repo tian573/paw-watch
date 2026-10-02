@@ -11,29 +11,29 @@ class Sighting {
   final double longitude;
   final String locationAddress;
   final String description;
-  final String urgency; // 'urgent', 'needsHelp', 'resolved'
-  final String category; // 'Kitten', 'Injured', 'Stray', 'Needs Foster', etc.
+  final String urgency;
+  final String category;
   final String title;
   final DateTime createdAt;
   final int commentCount;
   final int upvotes;
   final bool rescueClaimed;
-  final String rescueClaimedBy;    // uid of claimer
-  final String rescueClaimedByName; // display name of claimer
-  final DateTime? rescueClaimedAt; // timestamp when on-my-way was claimed
+  final String rescueClaimedBy;
+  final String rescueClaimedByName;
+  final DateTime? rescueClaimedAt;
   final DateTime? lastSeenAt;
-  final String? lastSeenStatus; // 'still_here', 'moved', 'not_here', 'holding', 'fed', 'vet'
+  final String? lastSeenStatus;
   final String? lastSeenNote;
   final String? routineHours;
   final double? updatedLatitude;
   final double? updatedLongitude;
   final String? updatedLocationAddress;
-  final String? careStatus; // 'onStreet', 'inCare_vet', 'inCare_foster', 'inCare_shelter'
+  final String? careStatus;
   final String? careTakerId;
   final String? careTakerName;
   final DateTime? careStartedAt;
   final DateTime? resolvedAt;
-  final String? resolvedByAction; // 'sheltered', 'rehomed', 'returnedToSpot', etc.
+  final String? resolvedByAction;
   final String? pendingHandoverRescuerId;
   final String? pendingHandoverRescuerName;
   final String? pendingHandoverUpdateId;
@@ -44,7 +44,7 @@ class Sighting {
   final List<int> completedMilestones;
   final String? latestCondition;
   final DateTime? lastCheckInAt;
-  final String? pendingOutcomeAction; // 'rehomed', 'returnedToSpot'
+  final String? pendingOutcomeAction;
   final String? pendingOutcomeNote;
   final String? pendingOutcomeProofUrl;
   final String? pendingOutcomeUpdateId;
@@ -66,9 +66,9 @@ class Sighting {
   final bool isCommunityFosterRequested;
   final bool isOpenForAdoption;
   final String? adoptionNote;
-  final String? temperament; // 'friendly', 'shy', 'feral'
+  final String? temperament;
   final bool hasEarTip;
-  final String? postVetCustody; // 'rescuerInCharge', 'reporterFoster', etc.
+  final String? postVetCustody;
   final DateTime? vetVerifiedAt;
   final String? pendingAdoptionApplicantId;
   final String? pendingAdoptionApplicantName;
@@ -169,7 +169,7 @@ class Sighting {
     this.deletedReason,
   });
 
-  /// Whether the 24-hour reporter decision window has expired after vet visit verification
+
   bool get isPostVetDecisionWindowExpired {
     final verifiedDate = vetVerifiedAt ?? lastVetVisitAt;
     if (verifiedDate == null) return false;
@@ -177,7 +177,7 @@ class Sighting {
     return DateTime.now().isAfter(expiry);
   }
 
-  /// Remaining duration in the 24-hour reporter decision window (null if not set or expired)
+
   Duration? get postVetDecisionTimeRemaining {
     final verifiedDate = vetVerifiedAt ?? lastVetVisitAt;
     if (verifiedDate == null) return null;
@@ -186,7 +186,7 @@ class Sighting {
     return remaining.isNegative ? Duration.zero : remaining;
   }
 
-  /// True if custody is explicitly delegated OR the 24h reporter decision window expired
+
   bool get isRescuerCustodyDelegated =>
       postVetCustody == 'rescuerInCharge' ||
       (isAwaitingPostVetDecision && isPostVetDecisionWindowExpired);
@@ -197,7 +197,7 @@ class Sighting {
 
   bool get isResolved => urgency == 'resolved';
 
-  /// Auto-archived from active public feed if resolved for 30+ days
+
   bool get isAutoArchived {
     if (!isResolved) return false;
     final date = resolvedAt ?? lastVetVisitAt ?? createdAt;
@@ -210,8 +210,7 @@ class Sighting {
       category == 'Rehomed' ||
       isOpenForAdoption;
 
-  /// Whether this sighting needs a foster, permanent home, or adopter
-  /// Distinct from urgent medical or stray feeding community care.
+
   bool get isNeedsHome {
     if (isResolved) return false;
     if (urgency == 'urgent') return false;
@@ -221,7 +220,7 @@ class Sighting {
         cat == 'community care' ||
         cat == 'stray feeding' ||
         cat == 'stray colony') {
-      return false; // strictly Needs Help
+      return false;
     }
     return cat == 'needs foster' ||
         cat == 'needs home' ||
@@ -241,7 +240,7 @@ class Sighting {
   bool isDispatchDismissedFor(String? uid) =>
       uid != null && uid.isNotEmpty && declinedDispatchUserIds.contains(uid);
 
-  /// Whether the specified user is involved in this sighting (as reporter, caretaker, vet rescuer, dispatch claimer, adopter, or action participant)
+
   bool isUserInvolved(String? uid) {
     if (uid == null || uid.isEmpty) return false;
     return reporterId == uid ||
@@ -308,8 +307,7 @@ class Sighting {
 
   int get completedMilestoneCount => completedMilestones.length;
 
-  /// Returns the next pending milestone day that hasn't been completed yet.
-  /// If day 1 is already completed, it instantly switches to day 2 and so forth without waiting 24 hours.
+
   int get nextPendingMilestoneDay {
     for (final day in effectiveMilestoneDays) {
       if (!isMilestoneDone(day)) {
@@ -525,7 +523,7 @@ class Sighting {
 
   bool get isOngoingCare => !isOneTimeTask;
 
-  /// TNR Return is strictly for adult feral colony cats. Domestic fosters and friendly pets cannot be returned to colony.
+
   bool get canTnrReturn =>
       isFeral &&
       temperament != 'friendly' &&
@@ -590,7 +588,7 @@ class Sighting {
         .toList();
     if (parts.length <= 1) return address;
 
-    // Filter out parts containing street / house indicators or raw zip codes
+
     final filtered = parts.where((p) {
       final lower = p.toLowerCase();
       final hasStreet = lower.startsWith('jl') ||
@@ -691,7 +689,7 @@ class Sighting {
   }
 
   String get distance {
-    // Default friendly distance label
+
     return 'Nearby';
   }
 
@@ -735,9 +733,7 @@ class Sighting {
     return effectiveLocationAddress;
   }
 
-  /// Only active roaming street cats (community stray care, feeding spots, and active street emergency rescues)
-  /// need the Last Seen freshness indicator. Once a cat is safely taken in (foster care, shelter, adoption, or resolved),
-  /// the street roaming freshness indicator is no longer relevant.
+
   bool get shouldShowLastSeenFreshness {
     if (isAutoArchived || isResolved || urgency == 'resolved') return false;
     if (isInCare || isSheltered || isOpenForAdoption || isNeedsHome) return false;
@@ -1152,3 +1148,4 @@ class Sighting {
     );
   }
 }
+

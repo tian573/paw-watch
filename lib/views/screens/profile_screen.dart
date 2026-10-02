@@ -197,7 +197,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      // Avatar with edit photo button
+
                       Center(
                         child: Stack(
                           clipBehavior: Clip.none,
@@ -960,9 +960,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       _buildBadgesSection(profile),
                       const SizedBox(height: 16),
                       _buildReviewsSection(profile),
+                      const SizedBox(height: 16),
+                      _buildLegalCard(),
                       const SizedBox(height: 20),
                       _buildSignOutBtn(),
-                      const SizedBox(height: 90), // Spacing for bottom nav
+                      const SizedBox(height: 90),
                     ],
                   ),
                 ),
@@ -1129,7 +1131,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Widget _buildDualDashboard(UserProfile profile) {
     return Row(
       children: [
-        // Gamification XP Card
+
         Expanded(
           child: Container(
             padding: const EdgeInsets.all(14),
@@ -1206,7 +1208,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
         ),
         const SizedBox(width: 12),
-        // Trust & Reliability Card
+
         Expanded(
           child: Container(
             padding: const EdgeInsets.all(14),
@@ -1429,7 +1431,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          // 1. Title on the top (locked icon removed as lock is on the logo emblem)
+
           Text(
             item.title,
             textAlign: TextAlign.center,
@@ -1441,7 +1443,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 12),
 
-          // 2. Logo / Badge in the center
+
           Stack(
             alignment: Alignment.center,
             clipBehavior: Clip.none,
@@ -1547,7 +1549,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           const SizedBox(height: 10),
 
-          // 3. Small description at the bottom
+
           Text(
             item.description,
             textAlign: TextAlign.center,
@@ -2407,6 +2409,210 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Widget _buildLegalCard() {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: _navy.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          ListTile(
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+            ),
+            leading: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _lavLight,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.description_outlined, color: _lavender, size: 20),
+            ),
+            title: Text(
+              'Terms of Service',
+              style: GoogleFonts.nunito(
+                fontSize: 14.5,
+                fontWeight: FontWeight.w700,
+                color: _navy,
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+            onTap: _showTermsModal,
+          ),
+          Divider(height: 1, color: Colors.grey.withValues(alpha: 0.15)),
+          ListTile(
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+            ),
+            leading: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: _lavLight,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.privacy_tip_outlined, color: _lavender, size: 20),
+            ),
+            title: Text(
+              'Privacy Policy',
+              style: GoogleFonts.nunito(
+                fontSize: 14.5,
+                fontWeight: FontWeight.w700,
+                color: _navy,
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right, size: 20, color: Colors.grey),
+            onTap: _showPrivacyModal,
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showTermsModal() {
+    _showLegalSheet(
+      title: 'Terms of Service',
+      sections: const [
+        {
+          'title': '1. Acceptance of Terms',
+          'body': 'By registering or reporting on PawWatch, you agree to these terms. PawWatch is an open community platform to safeguard cats and facilitate safe adoptions.'
+        },
+        {
+          'title': '2. Community Mission & Rescue',
+          'body': 'Users agree to report genuine sightings and avoid misleading medical, emergency, or location data.'
+        },
+        {
+          'title': '3. User Conduct & Content',
+          'body': 'You may not upload abusive, graphic, or false photos. Harassment of other volunteers or shelters will result in immediate termination of account access.'
+        },
+        {
+          'title': '4. Gamification, XP & Badges',
+          'body': 'Points and rescue badges are community incentives and possess no monetary value. Tampering with geolocation to claim false rescues is strictly prohibited.'
+        },
+      ],
+    );
+  }
+
+  void _showPrivacyModal() {
+    _showLegalSheet(
+      title: 'Privacy Policy',
+      sections: const [
+        {
+          'title': '1. Information We Collect',
+          'body': 'We collect your display name, email address, reported sighting photos, and device GPS location when submitting or browsing nearby stray cat alerts.'
+        },
+        {
+          'title': '2. How Location is Used',
+          'body': 'Location data is solely used to plot sighting pins on the interactive map and notify nearby volunteers when a cat requires attention.'
+        },
+        {
+          'title': '3. Data Protection & Security',
+          'body': 'Authentication is securely managed by Firebase. We never sell or distribute your personal contact information to third-party advertisers.'
+        },
+        {
+          'title': '4. Account & Data Deletion',
+          'body': 'You can request complete deletion of your account and associated sighting contributions at any time by contacting administration.'
+        },
+      ],
+    );
+  }
+
+  void _showLegalSheet({
+    required String title,
+    required List<Map<String, String>> sections,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return Container(
+          height: MediaQuery.of(ctx).size.height * 0.75,
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          child: Column(
+            children: [
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 12),
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      title,
+                      style: GoogleFonts.nunito(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: _navy,
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: () => Navigator.pop(ctx),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(20),
+                  itemCount: sections.length,
+                  itemBuilder: (_, index) {
+                    final s = sections[index];
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            s['title'] ?? '',
+                            style: GoogleFonts.nunito(
+                              fontSize: 14.5,
+                              fontWeight: FontWeight.w800,
+                              color: _navy,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            s['body'] ?? '',
+                            style: GoogleFonts.nunito(
+                              fontSize: 13,
+                              color: _navy.withValues(alpha: 0.75),
+                              height: 1.45,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Widget _buildSignOutBtn() {
     return SizedBox(
       width: double.infinity,
@@ -2455,3 +2661,4 @@ class AchievementItem {
     this.assetPath,
   });
 }
+

@@ -7,8 +7,10 @@
 .buildlog/
 .history
 .idea/
-
-
+# Environment Secrets
+.env
+.env.*
+*.env
 
 # Flutter repo-specific
 /bin/cache/
