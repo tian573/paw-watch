@@ -3357,6 +3357,15 @@ class FirebaseService {
     });
   }
 
+  Future<void> adminRestoreSighting(String sightingId) async {
+    await _firestore.collection('sightings').doc(sightingId).update({
+      'isDeleted': false,
+      'deletedByAdmin': false,
+      'restoredAt': FieldValue.serverTimestamp(),
+      'restoredBy': _auth.currentUser?.uid ?? 'admin',
+    });
+  }
+
 
   Future<void> verifyClinicSuggestion(String docId) async {
     String? shelterName;
@@ -3786,4 +3795,5 @@ class FirebaseService {
     }, SetOptions(merge: true));
   }
 }
+
 

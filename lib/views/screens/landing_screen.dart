@@ -429,3 +429,4 @@ class _ComicBubblePainter extends CustomPainter {
       old.tailWidth != tailWidth;
 }
 
+

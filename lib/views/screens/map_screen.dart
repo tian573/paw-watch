@@ -3215,3 +3215,4 @@ class _TrianglePainter extends CustomPainter {
   bool shouldRepaint(covariant _TrianglePainter oldDelegate) => oldDelegate.color != color;
 }
 
+

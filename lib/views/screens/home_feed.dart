@@ -43,6 +43,8 @@ class _HomeScreenState extends State<HomeScreen>
   final Set<String> _dismissedFosterCareIds = {};
   final Set<String> _dismissedPendingVetIds = {};
   final Set<String> _dismissedAnnouncementIds = {};
+  final Set<String> _dismissedDeletedSightingIds = {};
+  bool _hideAllDeletedReports = false;
   final Set<String> _readNotificationIds = {};
   bool _hasUnreadNotificationsState = false;
   StreamSubscription<List<Map<String, dynamic>>>? _announcementsSub;
@@ -89,6 +91,8 @@ class _HomeScreenState extends State<HomeScreen>
       final readNotifications = prefs.getStringList('read_notification_ids_$uid') ?? [];
       final dismissedFosterCare = prefs.getStringList('dismissed_foster_care_ids_$uid') ?? [];
       final dismissedPendingVet = prefs.getStringList('dismissed_pending_vet_ids_$uid') ?? [];
+      final dismissedDeleted = prefs.getStringList('dismissed_deleted_sighting_ids_$uid') ?? [];
+      final hideAllDeleted = prefs.getBool('hide_all_deleted_reports_$uid') ?? false;
       if (mounted) {
         setState(() {
           _dismissedDispatchIds.addAll(dismissedDispatches);
@@ -96,10 +100,232 @@ class _HomeScreenState extends State<HomeScreen>
           _readNotificationIds.addAll(readNotifications);
           _dismissedFosterCareIds.addAll(dismissedFosterCare);
           _dismissedPendingVetIds.addAll(dismissedPendingVet);
+          _dismissedDeletedSightingIds.addAll(dismissedDeleted);
+          _hideAllDeletedReports = hideAllDeleted;
         });
         _updateUnreadStatus();
       }
     } catch (_) {}
+  }
+
+  Future<void> _dismissDeletedReport(String sightingId) async {
+    setState(() {
+      _dismissedDeletedSightingIds.add(sightingId);
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+      await prefs.setStringList('dismissed_deleted_sighting_ids_$uid', _dismissedDeletedSightingIds.toList());
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Deleted report removed from your home page.',
+            style: GoogleFonts.nunito(fontWeight: FontWeight.w700),
+          ),
+          action: SnackBarAction(
+            label: 'Undo',
+            textColor: Colors.amber,
+            onPressed: () => _undoDismissDeletedReport(sightingId),
+          ),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
+  }
+
+  Future<void> _undoDismissDeletedReport(String sightingId) async {
+    setState(() {
+      _dismissedDeletedSightingIds.remove(sightingId);
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+      await prefs.setStringList('dismissed_deleted_sighting_ids_$uid', _dismissedDeletedSightingIds.toList());
+    } catch (_) {}
+  }
+
+  Future<void> _toggleHideAllDeletedReports() async {
+    final next = !_hideAllDeletedReports;
+    setState(() {
+      _hideAllDeletedReports = next;
+    });
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
+      await prefs.setBool('hide_all_deleted_reports_$uid', next);
+    } catch (_) {}
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            next ? 'Hiding all deleted reports on home page.' : 'Showing deleted reports on home page.',
+            style: GoogleFonts.nunito(fontWeight: FontWeight.w700),
+          ),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  void _showAdminQuickDeleteDialog(Sighting sighting) {
+    String selectedReason = 'Violated community guidelines';
+    final customCtrl = TextEditingController();
+    final reasons = [
+      'Violated community guidelines',
+      'Spam or advertising content',
+      'False or misleading sighting',
+      'Inappropriate photo or language',
+      'Duplicate report',
+      'Other',
+    ];
+
+    showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Row(
+                children: [
+                  const Icon(Icons.gavel_rounded, color: Color(0xFFE53935), size: 22),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Admin Delete Report',
+                    style: GoogleFonts.nunito(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: _navy,
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Delete report "${sighting.displayTitle}" by ${sighting.reporterName}?',
+                      style: GoogleFonts.nunito(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        color: _navy.withValues(alpha: 0.8),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Select deletion reason:',
+                      style: GoogleFonts.nunito(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: _navy,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    ...reasons.map((r) {
+                      final isSelected = selectedReason == r;
+                      return InkWell(
+                        onTap: () => setDialogState(() => selectedReason = r),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+                          child: Row(
+                            children: [
+                              Icon(
+                                isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+                                size: 18,
+                                color: isSelected ? const Color(0xFFE53935) : Colors.grey,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  r,
+                                  style: GoogleFonts.nunito(
+                                    fontSize: 13,
+                                    fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
+                                    color: isSelected ? const Color(0xFFE53935) : _navy,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    if (selectedReason == 'Other') ...[
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: customCtrl,
+                        decoration: InputDecoration(
+                          hintText: 'Enter reason...',
+                          hintStyle: GoogleFonts.nunito(fontSize: 12),
+                          filled: true,
+                          fillColor: Colors.grey.shade100,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: BorderSide(color: Colors.grey.shade300),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text('Cancel', style: GoogleFonts.nunito(fontWeight: FontWeight.w700)),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFE53935),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () async {
+                    final finalReason = selectedReason == 'Other' && customCtrl.text.trim().isNotEmpty
+                        ? customCtrl.text.trim()
+                        : selectedReason;
+                    Navigator.pop(ctx);
+                    try {
+                      await FirebaseService.instance.adminDeleteSighting(
+                        sighting.id,
+                        reason: finalReason,
+                      );
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Report deleted by Admin.',
+                              style: GoogleFonts.nunito(fontWeight: FontWeight.w700),
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                            backgroundColor: const Color(0xFFE53935),
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text('Error: $e')),
+                        );
+                      }
+                    }
+                  },
+                  child: Text('Delete Report', style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   Future<void> _dismissFosterCare(String sightingId) async {
@@ -572,12 +798,19 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   List<Sighting> _filterAndSortSightings(List<Sighting> list, [String? currentUid]) {
-    final activeList = list.where((s) => !s.isDeleted).toList();
+    final visibleList = list.where((s) {
+      if (s.isDeleted) {
+        if (_hideAllDeletedReports) return false;
+        if (_dismissedDeletedSightingIds.contains(s.id)) return false;
+      }
+      return true;
+    }).toList();
+    final activeList = visibleList.where((s) => !s.isDeleted).toList();
     List<Sighting> filtered;
     if (_activeFilter == 'All') {
-      filtered = list.where((s) => !s.isAutoArchived).toList();
+      filtered = visibleList.where((s) => !s.isAutoArchived).toList();
     } else if (_activeFilter == 'My Cases') {
-      filtered = list.where((s) => s.isUserInvolved(currentUid)).toList();
+      filtered = visibleList.where((s) => s.isUserInvolved(currentUid)).toList();
     } else if (_activeFilter == 'Adoption Showcase') {
       filtered = activeList.where((s) => s.isAdoptionShowcase && !s.isAutoArchived).toList();
     } else if (_activeFilter == 'Waiting') {
@@ -1405,6 +1638,52 @@ class _HomeScreenState extends State<HomeScreen>
                   padding: const EdgeInsets.only(right: 8),
                   child: _buildChip(filter),
                 )),
+            Padding(
+              padding: const EdgeInsets.only(right: 16),
+              child: GestureDetector(
+                onTap: _toggleHideAllDeletedReports,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: _hideAllDeletedReports
+                        ? const Color(0xFFE53935).withValues(alpha: 0.12)
+                        : Colors.white,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _hideAllDeletedReports
+                          ? const Color(0xFFE53935)
+                          : _navy.withValues(alpha: 0.15),
+                      width: 1,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _hideAllDeletedReports
+                            ? Icons.visibility_off_rounded
+                            : Icons.visibility_outlined,
+                        size: 14,
+                        color: _hideAllDeletedReports
+                            ? const Color(0xFFE53935)
+                            : _navy.withValues(alpha: 0.7),
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _hideAllDeletedReports ? 'Deleted Hidden' : 'Hide Deleted',
+                        style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w800,
+                          color: _hideAllDeletedReports
+                              ? const Color(0xFFE53935)
+                              : _navy.withValues(alpha: 0.75),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -1582,6 +1861,39 @@ class _HomeScreenState extends State<HomeScreen>
                               ],
                             ),
                           ),
+                          if (FirebaseService.instance.isCurrentUserAdmin) ...[
+                            InkWell(
+                              onTap: () => _showAdminQuickDeleteDialog(data),
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE53935).withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(
+                                    color: const Color(0xFFE53935).withValues(alpha: 0.35),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.delete_forever_rounded, size: 12, color: Color(0xFFE53935)),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      'Delete',
+                                      style: GoogleFonts.nunito(
+                                        fontSize: 10.5,
+                                        fontWeight: FontWeight.w900,
+                                        color: const Color(0xFFE53935),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                          ],
                           Icon(Icons.more_horiz,
                               color: _navy.withValues(alpha: 0.3), size: 18),
                         ],
@@ -1986,6 +2298,19 @@ class _HomeScreenState extends State<HomeScreen>
                                     ),
                                   ),
                                 ],
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            InkWell(
+                              onTap: () => _dismissDeletedReport(data.id),
+                              borderRadius: BorderRadius.circular(12),
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey.shade200,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close_rounded, size: 14, color: Colors.black54),
                               ),
                             ),
                           ],
@@ -3852,4 +4177,5 @@ class _HomeScreenState extends State<HomeScreen>
     return parts[0][0].toUpperCase();
   }
 }
+
 
