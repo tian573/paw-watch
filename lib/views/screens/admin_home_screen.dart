@@ -98,7 +98,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
     _PlatformBadge(
       title: 'Kitten Whisperer',
       description: 'Nursed and rehabilitated vulnerable newborn or orphaned kittens',
-      requirement: 'Foster Tier Level 3',
+      requirement: 'Rescue 100 Kittens',
       icon: Icons.pets_rounded,
       color: Color(0xFFEC407A),
       assetPath: 'assets/images/kittenwhisperer.png',
@@ -2315,51 +2315,9 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
   }
 
   Future<void> _purgeReportByAdmin(String sightingId) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          'Permanently Delete Report?',
-          style: GoogleFonts.nunito(fontWeight: FontWeight.w800, color: _navy),
-        ),
-        content: Text(
-          'This will permanently purge this sighting document from Firestore. This action cannot be undone.',
-          style: GoogleFonts.nunito(fontSize: 13, color: _navy.withValues(alpha: 0.8)),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: GoogleFonts.nunito(fontWeight: FontWeight.w700)),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: _red, foregroundColor: Colors.white),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text('Purge Permanently', style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      try {
-        await FirebaseService.instance.deleteSighting(sightingId, force: true);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Report purged permanently.', style: GoogleFonts.nunito(fontWeight: FontWeight.w700)),
-              backgroundColor: _red,
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error purging: $e')),
-          );
-        }
-      }
-    }
+    try {
+      await FirebaseService.instance.deleteSighting(sightingId, force: true);
+    } catch (_) {}
   }
 
   void _showAdminDeleteReportModal(Sighting sighting) {

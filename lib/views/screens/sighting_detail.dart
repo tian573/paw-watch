@@ -436,8 +436,57 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         context: context, backgroundColor: Colors.transparent, builder: (_) => _moreMenu(s));
   }
 
+  void _showLockedInfoDialog(Sighting s) {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: [
+            const Icon(Icons.lock_rounded, color: Color(0xFFE65100), size: 22),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text('Report Locked',
+                  style: GoogleFonts.nunito(
+                      fontWeight: FontWeight.w800,
+                      color: _navy,
+                      fontSize: 16.5)),
+            ),
+          ],
+        ),
+        content: Text(
+          s.isResolved
+              ? 'This report is marked as Resolved and cannot be edited or deleted to preserve the community rescue history.'
+              : 'This report cannot be edited or deleted because action logs have already been recorded by the community (feeding, check-in, or rescue updates). This preserves verified rescue history and accountability.',
+          style: GoogleFonts.nunito(
+              fontSize: 12.5,
+              color: _navy.withValues(alpha: 0.75),
+              height: 1.4),
+        ),
+        actions: [
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _navy,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(context),
+            child: Text('Understood',
+                style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showEdit(Sighting s) {
     if (!DoubleTapGuard.allow('show_edit_${s.id}', thresholdMs: 800)) return;
+    if (s.hasActionHistory) {
+      _showLockedInfoDialog(s);
+      return;
+    }
     final tc = TextEditingController(text: s.title);
     final dc = TextEditingController(text: s.description);
     showModalBottomSheet(
@@ -454,53 +503,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   void _confirmDelete(Sighting s) {
     if (!DoubleTapGuard.allow('confirm_delete_${s.id}', thresholdMs: 800)) return;
     Navigator.pop(context);
-    final hasActiveInvestment = s.hasVetVisit ||
-        s.isVetVisitPending ||
-        s.isInCare ||
-        s.rescueClaimed ||
-        s.isResolved;
-
-    if (hasActiveInvestment) {
-      showDialog(
-        context: context,
-        builder: (_) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-          title: Row(
-            children: [
-              const Icon(Icons.lock_rounded, color: Color(0xFFE65100), size: 22),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text('Cannot Delete Report',
-                    style: GoogleFonts.nunito(
-                        fontWeight: FontWeight.w800,
-                        color: _navy,
-                        fontSize: 16.5)),
-              ),
-            ],
-          ),
-          content: Text(
-            'This report cannot be deleted because a rescuer or clinic has already committed time, medical care, or custody to this cat (vet visit logged, foster custody active, or rescue mission underway).\n\nTo protect rescue accountability and medical records, active rescue posts remain permanent. You can coordinate next steps via chat or mark the report as resolved when completed.',
-            style: GoogleFonts.nunito(
-                fontSize: 12.5,
-                color: _navy.withValues(alpha: 0.75),
-                height: 1.4),
-          ),
-          actions: [
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: _navy,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-              onPressed: () => Navigator.pop(context),
-              child: Text('Understood',
-                  style: GoogleFonts.nunito(fontWeight: FontWeight.w800)),
-            ),
-          ],
-        ),
-      );
+    if (s.hasActionHistory) {
+      _showLockedInfoDialog(s);
       return;
     }
 
@@ -2103,7 +2107,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       color: const Color(0xFF1E88E5),
                       title: 'Delegate to $rescuerName',
                       subtitle:
-                          'Grants custody authority to $rescuerName to decide and log next steps (foster, shelter, or adoption).',
+                          'Grants custody authority to $rescuerName to decide and log next steps (foster or shelter).',
                       badgeText: 'Rescuer in Charge',
                       badgeColor: const Color(0xFF1E88E5),
                       onTap: () async {
@@ -2194,7 +2198,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   Future<void> _confirmReturnToSpot(Sighting s) async {
     if (!s.canTnrReturn && !s.isFeral) {
       _snack(
-          'Kittens and domestic fosters cannot be released to the street. Please choose Foster, Shelter, or Adoption.');
+          'Kittens and domestic fosters cannot be released to the street. Please choose Foster or Shelter.');
       return;
     }
     if (s.isVetVisitPending) {
@@ -3149,6 +3153,19 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   Future<void> _showUpdateCatTemperamentDialog(Sighting s) async {
+    final hasRescuerInCharge = (s.careTakerId != null && s.careTakerId!.isNotEmpty) ||
+        (s.pendingVetRescuerId != null && s.pendingVetRescuerId!.isNotEmpty);
+    final canEdit = !s.isVetVisitVerified &&
+        s.urgency != 'resolved' &&
+        (hasRescuerInCharge
+            ? (_uid != null && (s.careTakerId == _uid || s.pendingVetRescuerId == _uid))
+            : _isOwner(s));
+    if (!canEdit) {
+      _snack(hasRescuerInCharge
+          ? 'Only the rescuer currently caring for this cat can update its diagnosis.'
+          : 'You do not have permission to update this diagnosis.');
+      return;
+    }
     if (s.isVetVisitVerified) {
       _snack('Vet visit has already been verified. Diagnosis cannot be modified.');
       return;
@@ -3791,6 +3808,11 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             '⏳ A vet visit report has been submitted by ${s.pendingVetRescuerName?.isNotEmpty == true ? s.pendingVetRescuerName : "a rescuer"}. Actions are locked pending verification.');
         return;
       }
+      if (s.rescueClaimed && s.rescueClaimedBy != _uid && !_isOwner(s) && action != 'stillHere') {
+        _snack(
+            '🏃 ${s.rescueClaimedByName.isNotEmpty ? s.rescueClaimedByName : "A rescuer"} is already heading to help this cat.');
+        return;
+      }
     if (s.isAwaitingPostVetDecision) {
       if (!_isVetRescuer(s) && !_isOwner(s) && !s.isRescuerCustodyDelegated) {
         _snack(
@@ -4003,7 +4025,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                 isTookInAction
                                     ? (isOwner
                                         ? 'Foster at My Place (Care Plan)'
-                                        : 'Request Foster Custody')
+                                        : 'Foster Care Plan')
                                     : 'Log Rescue: $actionLabel',
                                 style: GoogleFonts.nunito(
                                   fontSize: 17,
@@ -4015,9 +4037,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                 isShelteredAction
                                     ? 'Marks report as Resolved • Safe in Shelter (+120 XP)'
                                     : (isTookInAction
-                                        ? (isOwner
-                                            ? 'Set up Care Plan & daily milestones (+150 XP)'
-                                            : 'Requires reporter confirmation for animal welfare (+150 XP)')
+                                        ? 'Set up Care Plan & daily milestones (+150 XP)'
                                         : '+$xp XP reward upon verification'),
                                 style: GoogleFonts.nunito(
                                   fontSize: 12,
@@ -4031,37 +4051,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       ],
                     ),
                     if (isTookInAction) ...[
-                      const SizedBox(height: 12),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF673AB7).withValues(alpha: 0.08),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                              color: const Color(0xFF673AB7).withValues(alpha: 0.25)),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(isOwner ? Icons.volunteer_activism_rounded : Icons.handshake_outlined,
-                                color: const Color(0xFF673AB7), size: 20),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                isOwner
-                                    ? 'Foster Custody: Set up your Custom Care Plan and daily milestones for taking this cat into foster care at your place.'
-                                    : 'Foster Handshake: Taking this cat into foster care will send your Custom Care Plan and Trust Card to the reporter for approval.',
-                                style: GoogleFonts.nunito(
-                                  fontSize: 11.5,
-                                  fontWeight: FontWeight.w700,
-                                  color: const Color(0xFF673AB7),
-                                  height: 1.35,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 14),
+                      const SizedBox(height: 16),
                       Text(
                         'Care Plan Target Goal',
                         style: GoogleFonts.nunito(
@@ -4195,7 +4185,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
-                                '📅 Everyday Updates: Mandatory photo & condition check-in every day (Day 1 ➔ Day $planDurationDays)',
+                                'Everyday Updates: Mandatory photo & condition check-in every day (Day 1 ➔ Day $planDurationDays)',
                                 style: GoogleFonts.nunito(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
@@ -4997,61 +4987,6 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                             .trim();
                                   }
 
-                                  final isVetRescuer = _uid != null &&
-                                      (s.lastVetRescuerId == _uid ||
-                                          s.pendingVetRescuerId == _uid ||
-                                          (s.lastVetRescuerId == null &&
-                                              s.rescueClaimedBy == _uid));
-                                  final shouldDirectlyActivateFoster =
-                                      isOwner || s.hasVetVisit || isVetRescuer;
-
-                                  if (isTookInAction && !shouldDirectlyActivateFoster) {
-                                    final finalGoal = isCustomGoal &&
-                                            customGoalCtrl.text.trim().isNotEmpty
-                                        ? customGoalCtrl.text.trim()
-                                        : selectedCareGoal;
-                                    final dynamicMilestones =
-                                        List.generate(planDurationDays, (i) => i + 1);
-                                    final dailyTitles =
-                                        List.generate(planDurationDays, (i) {
-                                      final dayNum = i + 1;
-                                      final ctrl = getDayCtrl(
-                                          dayNum, planDurationDays);
-                                      final text = ctrl.text.trim();
-                                      if (text.isNotEmpty) return text;
-                                      if (dayNum == 1) {
-                                        return 'Intake, Quarantine & Safe Settle';
-                                      }
-                                      if (dayNum == planDurationDays) {
-                                        return 'Final Target Outcome & Review';
-                                      }
-                                      return 'Day $dayNum Daily Care Check';
-                                    });
-
-                                    await FirebaseService.instance
-                                        .requestCustodyHandover(
-                                      sightingId: s.id,
-                                      customNote: finalNote,
-                                      proofPhotoFile: proofFile,
-                                      carePlanGoal: finalGoal,
-                                      carePlanDurationDays: planDurationDays,
-                                      careMilestoneDays: dynamicMilestones,
-                                      customMilestoneTitles: dailyTitles,
-                                    );
-                                    if (ctx.mounted) {
-                                      Navigator.pop(ctx);
-                                    }
-                                    if (mounted) {
-                                      setState(() {
-                                        _hasActed = true;
-                                        _myAction = action;
-                                      });
-                                      _snack(
-                                          'Foster custody request sent to reporter with your Trust Card! 🤝');
-                                    }
-                                    return;
-                                  }
-
                                   String? careGoal;
                                   int? careDuration;
                                   List<int>? milestones;
@@ -5109,8 +5044,12 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                         ? selectedDiagnosedTemperament
                                         : null,
                                   );
-                                  if (ctx.mounted) {
+                                  if (sheetContext.mounted) {
+                                    Navigator.pop(sheetContext);
+                                  } else if (ctx.mounted) {
                                     Navigator.pop(ctx);
+                                  } else if (mounted) {
+                                    Navigator.of(context).pop();
                                   }
                                   if (mounted) {
                                     setState(() {
@@ -5122,19 +5061,19 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                           'Foster custody activated! Care plan started 🏡🐾');
                                     } else if (action == 'vet') {
                                       _snack(
-                                          'Vet Visit report submitted for verification! 🩺');
+                                          'Vet Visit confirmed! Placement delegated to you 🩺🐾');
                                     } else if (isShelteredAction) {
                                       _snack(
                                           'Cat admitted to shelter! Report marked as Resolved 🏠');
                                     } else if (awardedXp > 0) {
                                       _snack(
                                           'Verified & Logged! +$awardedXp XP awarded 🐾');
-                                    } else if (_isOwner(s)) {
+                                    } else if (_isOwner(s) || action == 'stillHere' || action == 'moved' || action == 'notHere' || action == 'fed') {
                                       _snack(
-                                          'Action logged! (XP already collected for this spot recently)');
+                                          'Spot update logged! (XP already collected for this spot recently)');
                                     } else {
                                       _snack(
-                                          'Action logged & submitted for reporter verification! 🐾');
+                                          'Action logged successfully! 🐾');
                                     }
                                   }
                                 } catch (e) {
@@ -7185,11 +7124,9 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         }
         final isAdmin = FirebaseService.instance.isCurrentUserAdmin;
         final isCaretaker = _uid != null &&
-            (_uid == s.careTakerId ||
-                _isOwner(s) ||
-                _uid == s.lastVetRescuerId ||
-                _uid == s.pendingVetRescuerId ||
-                (s.rescueClaimed && s.rescueClaimedBy == _uid));
+            (s.careTakerId?.isNotEmpty == true
+                ? s.careTakerId == _uid
+                : _isOwner(s));
         final showWaitingOnTop =
             _hasWaitingStatus(s) && _isInvolvedInWaitingStatus(s);
         if (s.isRescueClaimExpired) {
@@ -7229,12 +7166,17 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                           const SizedBox(height: 10),
                           _buildCategoryBadge(s),
                           Builder(builder: (context) {
+                            final hasRescuerInCharge = (s.careTakerId != null &&
+                                    s.careTakerId!.isNotEmpty) ||
+                                (s.pendingVetRescuerId != null &&
+                                    s.pendingVetRescuerId!.isNotEmpty);
                             final canEditTemperament = !s.isVetVisitVerified &&
                                 s.urgency != 'resolved' &&
-                                (_isOwner(s) ||
-                                    (_uid != null &&
-                                        (s.pendingVetRescuerId == _uid ||
-                                            s.careTakerId == _uid)));
+                                (hasRescuerInCharge
+                                    ? (_uid != null &&
+                                        (s.careTakerId == _uid ||
+                                            s.pendingVetRescuerId == _uid))
+                                    : _isOwner(s));
                             if (!canEditTemperament &&
                                 s.temperament == null &&
                                 !s.hasEarTip) {
@@ -9641,13 +9583,16 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   }
 
   Widget _buildTopWaitingBoxes(Sighting s) {
+    final isAdoptionHost = s.careTakerId?.isNotEmpty == true
+        ? s.careTakerId == _uid
+        : _isOwner(s);
     return Container(
       margin: const EdgeInsets.only(bottom: 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (_isOwner(s) && !s.isAwaitingPostVetDecision) ...[
+          if (isAdoptionHost && !s.isAwaitingPostVetDecision && s.pendingAdoptionApplicantId != null && s.pendingAdoptionApplicantId!.isNotEmpty) ...[
             Container(
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -9680,9 +9625,6 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ],
           if (s.isVetVisitPending) ...[
             _buildVetVisitRequestBanner(s),
-          ] else if (s.pendingHandoverRescuerId != null &&
-              s.pendingHandoverRescuerId!.isNotEmpty) ...[
-            _buildHandoverRequestBanner(s),
           ] else if (s.pendingOutcomeAction != null &&
               s.pendingOutcomeAction!.isNotEmpty &&
               s.urgency != 'resolved' &&
@@ -10051,8 +9993,8 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           children: [
             Text(
               _isOwner(s)
-                  ? 'Your Vet Visit Was Verified! (+100 XP)'
-                  : 'Placement Delegated to You (+100 XP)',
+                  ? 'Vet Visit Completed! (+100 XP)'
+                  : 'Vet Visit Completed • You are in Charge (+100 XP)',
               style: GoogleFonts.nunito(
                 fontSize: 15,
                 fontWeight: FontWeight.w900,
@@ -10061,9 +10003,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              _isOwner(s)
-                  ? 'Since you have physical custody of the cat, select your next action:'
-                  : '${s.reporterName.isNotEmpty ? s.reporterName : "The reporter"} placed you in charge of placement. Select your next action:',
+              'You have physical custody of this cat following veterinary care. Select your next action:',
               style: GoogleFonts.nunito(
                 fontSize: 12,
                 color: _navy.withValues(alpha: 0.65),
@@ -10081,21 +10021,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                   color: const Color(0xFF673AB7),
                   onTap: () => _showActionProofSheet('tookIn', s),
                 ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 12),
                 _buildPostVetActionBox(
                   title: 'Shelter',
                   asset: 'assets/images/shelter.png',
                   sub: '+120 XP',
                   color: const Color(0xFFE65100),
                   onTap: () => _showOutcomeConfirmationRequestSheet('sheltered', s),
-                ),
-                const SizedBox(width: 10),
-                _buildPostVetActionBox(
-                  title: 'Open for Adoption',
-                  asset: 'assets/images/review.png',
-                  sub: '+100 XP',
-                  color: const Color(0xFF2E7D32),
-                  onTap: () => _showOpenForAdoptionSheet(s),
                 ),
               ],
             ),
@@ -10236,13 +10168,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         children: [
                           Expanded(
                             child: Text(
-                              s.isRescuerCustodyDelegated
-                                  ? (s.isPostVetDecisionWindowExpired &&
-                                          s.postVetCustody !=
-                                              'rescuerInCharge'
-                                      ? 'Decision Window Expired'
-                                      : 'Vet Visit Verified • Rescuer in Charge')
-                                  : 'Awaiting Decision',
+                              'Vet Care Completed • Rescuer in Charge',
                               style: GoogleFonts.nunito(
                                 fontSize: 13.5,
                                 fontWeight: FontWeight.w900,
@@ -10250,55 +10176,11 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               ),
                             ),
                           ),
-                          if (!s.isRescuerCustodyDelegated) ...[
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 7, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF673AB7)
-                                    .withValues(alpha: 0.12),
-                                borderRadius:
-                                    BorderRadius.circular(8),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  const Icon(Icons.timer_outlined,
-                                      size: 11,
-                                      color: Color(0xFF673AB7)),
-                                  const SizedBox(width: 3),
-                                  Text(
-                                    s.postVetDecisionTimeRemaining !=
-                                                null &&
-                                            s.postVetDecisionTimeRemaining! >
-                                                Duration.zero
-                                        ? (s.postVetDecisionTimeRemaining!
-                                                    .inHours >
-                                                0
-                                            ? '${s.postVetDecisionTimeRemaining!.inHours}h left'
-                                            : '${s.postVetDecisionTimeRemaining!.inMinutes}m left')
-                                        : 'Expiring',
-                                    style: GoogleFonts.nunito(
-                                      fontSize: 10.5,
-                                      fontWeight: FontWeight.w800,
-                                      color: const Color(0xFF673AB7),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
                         ],
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        s.isRescuerCustodyDelegated
-                            ? (s.isPostVetDecisionWindowExpired &&
-                                    s.postVetCustody !=
-                                        'rescuerInCharge'
-                                ? 'The 24-hour decision window has passed. Placement authority was automatically transferred to $rescuerName so care is not delayed.'
-                                : 'You delegated custody authority to $rescuerName to decide and log placement (foster, shelter, or adoption). Coordinate via chat.')
-                            : '$rescuerName completed veterinary care. Please decide within 24 hours between foster care, shelter, or delegating placement to $rescuerName. If no decision is made, authority automatically transfers to $rescuerName.',
+                        '$rescuerName completed veterinary care and is now in charge of the cat to decide and log placement (foster or shelter). Coordinate via chat.',
                         style: GoogleFonts.nunito(
                           fontSize: 11,
                           color: _navy.withValues(alpha: 0.7),
@@ -10352,35 +10234,6 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               fontSize: 11.5,
                               fontWeight: FontWeight.w800,
                               color: const Color(0xFF673AB7),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                if (_isOwner(s) && !s.isRescuerCustodyDelegated)
-                  InkWell(
-                    onTap: () => _showPostVetFollowUpDialog(s),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF673AB7),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.checklist_rounded,
-                              size: 14, color: Colors.white),
-                          const SizedBox(width: 6),
-                          Text(
-                            'Decide Next Step',
-                            style: GoogleFonts.nunito(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w800,
-                              color: Colors.white,
                             ),
                           ),
                         ],
@@ -11827,7 +11680,14 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                     shelterOrClinicName: facilityCtrl.text.trim(),
                                     adoptionContact: contactCtrl.text.trim(),
                                   );
-                                  if (ctx.mounted) Navigator.pop(ctx);
+                                  if (sheetContext.mounted) {
+                                    Navigator.pop(sheetContext);
+                                  } else if (ctx.mounted) {
+                                    Navigator.pop(ctx);
+                                  } else if (mounted) {
+                                    Navigator.of(context).pop();
+                                  }
+                                  DoubleTapGuard.reset('open_adoption_${s.id}');
                                   if (mounted) {
                                     setState(() {
                                       _hasActed = true;
@@ -11870,7 +11730,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
     }
     if (outcomeAction == 'returnedToSpot' && !s.canTnrReturn && !s.isFeral) {
       _snack(
-          'Kittens and domestic fosters cannot be released to the street. Please choose Foster, Shelter, or Adoption.');
+          'Kittens and domestic fosters cannot be released to the street. Please choose Foster or Shelter.');
       return;
     }
     File? proofFile;
@@ -12870,7 +12730,13 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                                         ? shelterNameCtrl.text.trim()
                                         : null,
                                   );
-                                  if (ctx.mounted) Navigator.pop(ctx);
+                                  if (sheetContext.mounted) {
+                                    Navigator.pop(sheetContext);
+                                  } else if (ctx.mounted) {
+                                    Navigator.pop(ctx);
+                                  } else if (mounted) {
+                                    Navigator.of(context).pop();
+                                  }
                                   if (mounted) {
                                     setState(() {
                                       _hasActed = true;
@@ -14513,65 +14379,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               }).toList(),
             ),
           ],
-          if (isCaretaker) ...[
-            const SizedBox(height: 16),
-            InkWell(
-              onTap: () => _showActionProofSheet('sheltered', s),
-              borderRadius: BorderRadius.circular(16),
-              child: Container(
-                width: 170,
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
-                decoration: BoxDecoration(
-                  color: Colors.transparent,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: const Color(0xFFE65100).withValues(alpha: 0.35),
-                    width: 1.4,
-                  ),
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    Text(
-                      'Transfer to Shelter Instead',
-                      textAlign: TextAlign.center,
-                      style: GoogleFonts.nunito(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        color: const Color(0xFFE65100),
-                        height: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Image.asset(
-                      'assets/images/shelter.png',
-                      width: 52,
-                      height: 52,
-                      fit: BoxFit.contain,
-                    ),
-                    const SizedBox(height: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 1.5),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFE65100).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(5),
-                      ),
-                      child: Text(
-                        '+120 XP',
-                        style: GoogleFonts.nunito(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w800,
-                          color: const Color(0xFFE65100),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ] else ...[
+          if (!isCaretaker) ...[
             const SizedBox(height: 16),
             Row(
               children: [
@@ -15155,15 +14963,16 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         s.pendingOutcomeAction!.isNotEmpty;
     final isVetPending = s.isVetVisitPending && !s.hasVetVisit;
     final isVetRescuer = _isVetRescuer(s);
+    final isEnRouteLocked = isClaimed && !isClaimedByMe && !_isOwner(s);
     final isLockedForMe =
-        (isClaimed && !isClaimedByMe && !_isOwner(s)) ||
+        isEnRouteLocked ||
             isHandoverPending ||
             isOutcomePending ||
             isVetPending ||
             (s.isAwaitingPostVetDecision && !isVetRescuer);
     final isFosterDeclinedForMe = uid != null && s.isFosterDeclinedFor(uid);
 
-    if (s.isInCare && !s.isOpenForAdoption) {
+    if (s.isInCare || s.isOpenForAdoption) {
       final isCaretaker = uid != null && s.careTakerId == uid;
       final areOutcomesUnlocked = s.areOutcomesUnlocked;
 
@@ -15561,7 +15370,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                               ? 'A foster custody request is awaiting reporter review.'
                               : (isOutcomePending
                                   ? 'Final outcome proof submitted, awaiting confirmation.'
-                                  : '${s.rescueClaimedByName.isNotEmpty ? s.rescueClaimedByName : "A rescuer"} is on their way (45m window).')),
+                                  : '${s.rescueClaimedByName.isNotEmpty ? s.rescueClaimedByName : "A rescuer"} is on their way (45m window). Still Here / Move updates remain open for everyone.')),
                       style: GoogleFonts.nunito(
                         fontSize: 11,
                         color: _navy.withValues(alpha: 0.7),
@@ -15656,7 +15465,10 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                 final isTookIn = key == 'tookIn';
                 final isDeclinedTookIn = isTookIn && isFosterDeclinedForMe;
                 final isSel = _myAction == key;
-                final isTileLocked = isLockedForMe || isDeclinedTookIn;
+                final isSpotUpdateTile = key == 'roaming';
+                final isTileLocked = isSpotUpdateTile
+                    ? (isOutcomePending || (isVetPending && !_isOwner(s)) || (s.isAwaitingPostVetDecision && !isVetRescuer))
+                    : (isLockedForMe || isDeclinedTookIn);
                 final isVetPriorityTile =
                     key == 'vet' && s.isMedicalOrTriagePriority && !s.hasVetVisit;
                 final col = _aColor(key);
@@ -15672,18 +15484,21 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       return;
                     }
                     if (isLockedForMe) {
-                      if (isVetPending) {
-                        _snack(_isOwner(s)
-                            ? '⏳ Actions are locked while vet visit report is pending. Please verify or decline the report in the banner above.'
-                            : '⏳ ${s.pendingVetRescuerName?.isNotEmpty == true ? s.pendingVetRescuerName : "A rescuer"} submitted a vet visit report. Actions are locked pending verification.');
-                      } else if (s.isAwaitingPostVetDecision) {
-                        _snack(
-                            '⏳ ${s.lastVetRescuerName?.isNotEmpty == true ? s.lastVetRescuerName : "The rescuer"} is currently in charge of this cat after vet care.');
+                      if (isSpotUpdateTile && isEnRouteLocked && !isOutcomePending && !isVetPending && !s.isAwaitingPostVetDecision) {
                       } else {
-                        _snack(
-                            '🏃 ${s.rescueClaimedByName.isNotEmpty ? s.rescueClaimedByName : "A rescuer"} is already heading to help this cat.');
+                        if (isVetPending) {
+                          _snack(_isOwner(s)
+                              ? '⏳ Actions are locked while vet visit report is pending. Please verify or decline the report in the banner above.'
+                              : '⏳ ${s.pendingVetRescuerName?.isNotEmpty == true ? s.pendingVetRescuerName : "A rescuer"} submitted a vet visit report. Actions are locked pending verification.');
+                        } else if (s.isAwaitingPostVetDecision) {
+                          _snack(
+                              '⏳ ${s.lastVetRescuerName?.isNotEmpty == true ? s.lastVetRescuerName : "The rescuer"} is currently in charge of this cat after vet care.');
+                        } else {
+                          _snack(
+                              '🏃 ${s.rescueClaimedByName.isNotEmpty ? s.rescueClaimedByName : "A rescuer"} is already heading to help this cat.');
+                        }
+                        return;
                       }
-                      return;
                     }
                     if (key == 'roaming') {
                       _showRoamingUpdateSheet(s);
@@ -16089,7 +15904,6 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
 
   Widget _updateTile(Map<String, dynamic> u,
       List<Map<String, dynamic>> replies, Sighting s) {
-    final sid = s.id;
     final type = u['type'] ?? 'comment';
     final name = u['authorName'] ?? 'Anonymous';
     final action = u['action'] as String?;
@@ -16679,279 +16493,78 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
               ],
               if (isAct) ...[
                 const SizedBox(height: 6),
-                if (u['isReporterConfirmed'] == true || u['action'] == 'returnedToSpot')
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: _resolved.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(6),
-                      border:
-                          Border.all(color: _resolved.withValues(alpha: 0.3)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.verified, size: 12, color: _resolved),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            u['action'] == 'returnedToSpot'
-                                ? 'Verified Colony Return (+${u['pendingXp'] ?? 100} XP)'
-                                : 'Verified by Reporter (+${u['pendingXp'] ?? 15} XP)',
-                            style: GoogleFonts.nunito(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w800,
-                              color: _resolved,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else if (_isOwner(s) && u['authorId'] != _uid)
-                  GestureDetector(
-                    onTap: () async {
-                      final awarded = await FirebaseService.instance
-                          .confirmRescueAction(sid, u['id']);
-                      if (mounted) {
-                        _snack('Rescue action verified! +$awarded XP awarded to $dName 🐾');
-                      }
-                    },
-                    child: Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: _resolved.withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: _resolved),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Icon(Icons.check_circle,
-                              size: 13, color: _resolved),
-                          const SizedBox(width: 5),
-                          Text(
-                            'Verify & Award +${u['pendingXp'] ?? 15} XP',
-                            style: GoogleFonts.nunito(
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.w800,
-                              color: _resolved,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  )
-                else if (u['authorId'] == _uid)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFFFA000).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                          color: const Color(0xFFFFA000).withValues(alpha: 0.3)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.schedule,
-                            size: 12, color: Color(0xFFFFA000)),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            'Pending Reporter Verification (+${u['pendingXp'] ?? 15} XP)',
-                            style: GoogleFonts.nunito(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w800,
-                              color: const Color(0xFFFFA000),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: _navy.withValues(alpha: 0.06),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      'Awaiting Reporter Confirmation',
-                      style: GoogleFonts.nunito(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                        color: _navy.withValues(alpha: 0.5),
-                      ),
-                    ),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: _resolved.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                    border:
+                        Border.all(color: _resolved.withValues(alpha: 0.3)),
                   ),
-              ],
-              if (isCustodyRequest) ...[
-                const SizedBox(height: 6),
-                if (u['status'] == 'approved')
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF2E7D32).withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                          color: const Color(0xFF2E7D32).withValues(alpha: 0.3)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.check_circle,
-                            size: 12, color: Color(0xFF2E7D32)),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Handover Approved by Reporter (+150 XP)',
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.verified, size: 12, color: _resolved),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          u['action'] == 'returnedToSpot'
+                              ? 'Verified Colony Return (+${u['pendingXp'] ?? 100} XP)'
+                              : (u['action'] == 'vet'
+                                  ? 'Vet Visit Completed (+${u['pendingXp'] ?? 100} XP)'
+                                  : (u['action'] == 'tookIn' || u['action'] == 'holding'
+                                      ? 'Foster Custody Activated (+${u['pendingXp'] ?? 150} XP)'
+                                      : (u['action'] == 'sheltered'
+                                          ? 'Admitted to Shelter (+${u['pendingXp'] ?? 120} XP)'
+                                          : (u['action'] == 'rehomed'
+                                              ? 'Rehomed with Family (+${u['pendingXp'] ?? 200} XP)'
+                                              : (u['action'] == 'stillHere' || u['action'] == 'moved' || u['action'] == 'notHere'
+                                                  ? 'Verified Spot Check (+${u['pendingXp'] ?? 15} XP)'
+                                                  : (u['action'] == 'fed'
+                                                      ? 'Feeding Logged (+${u['pendingXp'] ?? 30} XP)'
+                                                      : 'Verified Action (+${u['pendingXp'] ?? 15} XP)')))))),
                           style: GoogleFonts.nunito(
                             fontSize: 10.5,
                             fontWeight: FontWeight.w800,
-                            color: const Color(0xFF2E7D32),
+                            color: _resolved,
                           ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ],
-                    ),
-                  )
-                else if (u['status'] == 'declined')
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.red.shade50,
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      '✕ Handover declined by reporter',
-                      style: GoogleFonts.nunito(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                        color: Colors.red.shade400,
-                      ),
-                    ),
-                  )
-                else if (_isOwner(s)) ...[
-                  Row(
-                    children: [
-                      OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red.shade400,
-                          side: BorderSide(color: Colors.red.shade300),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 4),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                        onPressed: () async {
-                          await FirebaseService.instance
-                              .declineCustodyHandover(
-                            sightingId: s.id,
-                            updateId: u['id'] ?? '',
-                            rescuerId: u['userId']?.toString() ??
-                                s.pendingHandoverRescuerId,
-                          );
-                          _snack('Foster handover request declined.');
-                        },
-                        child: Text('Decline',
-                            style: GoogleFonts.nunito(
-                                fontSize: 11, fontWeight: FontWeight.w800)),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2E7D32),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 4),
-                          minimumSize: Size.zero,
-                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8)),
-                        ),
-                        onPressed: () async {
-                          final authorUid = u['authorId']?.toString() ?? '';
-                          final authorName =
-                              u['authorName']?.toString() ?? 'Rescuer';
-                          try {
-                            await FirebaseService.instance
-                                .approveCustodyHandover(
-                              sightingId: s.id,
-                              updateId: u['id']?.toString(),
-                              rescuerUid: authorUid,
-                              rescuerName: authorName,
-                            );
-                            _snack(
-                                'Handover approved! Custody transferred to $authorName 🐾');
-                            _showReporterReviewSheet(
-                                authorUid, authorName, s.id);
-                          } catch (e) {
-                            _snack('Error approving handover: $e');
-                          }
-                        },
-                        child: Text('Approve Handover',
-                            style: GoogleFonts.nunito(
-                                fontSize: 11, fontWeight: FontWeight.w800)),
                       ),
                     ],
                   ),
-                ] else if (u['authorId'] == _uid) ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF673AB7).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(
-                          color: const Color(0xFF673AB7).withValues(alpha: 0.3)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.schedule,
-                            size: 12, color: Color(0xFF673AB7)),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Custody Request Pending Reporter Review',
-                          style: GoogleFonts.nunito(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w800,
-                            color: const Color(0xFF673AB7),
-                          ),
+                ),
+              ],
+              if (isCustodyRequest) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2E7D32).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(
+                        color: const Color(0xFF2E7D32).withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.check_circle,
+                          size: 12, color: Color(0xFF2E7D32)),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Foster Custody Activated (+150 XP)',
+                        style: GoogleFonts.nunito(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          color: const Color(0xFF2E7D32),
                         ),
-                      ],
-                    ),
-                  ),
-                ] else ...[
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: _navy.withValues(alpha: 0.06),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      'Pending Reporter Handover Review',
-                      style: GoogleFonts.nunito(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                        color: _navy.withValues(alpha: 0.5),
                       ),
-                    ),
+                    ],
                   ),
-                ],
+                ),
               ],
               if (isWay)
                 Text('Auto-posted when marked on my way',
@@ -17467,33 +17080,54 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     color: _navy.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(2))),
             if (own && !s.isDeleted) ...[
-              ListTile(
-                leading: const Icon(Icons.edit_outlined,
-                    color: Color(0xFF9B8EC4)),
-                title: Text('Edit Report',
-                    style: GoogleFonts.nunito(
-                        fontWeight: FontWeight.w700, color: _navy)),
-                subtitle: Text('Change title or description',
-                    style: GoogleFonts.nunito(
-                        fontSize: 12,
-                        color: _navy.withValues(alpha: 0.5))),
-                onTap: () {
-                  Navigator.pop(context);
-                  _showEdit(s);
-                },
-              ),
-              ListTile(
-                leading: const Icon(Icons.delete_outline,
-                    color: Color(0xFFE53935)),
-                title: Text('Delete Report',
-                    style: GoogleFonts.nunito(
-                        fontWeight: FontWeight.w700, color: _urgent)),
-                subtitle: Text('This cannot be undone',
-                    style: GoogleFonts.nunito(
-                        fontSize: 12,
-                        color: _navy.withValues(alpha: 0.5))),
-                onTap: () => _confirmDelete(s),
-              ),
+              if (s.hasActionHistory) ...[
+                ListTile(
+                  leading: const Icon(Icons.lock_outline_rounded,
+                      color: Color(0xFF9E9E9E)),
+                  title: Text('Report Locked',
+                      style: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w700, color: _navy)),
+                  subtitle: Text(
+                      s.isResolved
+                          ? 'Resolved reports cannot be edited or deleted'
+                          : 'Action logs recorded — editing & deletion locked',
+                      style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          color: _navy.withValues(alpha: 0.5))),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showLockedInfoDialog(s);
+                  },
+                ),
+              ] else ...[
+                ListTile(
+                  leading: const Icon(Icons.edit_outlined,
+                      color: Color(0xFF9B8EC4)),
+                  title: Text('Edit Report',
+                      style: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w700, color: _navy)),
+                  subtitle: Text('Change title or description',
+                      style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          color: _navy.withValues(alpha: 0.5))),
+                  onTap: () {
+                    Navigator.pop(context);
+                    _showEdit(s);
+                  },
+                ),
+                ListTile(
+                  leading: const Icon(Icons.delete_outline,
+                      color: Color(0xFFE53935)),
+                  title: Text('Delete Report',
+                      style: GoogleFonts.nunito(
+                          fontWeight: FontWeight.w700, color: _urgent)),
+                  subtitle: Text('This cannot be undone',
+                      style: GoogleFonts.nunito(
+                          fontSize: 12,
+                          color: _navy.withValues(alpha: 0.5))),
+                  onTap: () => _confirmDelete(s),
+                ),
+              ],
             ] else if (!s.isDeleted && !FirebaseService.instance.isCurrentUserAdmin) ...[
               ListTile(
                 leading: const Icon(Icons.flag_outlined,

@@ -117,34 +117,6 @@ class _HomeScreenState extends State<HomeScreen>
       final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
       await prefs.setStringList('dismissed_deleted_sighting_ids_$uid', _dismissedDeletedSightingIds.toList());
     } catch (_) {}
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Deleted report removed from your home page.',
-            style: GoogleFonts.nunito(fontWeight: FontWeight.w700),
-          ),
-          action: SnackBarAction(
-            label: 'Undo',
-            textColor: Colors.amber,
-            onPressed: () => _undoDismissDeletedReport(sightingId),
-          ),
-          behavior: SnackBarBehavior.floating,
-          duration: const Duration(seconds: 4),
-        ),
-      );
-    }
-  }
-
-  Future<void> _undoDismissDeletedReport(String sightingId) async {
-    setState(() {
-      _dismissedDeletedSightingIds.remove(sightingId);
-    });
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final uid = FirebaseAuth.instance.currentUser?.uid ?? 'anon';
-      await prefs.setStringList('dismissed_deleted_sighting_ids_$uid', _dismissedDeletedSightingIds.toList());
-    } catch (_) {}
   }
 
   Future<void> _toggleHideAllDeletedReports() async {
@@ -1002,8 +974,7 @@ class _HomeScreenState extends State<HomeScreen>
                   .where((s) =>
                       s.isAwaitingPostVetDecision &&
                       currentUid != null &&
-                      (s.reporterId == currentUid ||
-                          s.lastVetRescuerId == currentUid ||
+                      (s.lastVetRescuerId == currentUid ||
                           s.pendingVetRescuerId == currentUid ||
                           (s.lastVetRescuerId == null && s.rescueClaimedBy == currentUid)))
                   .toList();
@@ -2033,18 +2004,16 @@ class _HomeScreenState extends State<HomeScreen>
                                     data.pendingHandoverRescuerId == currentUid ||
                                     (data.rescueClaimed && data.rescueClaimedBy == currentUid));
                             final String badgeText;
-                            if (isReporter) {
+                            if (isRescuer && data.isAwaitingPostVetDecision) {
+                              badgeText = 'Vet Care Complete • Decide Next Step';
+                            } else if (isReporter) {
                               if (data.isAwaitingPostVetDecision) {
-                                badgeText = 'Action Required • Decide Next Step';
+                                badgeText = 'Vet Care Complete • Rescuer in Charge';
                               } else {
-                                badgeText = 'Action Required • Awaiting Your Verification';
+                                badgeText = data.pendingVerificationDescription;
                               }
-                            } else if (isRescuer) {
-                              if (data.isAwaitingPostVetDecision) {
-                                badgeText = 'Waiting for Reporter Decision';
-                              } else {
-                                badgeText = 'Waiting for Reporter Verification';
-                              }
+                            } else if (data.isAwaitingPostVetDecision) {
+                              badgeText = 'Vet Care Complete • Rescuer in Charge';
                             } else {
                               badgeText = data.pendingVerificationDescription;
                             }
@@ -2865,9 +2834,6 @@ class _HomeScreenState extends State<HomeScreen>
   }
 
   Widget _buildPostVetReminderBanner(Sighting s) {
-    final currentUid = FirebaseAuth.instance.currentUser?.uid;
-    final isReporter = s.reporterId == currentUid;
-
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -2914,17 +2880,13 @@ class _HomeScreenState extends State<HomeScreen>
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           Icon(
-                            isReporter
-                                ? Icons.checklist_rounded
-                                : Icons.celebration_rounded,
+                            Icons.celebration_rounded,
                             color: Colors.white,
                             size: 13,
                           ),
                           const SizedBox(width: 4),
                           Text(
-                            isReporter
-                                ? 'DECISION REQUIRED'
-                                : 'VET VISIT VERIFIED',
+                            'VET CARE COMPLETED',
                             style: GoogleFonts.nunito(
                               fontSize: 10,
                               fontWeight: FontWeight.w900,
@@ -2944,7 +2906,7 @@ class _HomeScreenState extends State<HomeScreen>
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        isReporter ? '24h Window' : '+100 XP',
+                        '+100 XP',
                         style: GoogleFonts.nunito(
                           fontSize: 10.5,
                           fontWeight: FontWeight.w900,
@@ -2956,9 +2918,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
                 const SizedBox(height: 10),
                 Text(
-                  isReporter
-                      ? '${s.title.isNotEmpty ? s.title : "Cat Rescue"} • Decide Next Step'
-                      : '${s.title.isNotEmpty ? s.title : "Cat Rescue"} • Next Step On Hold',
+                  '${s.title.isNotEmpty ? s.title : "Cat Rescue"} • Decide Next Step',
                   style: GoogleFonts.nunito(
                     fontSize: 14.5,
                     fontWeight: FontWeight.w900,
@@ -2967,9 +2927,7 @@ class _HomeScreenState extends State<HomeScreen>
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  isReporter
-                      ? 'Vet visit verified! Please decide within 24 hours between foster care, shelter, or delegating placement to the rescuer.'
-                      : 'Reporter verified the vet visit! You have physical custody of this cat. Tap to open details and decide next action.',
+                  'Vet care completed! You currently have physical custody of this cat. Choose next action (foster, shelter, or return).',
                   style: GoogleFonts.nunito(
                     fontSize: 11.5,
                     color: _navy.withValues(alpha: 0.75),

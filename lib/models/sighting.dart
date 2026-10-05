@@ -188,12 +188,11 @@ class Sighting {
 
 
   bool get isRescuerCustodyDelegated =>
+      hasVetVisit ||
       postVetCustody == 'rescuerInCharge' ||
       (isAwaitingPostVetDecision && isPostVetDecisionWindowExpired);
 
-  bool get isVetVisitPending =>
-      pendingVetRescuerId != null &&
-      pendingVetRescuerId!.isNotEmpty;
+  bool get isVetVisitPending => false;
 
   bool get isResolved => urgency == 'resolved';
 
@@ -253,6 +252,19 @@ class Sighting {
         pendingAdoptionApplicantId == uid ||
         rescuerUserIds.contains(uid);
   }
+
+  bool get hasActionHistory =>
+      isResolved ||
+      urgency == 'resolved' ||
+      hasVetVisit ||
+      isVetVisitPending ||
+      isInCare ||
+      rescueClaimed ||
+      rescuerUserIds.isNotEmpty ||
+      (lastSeenStatus != null && lastSeenStatus!.isNotEmpty) ||
+      (careTakerId != null && careTakerId!.isNotEmpty) ||
+      (pendingVetRescuerId != null && pendingVetRescuerId!.isNotEmpty) ||
+      resolvedAt != null;
 
   bool get isInCare =>
       careStatus != null &&
@@ -419,9 +431,7 @@ class Sighting {
   bool get isPendingVerification =>
       urgency != 'resolved' &&
       resolvedByAction != 'returnedToSpot' &&
-      (isVetVisitPending ||
-          (pendingVetRescuerId != null && pendingVetRescuerId!.isNotEmpty) ||
-          (pendingHandoverRescuerId != null &&
+      ((pendingHandoverRescuerId != null &&
               pendingHandoverRescuerId!.isNotEmpty) ||
           (pendingOutcomeAction != null && pendingOutcomeAction!.isNotEmpty) ||
           (pendingAdoptionApplicantId != null &&

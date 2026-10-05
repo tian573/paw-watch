@@ -459,24 +459,34 @@ class FirebaseService {
         }
 
 
-        final isReporter = uid == reporterId;
         if (action == 'vet') {
-          if (isReporter) {
-            updateFields['hasVetVisit'] = true;
-            updateFields['hasVetVisitFlag'] = true;
-            updateFields['lastVetVisitAt'] = FieldValue.serverTimestamp();
-            updateFields['lastVetRescuerId'] = uid;
-            updateFields['lastVetRescuerName'] = name;
-            if (sightingDoc.data()?['urgency']?.toString() == 'urgent') {
-              updateFields['urgency'] = 'needsHelp';
-            }
-          } else {
-            updateFields['pendingVetRescuerId'] = uid;
-            updateFields['pendingVetRescuerName'] = name;
-            updateFields['pendingVetProofUrl'] = finalProofUrl;
-            if (customNote != null && customNote.trim().isNotEmpty) {
-              updateFields['pendingVetNote'] = customNote.trim();
-            }
+          updateFields['hasVetVisit'] = true;
+          updateFields['hasVetVisitFlag'] = true;
+          updateFields['lastVetVisitAt'] = FieldValue.serverTimestamp();
+          updateFields['vetVerifiedAt'] = FieldValue.serverTimestamp();
+          updateFields['lastVetRescuerId'] = uid;
+          updateFields['lastVetRescuerName'] = name;
+          updateFields['postVetCustody'] = 'rescuerInCharge';
+          updateFields['isRescuerCustodyDelegated'] = true;
+          updateFields['rescuerCustodyDelegatedAt'] = FieldValue.serverTimestamp();
+          if (finalProofUrl != null && finalProofUrl.isNotEmpty) {
+            updateFields['lastVetProofUrl'] = finalProofUrl;
+          }
+          if (customNote != null && customNote.trim().isNotEmpty) {
+            updateFields['lastVetNote'] = customNote.trim();
+          }
+          updateFields['pendingVetRescuerId'] = FieldValue.delete();
+          updateFields['pendingVetRescuerName'] = FieldValue.delete();
+          updateFields['pendingVetProofUrl'] = FieldValue.delete();
+          updateFields['pendingVetClinicName'] = FieldValue.delete();
+          updateFields['pendingVetNote'] = FieldValue.delete();
+          updateFields['pendingVetUpdateId'] = FieldValue.delete();
+          updateFields['rescueClaimed'] = false;
+          updateFields['rescueClaimedBy'] = FieldValue.delete();
+          updateFields['rescueClaimedByName'] = FieldValue.delete();
+          updateFields['rescueClaimedAt'] = FieldValue.delete();
+          if (sightingDoc.data()?['urgency']?.toString() == 'urgent') {
+            updateFields['urgency'] = 'needsHelp';
           }
         } else if (action == 'tookIn' || action == 'holding') {
           updateFields['careStatus'] = 'inCare_foster';
@@ -604,7 +614,7 @@ class FirebaseService {
 
     final isOngoingAction = action == 'fed' || action == 'stillHere' || action == 'moved' || action == 'notHere';
     final isReporter = uid == reporterId;
-    final isDirectlyConfirmed = isReporter || action == 'returnedToSpot';
+    const isDirectlyConfirmed = true;
     int effectiveXp = xp;
     Map<String, dynamic> existingCooldowns = {};
 
@@ -643,17 +653,11 @@ class FirebaseService {
     }
 
 
-    final updateDocRef = await _firestore
+    await _firestore
         .collection('sightings')
         .doc(sightingId)
         .collection('updates')
         .add(docData);
-
-    if (action == 'vet' && !isReporter) {
-      await _firestore.collection('sightings').doc(sightingId).update({
-        'pendingVetUpdateId': updateDocRef.id,
-      });
-    }
 
 
     if (user != null && !anonymous && isDirectlyConfirmed) {
@@ -680,7 +684,7 @@ class FirebaseService {
       }
     }
 
-    return isReporter ? effectiveXp : 0;
+    return effectiveXp;
   }
 
 
@@ -1326,10 +1330,21 @@ class FirebaseService {
         data['careTakerId'].toString().isNotEmpty;
     final isClaimed = data['rescueClaimed'] == true;
     final isResolved = data['urgency'] == 'resolved';
+    final hasRescuers = data['rescuerUserIds'] is List &&
+        (data['rescuerUserIds'] as List).isNotEmpty;
+    final hasActionLog = data['lastSeenStatus'] != null &&
+        data['lastSeenStatus'].toString().isNotEmpty;
 
-    if (!force && (hasVet || isPendingVet || isInCare || isClaimed || isResolved)) {
+    if (!force &&
+        (hasVet ||
+            isPendingVet ||
+            isInCare ||
+            isClaimed ||
+            isResolved ||
+            hasRescuers ||
+            hasActionLog)) {
       throw Exception(
-        'Cannot delete report: active rescue progress, medical records, or community care already exist for this cat.',
+        'Cannot delete report: action logs have been recorded or this report is resolved.',
       );
     }
 
@@ -1380,7 +1395,37 @@ class FirebaseService {
   }
 
 
-  Future<void> updateSighting(String sightingId, {String? title, String? description}) async {
+  Future<void> updateSighting(String sightingId,
+      {String? title, String? description, bool force = false}) async {
+    if (!force) {
+      final docSnap =
+          await _firestore.collection('sightings').doc(sightingId).get();
+      if (!docSnap.exists) return;
+      final data = docSnap.data() ?? {};
+      final hasVet =
+          data['hasVetVisit'] == true || data['hasVetVisitFlag'] == true;
+      final isPendingVet = data['pendingVetRescuerId'] != null &&
+          data['pendingVetRescuerId'].toString().isNotEmpty;
+      final isInCare = data['careTakerId'] != null &&
+          data['careTakerId'].toString().isNotEmpty;
+      final isClaimed = data['rescueClaimed'] == true;
+      final isResolved = data['urgency'] == 'resolved';
+      final hasRescuers = data['rescuerUserIds'] is List &&
+          (data['rescuerUserIds'] as List).isNotEmpty;
+      final hasActionLog = data['lastSeenStatus'] != null &&
+          data['lastSeenStatus'].toString().isNotEmpty;
+      if (hasVet ||
+          isPendingVet ||
+          isInCare ||
+          isClaimed ||
+          isResolved ||
+          hasRescuers ||
+          hasActionLog) {
+        throw Exception(
+          'Cannot edit report: action logs have been recorded or this report is resolved.',
+        );
+      }
+    }
     final data = <String, dynamic>{};
     if (title != null) data['title'] = title.trim();
     if (description != null) data['description'] = description.trim();
@@ -3004,7 +3049,7 @@ class FirebaseService {
       'action': 'custody_delegated',
       'authorId': user.uid,
       'authorName': name,
-      'note': '$name placed $rescuerName in charge of next steps (foster, shelter, or adoption).',
+      'note': '$name placed $rescuerName in charge of next steps (foster or shelter).',
       'timestamp': FieldValue.serverTimestamp(),
     });
   }
