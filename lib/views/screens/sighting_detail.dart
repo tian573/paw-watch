@@ -222,7 +222,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
   static const _aLabels = {
     'fed': 'Fed',
     'vet': 'Vet Visit',
-    'tookIn': 'Took In',
+    'tookIn': 'Foster',
     'sheltered': 'Sheltered',
     'rehomed': 'Rehomed',
     'stillHere': 'Still Here',
@@ -456,9 +456,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
           ],
         ),
         content: Text(
-          s.isResolved
-              ? 'This report is marked as Resolved and cannot be edited or deleted to preserve the community rescue history.'
-              : 'This report cannot be edited or deleted because action logs have already been recorded by the community (feeding, check-in, or rescue updates). This preserves verified rescue history and accountability.',
+          'This report cannot be edited or deleted because action logs have already been recorded by the community (feeding, check-in, or rescue updates). This preserves verified rescue history and accountability.',
           style: GoogleFonts.nunito(
               fontSize: 12.5,
               color: _navy.withValues(alpha: 0.75),
@@ -14873,7 +14871,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       {
         'key': 'tookIn',
         'icon': Icons.home,
-        'label': 'Took In',
+        'label': 'Foster',
         'xp': '+150 XP',
         'sub': 'Taking care',
         'asset': 'assets/images/needshome.png',
@@ -14936,6 +14934,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
       acts = allActs
           .where((a) =>
               a['key'] == 'vet' ||
+              a['key'] == 'tookIn' ||
               a['key'] == 'roaming')
           .toList();
     } else if (cat == 'Injured' ||
@@ -15046,7 +15045,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
         const SizedBox(height: 2),
         Text(
           isPriorityVet
-              ? '🏥 Medical Triage: For ${s.category} situations, a vet clinic visit is required first.'
+              ? '🏥 Urgent Rescue & Care: Clinic visit or Foster intake.'
               : (s.isOneTimeTask
                   ? 'Action focused on ${s.category} situation. Verified by AI proof.'
                   : 'Choose an action to help. Visible to all rescuers.'),
@@ -15084,7 +15083,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Veterinary Triage Required First',
+                        'Veterinary Triage & Foster Care',
                         style: GoogleFonts.nunito(
                           fontSize: 13,
                           fontWeight: FontWeight.w900,
@@ -15092,7 +15091,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         ),
                       ),
                       Text(
-                        'Please bring this cat for a vet checkup first. Once the vet visit is verified, Foster Care and Shelter options will unlock!',
+                        'Bring this cat for a clinic checkup, or provide temporary Foster Care if no vet is nearby. Shelter transfer unlocks after vet verification.',
                         style: GoogleFonts.nunito(
                           fontSize: 11,
                           color: _navy.withValues(alpha: 0.7),
@@ -15508,7 +15507,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                         (key == 'tookIn' || key == 'sheltered')) {
                       _snack(
                           '🌿 This is an unsocialized feral cat. Foster and shelter adoptions are not suitable for feral cats. Mandatory TNR Return to Colony is the only permitted outcome.');
-                    } else if ((key == 'tookIn' || key == 'sheltered') &&
+                    } else if (key == 'sheltered' &&
                         s.isMedicalOrTriagePriority &&
                         !s.hasVetVisit) {
                       _showMedicalTriageGuidanceDialog(s, key);
@@ -15522,44 +15521,18 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
 
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          if (isVetPriorityTile) ...[
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 6, vertical: 2),
-                              margin: const EdgeInsets.only(right: 6),
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF673AB7),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                '⭐ Priority 1st',
-                                style: GoogleFonts.nunito(
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                          Text(
-                            a['label'] as String,
-                            textAlign: TextAlign.center,
-                            style: GoogleFonts.nunito(
-                              fontSize: 14.5,
-                              fontWeight: FontWeight.w800,
-                              color: isDeclinedTookIn
-                                  ? Colors.red.shade400
-                                  : (isTileLocked
-                                      ? _navy.withValues(alpha: 0.5)
-                                      : (isVetPriorityTile
-                                          ? const Color(0xFF673AB7)
-                                          : _navy)),
-                            ),
-                          ),
-                        ],
+                      Text(
+                        a['label'] as String,
+                        textAlign: TextAlign.center,
+                        style: GoogleFonts.nunito(
+                          fontSize: 14.5,
+                          fontWeight: FontWeight.w800,
+                          color: isDeclinedTookIn
+                              ? Colors.red.shade400
+                              : (isTileLocked
+                                  ? _navy.withValues(alpha: 0.5)
+                                  : _navy),
+                        ),
                       ),
                       const SizedBox(height: 8),
 
@@ -17088,9 +17061,7 @@ class _SightingDetailScreenState extends State<SightingDetailScreen> {
                       style: GoogleFonts.nunito(
                           fontWeight: FontWeight.w700, color: _navy)),
                   subtitle: Text(
-                      s.isResolved
-                          ? 'Resolved reports cannot be edited or deleted'
-                          : 'Action logs recorded — editing & deletion locked',
+                      'Action logs recorded — editing & deletion locked',
                       style: GoogleFonts.nunito(
                           fontSize: 12,
                           color: _navy.withValues(alpha: 0.5))),

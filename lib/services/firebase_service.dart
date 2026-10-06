@@ -1329,22 +1329,24 @@ class FirebaseService {
     final isInCare = data['careTakerId'] != null &&
         data['careTakerId'].toString().isNotEmpty;
     final isClaimed = data['rescueClaimed'] == true;
-    final isResolved = data['urgency'] == 'resolved';
     final hasRescuers = data['rescuerUserIds'] is List &&
         (data['rescuerUserIds'] as List).isNotEmpty;
     final hasActionLog = data['lastSeenStatus'] != null &&
-        data['lastSeenStatus'].toString().isNotEmpty;
+        data['lastSeenStatus'].toString().isNotEmpty &&
+        data['lastSeenStatus'].toString() != 'still_here';
+    final hasResolvedAction = data['resolvedByAction'] != null &&
+        data['resolvedByAction'].toString().isNotEmpty;
 
     if (!force &&
         (hasVet ||
             isPendingVet ||
             isInCare ||
             isClaimed ||
-            isResolved ||
             hasRescuers ||
-            hasActionLog)) {
+            hasActionLog ||
+            hasResolvedAction)) {
       throw Exception(
-        'Cannot delete report: action logs have been recorded or this report is resolved.',
+        'Cannot delete report: action logs have been recorded on this report.',
       );
     }
 
@@ -1409,20 +1411,22 @@ class FirebaseService {
       final isInCare = data['careTakerId'] != null &&
           data['careTakerId'].toString().isNotEmpty;
       final isClaimed = data['rescueClaimed'] == true;
-      final isResolved = data['urgency'] == 'resolved';
       final hasRescuers = data['rescuerUserIds'] is List &&
           (data['rescuerUserIds'] as List).isNotEmpty;
       final hasActionLog = data['lastSeenStatus'] != null &&
-          data['lastSeenStatus'].toString().isNotEmpty;
+          data['lastSeenStatus'].toString().isNotEmpty &&
+          data['lastSeenStatus'].toString() != 'still_here';
+      final hasResolvedAction = data['resolvedByAction'] != null &&
+          data['resolvedByAction'].toString().isNotEmpty;
       if (hasVet ||
           isPendingVet ||
           isInCare ||
           isClaimed ||
-          isResolved ||
           hasRescuers ||
-          hasActionLog) {
+          hasActionLog ||
+          hasResolvedAction) {
         throw Exception(
-          'Cannot edit report: action logs have been recorded or this report is resolved.',
+          'Cannot edit report: action logs have been recorded on this report.',
         );
       }
     }

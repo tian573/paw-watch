@@ -254,17 +254,19 @@ class Sighting {
   }
 
   bool get hasActionHistory =>
-      isResolved ||
-      urgency == 'resolved' ||
       hasVetVisit ||
       isVetVisitPending ||
       isInCare ||
       rescueClaimed ||
       rescuerUserIds.isNotEmpty ||
-      (lastSeenStatus != null && lastSeenStatus!.isNotEmpty) ||
+      (lastSeenStatus != null &&
+          lastSeenStatus!.isNotEmpty &&
+          lastSeenStatus != 'still_here') ||
       (careTakerId != null && careTakerId!.isNotEmpty) ||
       (pendingVetRescuerId != null && pendingVetRescuerId!.isNotEmpty) ||
-      resolvedAt != null;
+      (resolvedByAction != null && resolvedByAction!.isNotEmpty) ||
+      (pendingHandoverRescuerId != null && pendingHandoverRescuerId!.isNotEmpty) ||
+      (pendingOutcomeAction != null && pendingOutcomeAction!.isNotEmpty);
 
   bool get isInCare =>
       careStatus != null &&
