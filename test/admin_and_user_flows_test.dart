@@ -542,5 +542,51 @@ void main() {
       );
     });
   });
+
+  group('Sighting Action History & Edit/Delete Lock Tests', () {
+    test('Newly reported sighting does not lock editing and deletion', () {
+      final freshSighting = Sighting(
+        id: 'sight-fresh',
+        reporterId: 'user-reporter',
+        reporterName: 'Reporter',
+        title: 'Calico cat near park bench',
+        description: 'Spotted resting peacefully under a tree',
+        urgency: 'low',
+        category: 'Spotted',
+        latitude: 1.3521,
+        longitude: 103.8198,
+        locationAddress: 'Central Park',
+        photoUrls: ['https://example.com/cat.jpg'],
+        createdAt: DateTime.now(),
+        lastSeenAt: DateTime.now(),
+        lastSeenStatus: 'still_here',
+      );
+
+      expect(freshSighting.hasActionHistory, isFalse);
+    });
+
+    test('Sighting with genuine action log locks editing and deletion', () {
+      final actionLoggedSighting = Sighting(
+        id: 'sight-active',
+        reporterId: 'user-reporter',
+        reporterName: 'Reporter',
+        title: 'Injured cat near drain',
+        description: 'Limping left paw',
+        urgency: 'urgent',
+        category: 'Needs Help',
+        latitude: 1.3521,
+        longitude: 103.8198,
+        locationAddress: 'Block 123',
+        photoUrls: ['https://example.com/cat.jpg'],
+        createdAt: DateTime.now(),
+        lastSeenAt: DateTime.now(),
+        lastSeenStatus: 'stillHere',
+        rescuerUserIds: ['volunteer-1'],
+        hasVetVisitFlag: true,
+      );
+
+      expect(actionLoggedSighting.hasActionHistory, isTrue);
+    });
+  });
 }
 
